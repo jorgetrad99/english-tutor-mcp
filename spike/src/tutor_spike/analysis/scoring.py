@@ -227,8 +227,23 @@ def _counts_for(run: Run, line: Record, calls: dict[tuple[str, str], Record]) ->
     return joined is None or joined.get("tester") == run.tester
 
 
+def _is_own_session(run: Run, line: Record, records: list[Record]) -> bool:
+    """The line's MCP session id is non-empty and belongs to a call record of this run's tester.
+
+    The server issues MCP session ids only to authenticated clients, so a stranger cannot know one.
+    """
+    sid = (line.get("http") or {}).get("mcp_session_id")
+    return bool(sid) and any(
+        r.get("kind") == "call" and r.get("tester") == run.tester and r.get("mcp_session_id") == sid
+        for r in records
+    )
+
+
 def _end_attempts(run: Run, records: list[Record]) -> list[Record]:
-    """HTTP lines of this run's end_session attempts, oversized (413) POSTs included."""
+    """HTTP lines of this run's end_session attempts, oversized (413) POSTs included.
+
+    A 413 without a joined call record counts only when it carries this tester's MCP session id.
+    """
     calls = _call_index(records)
     attempts: list[Record] = []
     for line in sorted(records, key=_ts):
@@ -240,10 +255,22 @@ def _end_attempts(run: Run, records: list[Record]) -> list[Record]:
         elif _is_too_large_mcp_post(line):
             key = call_key(line)
             joined = calls.get(key) if key is not None else None
-            tool = joined.get("tool") if joined is not None else rpc.get("tool")
-            if tool in (None, "end_session"):
+            if joined is None:
+                if _is_own_session(run, line, records) and rpc.get("tool") in (None, "end_session"):
+                    attempts.append(line)
+            elif joined.get("tool") == "end_session":
                 attempts.append(line)
     return attempts
+
+
+def uncounted_too_large(
+    runs: list[Run], records: list[Record], grouped: dict[str, list[Record]]
+) -> list[Record]:
+    """413 POST /mcp lines that no run counted as an end_session attempt, in time order."""
+    counted = {id(line) for r in runs for line in _end_attempts(r, grouped.get(r.run_id, []))}
+    return [
+        r for r in sorted(records, key=_ts) if _is_too_large_mcp_post(r) and id(r) not in counted
+    ]
 
 
 def _fired(run: Run, records: list[Record]) -> bool:

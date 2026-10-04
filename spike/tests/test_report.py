@@ -217,7 +217,7 @@ def test_report_lists_unassigned_calls_and_fidelity_exclusions(
     assert "tools/call HTTP lines: 1" in report
     assert 'kind:"call" records: 1' in report
     assert stray in report
-    for line in ("- r02: not text", "- r03: aborted", "- r04: invalid final"):
+    for line in ("- r02: invalid final", "- r03: aborted", "- r04: invalid final"):
         assert line in report
 
 
@@ -288,3 +288,59 @@ def test_cli_prints_the_report_without_out(
     monkeypatch.setattr("sys.argv", ["analysis", "--data", str(tmp_path), "--tz", "UTC"])
     report_cli.main()
     assert "## 02 — end_session reliability" in capsys.readouterr().out
+
+
+def _voice_row(run_id: str, start: datetime, transcript: bool) -> str:
+    end = (start + timedelta(minutes=15)).strftime("%H:%M")
+    name = f"transcripts/{run_id}.md" if transcript else ""
+    return (
+        f"{run_id},2026-10-06,free,iphone,1.0,voice,Sonnet,3,{start.strftime('%H:%M')},{end},"
+        f"y,y,,{name},ok,,\n"
+    )
+
+
+def test_voice_run_with_transcript_is_measured_in_section_03(
+    tmp_path: Path, end_session_schema: dict[str, Any]
+) -> None:
+    write_sample_data(tmp_path, end_session_schema)
+    start = datetime(2026, 10, 6, 16, 0, tzinfo=UTC)
+    _extra_run(tmp_path, "v01", start, _valid_args("sid-v1"), annotate=False)
+    with (tmp_path / "runs.csv").open("a", encoding="utf-8") as f:
+        f.write(_voice_row("v01", start, transcript=True))
+    report = render_report(tmp_path, ZoneInfo("UTC"))
+    row = next(x for x in report.splitlines() if x.startswith("| v01 |") and "turns R" in x)
+    assert "turns R 100% / P 100%" in row
+    assert "- v01:" not in report
+    assert "user_turns strict: R 100% / P 100%" in report
+
+
+def test_voice_run_without_transcript_is_excluded_with_that_reason(
+    tmp_path: Path, end_session_schema: dict[str, Any]
+) -> None:
+    write_sample_data(tmp_path, end_session_schema)
+    start = datetime(2026, 10, 6, 16, 0, tzinfo=UTC)
+    _extra_run(tmp_path, "v01", start, _valid_args("sid-v1"), annotate=False)
+    (tmp_path / "transcripts" / "v01.md").unlink()
+    with (tmp_path / "runs.csv").open("a", encoding="utf-8") as f:
+        f.write(_voice_row("v01", start, transcript=False))
+    assert "- v01: no transcript" in render_report(tmp_path, ZoneInfo("UTC"))
+
+
+def test_report_lists_uncounted_413_requests_by_timestamp_only(
+    tmp_path: Path, end_session_schema: dict[str, Any]
+) -> None:
+    write_sample_data(tmp_path, end_session_schema)
+    stamp = datetime(2026, 10, 6, 15, 14, tzinfo=UTC).isoformat()
+    _append_log(
+        tmp_path,
+        {
+            "kind": "http",
+            "ts_in": stamp,
+            "http": {"method": "POST", "path": "/mcp", "status": 413, "mcp_session_id": None},
+            "rpc": {"id": None, "method": None, "tool": None, "params_raw": "SECRET-BODY"},
+        },
+    )
+    report = render_report(tmp_path, ZoneInfo("UTC"))
+    assert f"- Uncounted 413 requests: 1 ({stamp})" in report
+    assert "SECRET-BODY" not in report
+    assert "| r01 | 2026-10-06 | web / free / text | valid (final), 1 call(s)" in report
