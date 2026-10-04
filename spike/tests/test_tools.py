@@ -6,11 +6,12 @@ from typing import Any
 import pytest
 from conftest import FIXED_NOW, make_server, read_log_lines
 from fastmcp import Client
+from fastmcp.server import dependencies
 
 from tutor_spike.contract import INSTRUCTIONS, RETRY_RULES
 from tutor_spike.eventlog import JsonlLog
 from tutor_spike.sessions import SessionRegistry
-from tutor_spike.testers import parse_testers
+from tutor_spike.testers import parse_testers, token_tester
 from tutor_spike.tools import build_mcp
 
 
@@ -359,3 +360,30 @@ async def test_logged_session_ids_are_truncated_to_64_chars(tmp_path: Path) -> N
     first, second = call_lines(tmp_path)
     assert first["session_id"] == "s" * 64
     assert second["session_id"] is None
+
+
+class FakeToken:
+    def __init__(self, **claims: Any) -> None:
+        self.claims = claims
+
+
+@pytest.mark.parametrize(
+    ("claims", "expected"),
+    [
+        ({"email": "Me@Example.com", "email_verified": "true"}, "author-free"),
+        ({"email": "me@example.com", "email_verified": True}, "author-free"),
+        ({"email": "me@example.com", "email_verified": "false"}, None),
+        ({"email": "me@example.com"}, None),
+        ({"email": "stranger@example.com", "email_verified": "true"}, None),
+    ],
+)
+def test_token_tester_requires_a_verified_allowlisted_email(
+    monkeypatch: pytest.MonkeyPatch, claims: dict[str, Any], expected: str | None
+) -> None:
+    monkeypatch.setattr(dependencies, "get_access_token", lambda: FakeToken(**claims))
+    assert token_tester({"me@example.com": "author-free"})() == expected
+
+
+def test_token_tester_without_a_token_is_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(dependencies, "get_access_token", lambda: None)
+    assert token_tester({"me@example.com": "author-free"})() is None

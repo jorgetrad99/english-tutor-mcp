@@ -18,13 +18,15 @@ def parse_testers(raw: str) -> dict[str, str]:
 
 
 def token_tester(testers: dict[str, str]) -> Callable[[], str | None]:
-    """Resolver for tools: the caller's tester label, or None if not allowlisted."""
+    """Resolver for tools: the caller's tester label, or None if not verified and allowlisted."""
 
     def resolve() -> str | None:
         from fastmcp.server.dependencies import get_access_token
 
         token = get_access_token()
         if token is None:
+            return None
+        if str(token.claims.get("email_verified")).lower() != "true":
             return None
         return testers.get(str(token.claims.get("email", "")).lower())
 

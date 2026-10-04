@@ -2,6 +2,7 @@ import threading
 import uuid
 from pathlib import Path
 
+import pytest
 from conftest import FIXED_NOW
 
 from tutor_spike.sessions import SessionRegistry
@@ -63,3 +64,13 @@ def test_record_end_is_thread_safe(tmp_path: Path) -> None:
         t.join()
 
     assert sorted(results) == list(range(num_threads))
+
+
+def test_truncated_last_line_is_skipped_with_a_warning(tmp_path: Path) -> None:
+    path = tmp_path / "sessions.jsonl"
+    session_id = SessionRegistry(path, FIXED_NOW).issue("author-free")
+    with path.open("a", encoding="utf-8") as f:
+        f.write('{"ts": "2026-10-06T15:00:00+00:00", "event": "iss')
+    with pytest.warns(RuntimeWarning, match="line 2"):
+        registry = SessionRegistry(path, FIXED_NOW)
+    assert registry.owner(session_id) == "author-free"

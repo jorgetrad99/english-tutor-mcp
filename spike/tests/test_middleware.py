@@ -10,7 +10,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from tutor_spike.eventlog import JsonlLog
-from tutor_spike.middleware import RawLogMiddleware
+from tutor_spike.middleware import BodySizeGuard, RawLogMiddleware, _parse_body
 
 SSE_BODY = 'event: message\ndata: {"jsonrpc": "2.0", "id": 3, "result": {"ok": true}}\n\n'
 
@@ -332,3 +332,66 @@ async def test_many_small_chunks_with_small_cap(tmp_path: Path) -> None:
     assert record["http"]["request_truncated"] is True
     assert record["http"]["request_bytes"] == chunk_size * num_chunks
     assert record["kind"] == "http"
+
+
+async def test_auth_route_lines_keep_no_client_headers(tmp_path: Path) -> None:
+    headers = {
+        "user-agent": "Mozilla/5.0 secret-device",
+        "mcp-session-id": "sess-9",
+        "mcp-protocol-version": "2025-06-18",
+    }
+    async with client(make_app(tmp_path)) as c:
+        await c.post("/token", content=b"code=x", headers=headers)
+    [record] = read_log_lines(tmp_path)
+    http = record["http"]
+    assert (http["method"], http["path"], http["status"]) == ("POST", "/token", 200)
+    assert record["latency_ms"] >= 0
+    assert http["request_bytes"] == 6
+    assert http["user_agent"] is None
+    assert http["mcp_session_id"] is None
+    assert http["mcp_protocol_version"] is None
+
+
+async def test_unparsed_body_text_is_truncated_to_4096_chars(tmp_path: Path) -> None:
+    async with client(make_app(tmp_path)) as c:
+        await c.post("/mcp", content=b"not json " * 2000, headers={"content-type": "text/plain"})
+    [record] = read_log_lines(tmp_path)
+    assert len(record["rpc"]["request_raw"]["unparsed"]) == 4096
+
+
+def test_unparsed_sse_event_is_truncated_to_4096_chars() -> None:
+    raw = ("data: " + "z" * 9000 + "\n\n" + "data: " + "y" * 9000 + "\n\n").encode()
+    events = _parse_body(raw)
+    assert [len(e["unparsed"]) for e in events] == [4096, 4096]
+
+
+def guarded_app(tmp_path: Path) -> RawLogMiddleware:
+    app = make_app(tmp_path)
+    app.app = BodySizeGuard(app.app, mcp_limit=1_000, other_limit=2_000)
+    return app
+
+
+async def test_streamed_body_over_the_limit_is_rejected_and_logged(tmp_path: Path) -> None:
+    async def stream_body():
+        for _ in range(10):
+            yield b"x" * 200
+
+    async with client(guarded_app(tmp_path)) as c:
+        mcp = await c.post("/mcp", content=stream_body())
+        token = await c.post("/token", content=b"x" * 1_500)
+    assert (mcp.status_code, token.status_code) == (413, 200)
+    first, second = read_log_lines(tmp_path)
+    assert first["http"]["status"] == 413
+    assert second["http"]["status"] == 200
+
+
+async def test_requests_within_the_limit_reach_the_app_unchanged(tmp_path: Path) -> None:
+    payload = {"jsonrpc": "2.0", "id": 2, "method": "ping"}
+    async with client(guarded_app(tmp_path)) as c:
+        response = await c.post("/mcp", json=payload)
+        listed = await c.get("/mcp")
+    assert response.status_code == 200
+    assert response.json()["id"] == 2
+    assert listed.status_code == 200
+    [record, _] = read_log_lines(tmp_path)
+    assert record["rpc"]["method"] == "ping"

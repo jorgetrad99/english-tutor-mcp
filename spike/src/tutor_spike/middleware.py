@@ -10,6 +10,83 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from tutor_spike.eventlog import JsonlLog
 
 _LOGGED_HEADERS = ("user-agent", "mcp-session-id", "mcp-protocol-version")
+UNPARSED_CHARS = 4096
+MCP_BODY_LIMIT = 65_536
+OTHER_BODY_LIMIT = 1_048_576
+
+
+class BodySizeGuard:
+    """Rejects oversized POST bodies with 413 before they reach the app.
+
+    Sits inside RawLogMiddleware, so every rejection is still logged. The body is read
+    (up to the limit) before the app runs, then replayed to it unchanged.
+    """
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        mcp_path: str = "/mcp",
+        mcp_limit: int = MCP_BODY_LIMIT,
+        other_limit: int = OTHER_BODY_LIMIT,
+    ) -> None:
+        self.app = app
+        self._mcp_path = mcp_path
+        self._mcp_limit = mcp_limit
+        self._other_limit = other_limit
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope.get("method") != "POST":
+            await self.app(scope, receive, send)
+            return
+        is_mcp = scope["path"].rstrip("/") == self._mcp_path
+        limit = self._mcp_limit if is_mcp else self._other_limit
+        declared = _headers_raw(scope.get("headers", [])).get("content-length")
+        if declared is not None and (not declared.isdigit() or int(declared) > limit):
+            await _too_large(send)
+            return
+        chunks: list[bytes] = []
+        size = 0
+        while True:
+            message = await receive()
+            if message["type"] != "http.request":
+                break
+            chunk = message.get("body", b"")
+            size += len(chunk)
+            if size > limit:
+                await _too_large(send)
+                return
+            chunks.append(chunk)
+            if not message.get("more_body", False):
+                break
+        replayed = False
+
+        async def replay() -> Message:
+            nonlocal replayed
+            if not replayed:
+                replayed = True
+                return {"type": "http.request", "body": b"".join(chunks), "more_body": False}
+            return await receive()
+
+        await self.app(scope, replay, send)
+
+
+async def _too_large(send: Send) -> None:
+    body = b'{"error": "request body too large"}'
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 413,
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode()),
+            ],
+        }
+    )
+    await send({"type": "http.response.body", "body": body})
+
+
+def _headers_raw(raw: Any) -> dict[str, str]:
+    return {key.decode("latin-1").lower(): value.decode("latin-1") for key, value in raw}
 
 
 class RawLogMiddleware:
@@ -35,7 +112,8 @@ class RawLogMiddleware:
             return
         ts_in = self._now()
         is_post = scope.get("method") == "POST"
-        log_bodies = is_post and scope["path"].rstrip("/") == self._mcp_path
+        is_mcp = scope["path"].rstrip("/") == self._mcp_path
+        log_bodies = is_post and is_mcp
         request_body: list[bytes] = []
         response_body: list[bytes] = []
         response_headers: dict[str, str] = {}
@@ -90,7 +168,10 @@ class RawLogMiddleware:
         finally:
             try:
                 ts_out = self._now()
-                request_headers = _headers(scope.get("headers", []))
+                # Auth routes keep only method, path, status, latency and sizes.
+                request_headers = _headers(scope.get("headers", [])) if is_mcp else {}
+                if not is_mcp:
+                    response_headers.clear()
                 record = {
                     "kind": "http",
                     "ts_in": ts_in.isoformat(),
@@ -152,7 +233,7 @@ def _headers(raw: Any) -> dict[str, str]:
 def _parse_body(raw: bytes, truncated: bool = False) -> Any:
     if truncated:
         text = raw.decode("utf-8", errors="replace")
-        prefix = text[:4096]
+        prefix = text[:UNPARSED_CHARS]
         return {"truncated": True, "prefix": prefix}
     if not raw:
         return None
@@ -168,10 +249,10 @@ def _parse_body(raw: bytes, truncated: bool = False) -> Any:
             try:
                 events.append(json.loads(data))
             except (ValueError, RecursionError):
-                events.append({"unparsed": data})
+                events.append({"unparsed": data[:UNPARSED_CHARS]})
     if len(events) == 1:
         return events[0]
-    return events or {"unparsed": text}
+    return events or {"unparsed": text[:UNPARSED_CHARS]}
 
 
 def _rpc(

@@ -3,6 +3,7 @@
 import json
 import threading
 import uuid
+import warnings
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -18,9 +19,19 @@ class SessionRegistry:
         self._owners: dict[str, str] = {}
         self._ends: dict[str, int] = {}
         if path.exists():
-            for line in path.read_text(encoding="utf-8").splitlines():
-                if line.strip():
+            lines = path.read_text(encoding="utf-8").splitlines()
+            for number, line in enumerate(lines, start=1):
+                if not line.strip():
+                    continue
+                try:
                     self._apply(json.loads(line))
+                except (ValueError, KeyError, TypeError) as exc:
+                    # A crash mid-write can leave a truncated last line; keep the rest.
+                    warnings.warn(
+                        f"{path.name} line {number} skipped: {type(exc).__name__}",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
 
     def issue(self, tester: str) -> str:
         session_id = str(uuid.uuid4())
