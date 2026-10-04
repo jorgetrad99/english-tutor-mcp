@@ -42,47 +42,55 @@ class RawLogMiddleware:
         status = 0
         request_bytes_total = 0
         response_bytes_total = 0
+        request_captured = 0
+        response_captured = 0
         request_truncated = False
         response_truncated = False
 
         async def receive_logged() -> Message:
-            nonlocal request_bytes_total, request_truncated
+            nonlocal request_bytes_total, request_captured, request_truncated
             message = await receive()
-            if log_bodies and message["type"] == "http.request":
+            if message["type"] == "http.request":
                 chunk = message.get("body", b"")
                 request_bytes_total += len(chunk)
-                if (
-                    not request_truncated
-                    and len(b"".join(request_body)) + len(chunk) <= self._max_capture_bytes
-                ):
-                    request_body.append(chunk)
-                else:
-                    request_truncated = True
+                if log_bodies and not request_truncated:
+                    space_left = self._max_capture_bytes - request_captured
+                    if space_left > 0:
+                        to_capture = min(len(chunk), space_left)
+                        request_body.append(chunk[:to_capture])
+                        request_captured += to_capture
+                        if to_capture < len(chunk):
+                            request_truncated = True
+                    else:
+                        request_truncated = True
             return message
 
         async def send_logged(message: Message) -> None:
-            nonlocal status, response_bytes_total, response_truncated
+            nonlocal status, response_bytes_total, response_captured, response_truncated
             if message["type"] == "http.response.start":
                 status = message["status"]
                 response_headers.update(_headers(message.get("headers", [])))
-            elif log_bodies and message["type"] == "http.response.body":
+            elif message["type"] == "http.response.body":
                 chunk = message.get("body", b"")
                 response_bytes_total += len(chunk)
-                if (
-                    not response_truncated
-                    and len(b"".join(response_body)) + len(chunk) <= self._max_capture_bytes
-                ):
-                    response_body.append(chunk)
-                else:
-                    response_truncated = True
+                if log_bodies and not response_truncated:
+                    space_left = self._max_capture_bytes - response_captured
+                    if space_left > 0:
+                        to_capture = min(len(chunk), space_left)
+                        response_body.append(chunk[:to_capture])
+                        response_captured += to_capture
+                        if to_capture < len(chunk):
+                            response_truncated = True
+                    else:
+                        response_truncated = True
             await send(message)
 
         try:
             await self.app(scope, receive_logged, send_logged)
         finally:
-            ts_out = self._now()
-            request_headers = _headers(scope.get("headers", []))
             try:
+                ts_out = self._now()
+                request_headers = _headers(scope.get("headers", []))
                 record = {
                     "kind": "http",
                     "ts_in": ts_in.isoformat(),
@@ -184,7 +192,10 @@ def _rpc(
         "error_raw": None,
         "request_raw": None,
     }
-    if isinstance(request, dict) and not request.get("truncated"):
+    is_request_valid = (
+        isinstance(request, dict) and not request.get("truncated") and not request.get("unparsed")
+    )
+    if is_request_valid:
         params = request.get("params")
         rpc["id"] = request.get("id")
         rpc["method"] = request.get("method")
@@ -196,7 +207,12 @@ def _rpc(
                 rpc["client_info"] = params.get("clientInfo")
     else:
         rpc["request_raw"] = request
-    if isinstance(response, dict) and not response.get("truncated"):
+    is_response_valid = (
+        isinstance(response, dict)
+        and not response.get("truncated")
+        and not response.get("unparsed")
+    )
+    if is_response_valid:
         rpc["result_raw"] = response.get("result")
         rpc["error_raw"] = response.get("error")
     else:

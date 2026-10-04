@@ -16,7 +16,11 @@ SSE_BODY = 'event: message\ndata: {"jsonrpc": "2.0", "id": 3, "result": {"ok": t
 
 
 async def mcp_endpoint(request: Request) -> Response:
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        # Invalid JSON should not crash the endpoint
+        return JSONResponse({"error": "Invalid JSON"}, status_code=200)
     if body.get("id") == 3:
         return Response(SSE_BODY, media_type="text/event-stream")
     params = body.get("params", {})
@@ -39,10 +43,15 @@ async def crash(request: Request) -> Response:
     raise RuntimeError("boom")
 
 
-def make_app(tmp_path: Path, max_capture_bytes: int | None = None) -> RawLogMiddleware:
+async def mcp_get_endpoint(request: Request) -> Response:
+    return Response("data: x\n\n", media_type="text/event-stream")
+
+
+def make_app(tmp_path: Path, max_capture_bytes: int = 262_144) -> RawLogMiddleware:
     inner = Starlette(
         routes=[
-            Route("/mcp", mcp_endpoint, methods=["POST", "GET"]),
+            Route("/mcp", mcp_endpoint, methods=["POST"]),
+            Route("/mcp", mcp_get_endpoint, methods=["GET"]),
             Route("/token", token_endpoint, methods=["POST"]),
             Route("/crash", crash, methods=["POST"]),
         ]
@@ -52,10 +61,13 @@ def make_app(tmp_path: Path, max_capture_bytes: int | None = None) -> RawLogMidd
     def clock() -> datetime:
         return FIXED_NOW() + timedelta(milliseconds=10 * next(ticks))
 
-    kwargs: dict = {"log": JsonlLog(tmp_path, FIXED_NOW), "now": clock, "server_sha": "abc1234"}
-    if max_capture_bytes is not None:
-        kwargs["max_capture_bytes"] = max_capture_bytes
-    return RawLogMiddleware(inner, **kwargs)
+    return RawLogMiddleware(
+        inner,
+        log=JsonlLog(tmp_path, FIXED_NOW),
+        now=clock,
+        server_sha="abc1234",
+        max_capture_bytes=max_capture_bytes,
+    )
 
 
 def client(app: RawLogMiddleware) -> httpx.AsyncClient:
@@ -206,12 +218,13 @@ async def test_response_body_over_cap_is_truncated(tmp_path: Path) -> None:
 
 async def test_get_mcp_does_not_capture_response_body(tmp_path: Path) -> None:
     async with client(make_app(tmp_path)) as c:
-        await c.get("/mcp")
-    # GET is not allowed on /mcp, but it should still be logged
+        response = await c.get("/mcp")
+    assert response.status_code == 200
     [record] = read_log_lines(tmp_path)
     assert record["http"]["method"] == "GET"
     assert record["http"]["path"] == "/mcp"
-    assert record["http"]["response_bytes"] == 0
+    assert record["http"]["response_bytes"] > 0
+    assert record["http"]["response_truncated"] is False
     assert record["rpc"] is None
 
 
@@ -229,3 +242,93 @@ async def test_large_body_is_handled_without_exception(tmp_path: Path) -> None:
     assert record["kind"] == "http"
     assert record["http"]["status"] == 200
     assert "log_error" not in record
+
+
+async def test_raw_binary_body_with_default_cap(tmp_path: Path) -> None:
+    async with client(make_app(tmp_path)) as c:
+        response = await c.post(
+            "/mcp", content=b"1" * 5000, headers={"content-type": "application/json"}
+        )
+    assert response.status_code == 200
+    [record] = read_log_lines(tmp_path)
+    assert record["kind"] == "http"
+    assert record["http"]["status"] == 200
+    assert record["http"]["request_truncated"] is False
+    assert record["http"]["request_bytes"] == 5000
+    assert isinstance(record["rpc"]["request_raw"], dict)
+    assert record["rpc"]["request_raw"]["unparsed"]  # ValueError path: int digits not valid JSON
+
+
+async def test_deeply_nested_json_with_large_cap(tmp_path: Path) -> None:
+    body = b"[" * 100_000 + b"]" * 100_000
+    async with client(make_app(tmp_path, max_capture_bytes=300_000)) as c:
+        response = await c.post("/mcp", content=body, headers={"content-type": "application/json"})
+    assert response.status_code == 200
+    [record] = read_log_lines(tmp_path)
+    assert record["kind"] == "http"
+    assert record["http"]["status"] == 200
+    assert "log_error" not in record
+
+
+async def test_logging_failure_falls_back_to_minimal_record(tmp_path: Path) -> None:
+    class FailingJsonlLog:
+        def __init__(self, real_log: JsonlLog) -> None:
+            self.real_log = real_log
+            self.write_count = 0
+
+        def write(self, record: dict) -> None:
+            self.write_count += 1
+            if self.write_count == 1:
+                raise ValueError("Log write failed")
+            self.real_log.write(record)
+
+    failing_log = FailingJsonlLog(JsonlLog(tmp_path, FIXED_NOW))
+    ticks = itertools.count()
+
+    def clock() -> datetime:
+        return FIXED_NOW() + timedelta(milliseconds=10 * next(ticks))
+
+    app = RawLogMiddleware(
+        Starlette(
+            routes=[
+                Route(
+                    "/mcp",
+                    lambda req: JSONResponse({"ok": True}),
+                    methods=["POST"],
+                )
+            ]
+        ),
+        log=failing_log,
+        now=clock,
+        server_sha="abc1234",
+    )
+
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as c:
+        response = await c.post("/mcp", json={"test": "data"})
+    assert response.status_code == 200
+    [record] = read_log_lines(tmp_path)
+    assert record["kind"] == "http"
+    assert record["http"]["status"] == 200
+    assert record["log_error"] == "ValueError"
+
+
+async def test_many_small_chunks_with_small_cap(tmp_path: Path) -> None:
+    chunk_size = 200
+    num_chunks = 2000
+
+    async def stream_body():
+        for _ in range(num_chunks):
+            yield b"x" * chunk_size
+
+    async with client(make_app(tmp_path, max_capture_bytes=64_000)) as c:
+        response = await c.post(
+            "/mcp",
+            content=stream_body(),
+            headers={"content-type": "application/json"},
+        )
+    assert response.status_code == 200
+    [record] = read_log_lines(tmp_path)
+    assert record["http"]["request_truncated"] is True
+    assert record["http"]["request_bytes"] == chunk_size * num_chunks
+    assert record["kind"] == "http"
