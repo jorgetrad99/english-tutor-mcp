@@ -4,6 +4,8 @@
 
 This is Part 2 (Tasks 16–30: payments, pages, verification). It requires Part 1 (`2026-10-04-dashboard-web-1-foundation.md`, Tasks 1–15) to be merged first; task numbers continue from Part 1 and references to Tasks 1–15 point there. The header is shared with Part 1.
 
+**Execution: subagent-driven** (chosen by the author on 2026-10-04).
+
 **Status: parked.** Do not start before 2027-01-05, and only if the gate decision on 2026-11-30 says continue. Scope is re-estimated at the gate (requirements section 16); re-read this plan then.
 
 **Goal:** Build the installable web dashboard (pages, payments, PWA shell, motion layer) as a server-rendered layer that talks to the rest of the system only through typed ports.

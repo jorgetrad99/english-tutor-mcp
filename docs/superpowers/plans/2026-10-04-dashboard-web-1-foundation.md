@@ -4,6 +4,8 @@
 
 This plan is split in two files to stay reviewable: Part 1 (`2026-10-04-dashboard-web-1-foundation.md`, Tasks 1–15: domain, web foundation, look and install) and Part 2 (`2026-10-04-dashboard-web-2-pages.md`, Tasks 16–30: payments, pages, verification). Execute Part 1 first; both share the header below.
 
+**Execution: subagent-driven** (chosen by the author on 2026-10-04).
+
 **Status: parked.** Do not start before 2027-01-05, and only if the gate decision on 2026-11-30 says continue. Scope is re-estimated at the gate (requirements section 16); re-read this plan then.
 
 **Goal:** Build the installable web dashboard (pages, payments, PWA shell, motion layer) as a server-rendered layer that talks to the rest of the system only through typed ports.
