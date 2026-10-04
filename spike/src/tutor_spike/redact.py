@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from tutor_spike.analysis.runs import Run, load_runs
+from tutor_spike.analysis.runs import load_runs, transcript_path
 from tutor_spike.analysis.scoring import (
     assign,
     end_session_schema_from,
@@ -52,19 +52,10 @@ def _write(path: Path, text: str, written: list[Path]) -> None:
     written.append(path)
 
 
-def _transcript_path(data_dir: Path, run: Run) -> Path | None:
-    if not run.transcript_file:
-        return None
-    path = (data_dir / run.transcript_file).resolve()
-    if not path.is_relative_to(data_dir.resolve()):
-        raise ValueError(f"run {run.run_id}: transcript_file escapes the data directory")
-    return path
-
-
 def export(data_dir: Path, repo_root: Path, names: list[str], tz: ZoneInfo) -> list[Path]:
     runs = load_runs(data_dir / "runs.csv", tz)
     records = load_records(data_dir)
-    schema = end_session_schema_from(records)
+    schema, _ = end_session_schema_from(records)
     grouped = assign(runs, records)
     written: list[Path] = []
     spike_docs = repo_root / "docs" / "spike"
@@ -78,7 +69,7 @@ def export(data_dir: Path, repo_root: Path, names: list[str], tz: ZoneInfo) -> l
         if outcome.valid_final:
             payload = _redact_json_text(json.dumps(outcome.final_arguments), names)
             _write(spike_docs / "02-data" / "payloads" / f"{run.run_id}.json", payload, written)
-        transcript = _transcript_path(data_dir, run)
+        transcript = transcript_path(data_dir, run)
         if run.mode != "text" or transcript is None or not transcript.exists():
             continue
         text = redact(transcript.read_text(encoding="utf-8"), names)

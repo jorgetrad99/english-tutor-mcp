@@ -4,7 +4,12 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import pytest
+
+from tutor_spike.analysis import __main__ as report_cli
+from tutor_spike.analysis import scoring
 from tutor_spike.analysis.__main__ import render_report
+from tutor_spike.analysis.scoring import end_session_schema_from
 
 HEADER = (
     "run_id,date,account,device,app_version,mode,model_shown,situation_card,start_local,"
@@ -178,3 +183,108 @@ def test_report_excludes_invalid_payload_and_gates_errors_on_annotation(
     r01 = next(x for x in section3 if x.startswith("| r01 |"))
     assert "errors R 100% / P 100%" in r01
     assert any(x.startswith("| all | 2 | B1+ |") for x in lines)
+
+
+def _append_log(tmp_path: Path, *lines: dict[str, Any]) -> None:
+    with (tmp_path / "calls-2026-10-06.jsonl").open("a", encoding="utf-8") as f:
+        f.write("".join(json.dumps(x) + "\n" for x in lines))
+
+
+def test_report_lists_unassigned_calls_and_fidelity_exclusions(
+    tmp_path: Path, end_session_schema: dict[str, Any]
+) -> None:
+    write_sample_data(tmp_path, end_session_schema)
+    stray = datetime(2026, 10, 6, 20, 0, tzinfo=UTC).isoformat()
+    _append_log(
+        tmp_path,
+        {"kind": "call", "ts": stray, "tool": "get_profile", "tester": None},
+        {
+            "kind": "http",
+            "ts_in": stray,
+            "http": {"method": "POST", "path": "/mcp", "status": 200},
+            "rpc": {"method": "tools/call", "tool": "get_profile", "params_raw": {}},
+        },
+    )
+    rows = (
+        "r02,2026-10-06,pro,iphone,1.0,voice,Sonnet,3,16:00,16:15,y,y,,,ok,,\n"
+        "r03,2026-10-06,free,laptop,web,text,Sonnet,3,17:00,17:15,na,na,,,aborted,crash,\n"
+        "r04,2026-10-06,free,laptop,web,text,Sonnet,3,18:00,18:15,na,na,,,ok,,\n"
+    )
+    with (tmp_path / "runs.csv").open("a", encoding="utf-8") as f:
+        f.write(rows)
+    report = render_report(tmp_path, ZoneInfo("UTC"))
+    assert "## Unassigned records" in report
+    assert "tools/call HTTP lines: 1" in report
+    assert 'kind:"call" records: 1' in report
+    assert stray in report
+    for line in ("- r02: not text", "- r03: aborted", "- r04: invalid final"):
+        assert line in report
+
+
+def test_report_excludes_a_valid_run_without_transcript(
+    tmp_path: Path, end_session_schema: dict[str, Any]
+) -> None:
+    write_sample_data(tmp_path, end_session_schema)
+    (tmp_path / "transcripts" / "r01.md").unlink()
+    assert "- r01: no transcript" in render_report(tmp_path, ZoneInfo("UTC"))
+
+
+def _drop_tools_list(tmp_path: Path) -> None:
+    log = tmp_path / "calls-2026-10-06.jsonl"
+    kept = [x for x in log.read_text(encoding="utf-8").splitlines() if "tools/list" not in x]
+    log.write_text("\n".join(kept) + "\n", encoding="utf-8")
+
+
+def test_schema_falls_back_to_build_mcp_without_tools_list(
+    tmp_path: Path, end_session_schema: dict[str, Any]
+) -> None:
+    write_sample_data(tmp_path, end_session_schema)
+    _drop_tools_list(tmp_path)
+    schema, from_log = end_session_schema_from(scoring.load_records(tmp_path))
+    assert (schema, from_log) == (end_session_schema, False)
+    report = render_report(tmp_path, ZoneInfo("UTC"))
+    assert report.startswith("end_session schema: no tools/list response in the log")
+    assert "valid (final)" in report
+
+
+def test_schema_from_the_log_is_named_in_the_header(
+    tmp_path: Path, end_session_schema: dict[str, Any]
+) -> None:
+    write_sample_data(tmp_path, end_session_schema)
+    report = render_report(tmp_path, ZoneInfo("UTC"))
+    assert report.startswith("end_session schema: from the logged tools/list response")
+
+
+def test_schema_error_when_log_and_fallback_both_fail(
+    tmp_path: Path, end_session_schema: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken(**_: Any) -> Any:
+        raise RuntimeError("no server")
+
+    monkeypatch.setattr(scoring, "build_mcp", broken)
+    with pytest.raises(ValueError, match="tools/list"):
+        end_session_schema_from([])
+
+
+def test_cli_writes_the_report_to_out_as_utf8(
+    tmp_path: Path, end_session_schema: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write_sample_data(tmp_path, end_session_schema)
+    out = tmp_path / "report.md"
+    argv = ["analysis", "--data", str(tmp_path), "--tz", "UTC", "--out", str(out)]
+    monkeypatch.setattr("sys.argv", argv)
+    report_cli.main()
+    assert out.read_text(encoding="utf-8") == render_report(tmp_path, ZoneInfo("UTC"))
+    assert "≥ 90%" in out.read_text(encoding="utf-8")
+
+
+def test_cli_prints_the_report_without_out(
+    tmp_path: Path,
+    end_session_schema: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    write_sample_data(tmp_path, end_session_schema)
+    monkeypatch.setattr("sys.argv", ["analysis", "--data", str(tmp_path), "--tz", "UTC"])
+    report_cli.main()
+    assert "## 02 — end_session reliability" in capsys.readouterr().out

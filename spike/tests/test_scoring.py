@@ -9,6 +9,7 @@ from tutor_spike.analysis.scoring import (
     score_run,
     summarize_exp1,
     summarize_exp2,
+    unassigned_records,
 )
 
 T0 = datetime(2026, 10, 6, 15, 0, tzinfo=UTC)
@@ -50,12 +51,15 @@ def http_call(
     result: Any = None,
     error: Any = None,
     status: int = 200,
+    mcp: str | None = "s1",
+    rpc_id: int | None = None,
 ) -> dict[str, Any]:
     return {
         "kind": "http",
         "ts_in": at(minutes),
-        "http": {"status": status, "mcp_session_id": "s1"},
+        "http": {"method": "POST", "path": "/mcp", "status": status, "mcp_session_id": mcp},
         "rpc": {
+            "id": rpc_id,
             "method": "tools/call",
             "tool": tool,
             "params_raw": {"name": tool, "arguments": arguments},
@@ -316,3 +320,114 @@ def test_score_run_first_valid_last_invalid(end_session_schema: dict[str, Any]) 
     ]
     result = score_run(run("r01", 0, 15), records, end_session_schema)
     assert (result.valid_first, result.valid_final) == (True, False)
+
+
+def call(
+    minutes: float,
+    tool: str,
+    tester: str | None,
+    mcp: str,
+    rpc_id: int,
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "kind": "call",
+        "ts": at(minutes),
+        "tool": tool,
+        "tester": tester,
+        "mcp_session_id": mcp,
+        "rpc_id": str(rpc_id),
+        "session_id": session_id,
+    }
+
+
+def end_call(
+    minutes: float,
+    arguments: Any,
+    *,
+    mcp: str = "m1",
+    rpc_id: int = 2,
+    tester: str | None = "author-free",
+    valid: bool = True,
+) -> list[dict[str, Any]]:
+    """The kind:"call" record and the HTTP line of one end_session call."""
+    session_id = arguments.get("session_id") if isinstance(arguments, dict) else None
+    outcome = {"result": {"structuredContent": {}}} if valid else {"error": {"code": -32602}}
+    return [
+        call(minutes, "end_session", tester, mcp, rpc_id, session_id),
+        http_call(minutes, "end_session", arguments, mcp=mcp, rpc_id=rpc_id, **outcome),
+    ]
+
+
+def profile(minutes: float, session_id: str, mcp: str = "m1") -> list[dict[str, Any]]:
+    tool_line = issued(minutes, session_id) | {"mcp_session_id": mcp, "rpc_id": "1"}
+    return [
+        call(minutes, "get_profile", "author-free", mcp, 1),
+        tool_line,
+        http_call(minutes, "get_profile", {}, result={}, mcp=mcp, rpc_id=1),
+    ]
+
+
+def too_large(minutes: float) -> dict[str, Any]:
+    return {
+        "kind": "http",
+        "ts_in": at(minutes),
+        "http": {"method": "POST", "path": "/mcp", "status": 413, "mcp_session_id": "m3"},
+        "rpc": {"id": None, "method": None, "tool": None, "params_raw": None},
+    }
+
+
+def scored(runs: list[Run], records: list[dict[str, Any]], schema: dict[str, Any]) -> Any:
+    grouped = assign(runs, records)
+    return {r.run_id: score_run(r, grouped[r.run_id], schema) for r in runs}
+
+
+def test_outsider_and_unauthenticated_end_session_do_not_affect_the_run(
+    end_session_schema: dict[str, Any],
+) -> None:
+    outsider = end_call(14.2, {**args(), "glossary": []}, mcp="m9", tester=None, valid=False)
+    unauthenticated = http_call(14.4, "end_session", {"bogus": 1}, status=401, mcp=None)
+    records = [*profile(1, "sid-1"), *end_call(14, args()), *outsider, unauthenticated]
+    result = scored([run("r01", 0, 15)], records, end_session_schema)["r01"]
+    assert (result.end_calls, result.valid_first, result.valid_final) == (1, True, True)
+
+
+def test_outsider_get_profile_alone_does_not_make_tools_fire(
+    end_session_schema: dict[str, Any],
+) -> None:
+    records = [
+        call(3, "get_profile", None, "m9", 1),
+        http_call(3, "get_profile", {}, result={}, mcp="m9", rpc_id=1),
+    ]
+    grouped = assign([run("r01", 0, 15)], records)
+    assert grouped == {"r01": []}
+    assert unassigned_records(records, grouped) == records
+
+
+def test_invalid_final_call_in_a_new_mcp_session_makes_the_run_invalid(
+    end_session_schema: dict[str, Any],
+) -> None:
+    retry = end_call(14.5, args(task_result="done"), mcp="m2", valid=False)
+    records = [*profile(1, "sid-1"), *end_call(14, args()), *retry]
+    result = scored([run("r01", 0, 15)], records, end_session_schema)["r01"]
+    assert (result.end_calls, result.valid_first, result.valid_final) == (2, True, False)
+
+
+def test_oversized_final_attempt_counts_as_an_invalid_end_session(
+    end_session_schema: dict[str, Any],
+) -> None:
+    records = [*profile(1, "sid-1"), *end_call(14, args()), too_large(14.5)]
+    result = scored([run("r01", 0, 15)], records, end_session_schema)["r01"]
+    assert (result.end_calls, result.valid_first, result.valid_final) == (2, True, False)
+
+
+def test_end_session_after_the_window_goes_to_the_run_that_issued_its_session(
+    end_session_schema: dict[str, Any],
+) -> None:
+    late = end_call(27, args(), mcp="m1", rpc_id=5)
+    runs = [run("r01", 0, 15), run("r02", 26, 41)]
+    records = [*profile(1, "sid-1"), *late]
+    outcomes = scored(runs, records, end_session_schema)
+    assert (outcomes["r01"].end_calls, outcomes["r01"].valid_final) == (1, True)
+    assert outcomes["r02"].end_calls == 0
+    assert unassigned_records(records, assign(runs, records)) == []

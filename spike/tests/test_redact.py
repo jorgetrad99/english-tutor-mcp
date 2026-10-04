@@ -64,7 +64,7 @@ def _build(tmp_path: Path, schema: dict[str, Any]) -> Path:
     runs = data / "runs.csv"
     runs.write_text(
         runs.read_text(encoding="utf-8").replace("ok,,\n", f"ok,,met {PII}\n")
-        + "r02,2026-10-07,free,laptop,web,voice,Sonnet,3,10:00,10:15,yes,na,,,ok,,\n"
+        + "r02,2026-10-07,free,laptop,web,voice,Sonnet,3,10:00,10:15,y,y,,,ok,,\n"
         + "r03,2026-10-07,free,laptop,web,text,Sonnet,3,11:00,11:15,na,na,,"
         + "transcripts/r03.md,aborted,crash,\n"
         + "r04,2026-10-07,free,laptop,web,text,Sonnet,3,12:00,12:15,na,na,,"
