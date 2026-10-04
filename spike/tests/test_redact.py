@@ -9,14 +9,15 @@ from zoneinfo import ZoneInfo
 import pytest
 from test_report import write_sample_data
 
+from tutor_spike import redact as redact_cli
 from tutor_spike.redact import export, redact
 
-PII = "José Jorge jose@example.com"
+PII = "Lucía Mateo lucia@example.com"
 
 
 def test_redact_replaces_names_case_insensitively_and_emails() -> None:
-    text = "Hi Jorge, mail jorge.x@gmail.com. JORGE said hi to Jorgensen."
-    assert redact(text, ["Jorge"]) == "Hi [name], mail [email]. [name] said hi to Jorgensen."
+    text = "Hi Mateo, mail mateo.x@example.com. MATEO said hi to Mateos."
+    assert redact(text, ["Mateo"]) == "Hi [name], mail [email]. [name] said hi to Mateos."
 
 
 def test_redact_handles_longer_names_first() -> None:
@@ -24,19 +25,32 @@ def test_redact_handles_longer_names_first() -> None:
 
 
 def test_redact_underscore_digit_possessive_and_letters() -> None:
-    assert redact("Jorge_Perez", ["Jorge"]) == "[name]_Perez"
-    assert redact("jorge2 _Jorge_1 xJorge", ["Jorge"]) == "[name]2 _[name]_1 xJorge"
-    assert redact("Jorge's book", ["Jorge"]) == "[name]'s book"
-    assert redact("Jorgensen", ["Jorge"]) == "Jorgensen"
-    assert redact("a@b.co", ["Jorge"]) == "[email]"
+    assert redact("Mateo_Perez", ["Mateo"]) == "[name]_Perez"
+    assert redact("mateo2 _Mateo_1 xMateo", ["Mateo"]) == "[name]2 _[name]_1 xMateo"
+    assert redact("Mateo's book", ["Mateo"]) == "[name]'s book"
+    assert redact("Mateos", ["Mateo"]) == "Mateos"
+    assert redact("a@b.co", ["Mateo"]) == "[email]"
 
 
 def test_redact_accented_name_nfc_and_nfd() -> None:
-    nfc = unicodedata.normalize("NFC", "José")
-    nfd = unicodedata.normalize("NFD", "José")
+    nfc = unicodedata.normalize("NFC", "Lucía")
+    nfd = unicodedata.normalize("NFD", "Lucía")
     assert nfc != nfd
-    assert redact(f"hi {nfc} and {nfd}", ["José"]) == "hi [name] and [name]"
+    assert redact(f"hi {nfc} and {nfd}", ["Lucía"]) == "hi [name] and [name]"
     assert redact(f"hi {nfc}", [nfd]) == "hi [name]"
+
+
+def test_redact_folds_accents_on_both_sides() -> None:
+    assert redact("Lucia met Lucía and LUCÍA.", ["Lucía"]) == "[name] met [name] and [name]."
+    assert redact("Lucía met Lucia.", ["Lucia"]) == "[name] met [name]."
+    text = "¿Lucía Fernández? Sí, Lucia Fernandez, the Fernández family."
+    expected = "¿[name]? Sí, [name], the [name] family."
+    assert redact(text, ["Lucía Fernández", "Fernandez"]) == expected
+
+
+def test_redact_folding_keeps_letter_boundaries() -> None:
+    assert redact("Luciana and Lucías", ["Lucía"]) == "Luciana and Lucías"
+    assert redact("Mateó2 and _Mateo", ["Mateo"]) == "[name]2 and _[name]"
 
 
 def _calls(ts: datetime, sid: str, arguments: dict[str, Any]) -> list[dict[str, Any]]:
@@ -81,9 +95,9 @@ def _build(tmp_path: Path, schema: dict[str, Any]) -> Path:
     (data / "transcripts" / "r01.md").write_text(f"U: I am {PII}.\n", encoding="utf-8")
     annotation = data / "annotations" / "r01.json"
     annotation.write_text(
-        json.dumps([{"said": "Hi José", "correct": f"Hi {PII}"}]), encoding="utf-8"
+        json.dumps([{"said": "Hi Lucía", "correct": f"Hi {PII}"}]), encoding="utf-8"
     )
-    assert "\\u00e9" in annotation.read_text(encoding="utf-8")  # ensure_ascii escapes
+    assert "\\u00ed" in annotation.read_text(encoding="utf-8")  # ensure_ascii escapes
     for rid in ("r03", "r04"):
         (data / "transcripts" / f"{rid}.md").write_text("U: hi\n", encoding="utf-8")
     good = {
@@ -110,13 +124,13 @@ def test_export_writes_redacted_copies(tmp_path: Path, end_session_schema: dict[
     write_sample_data(data, end_session_schema)
     transcript = data / "transcripts" / "r01.md"
     transcript.write_text(
-        transcript.read_text(encoding="utf-8") + "A: Bye Jorge.\n", encoding="utf-8"
+        transcript.read_text(encoding="utf-8") + "A: Bye Mateo.\n", encoding="utf-8"
     )
     repo = tmp_path / "repo"
-    written = export(data, repo, ["Jorge"], ZoneInfo("UTC"))
+    written = export(data, repo, ["Mateo"], ZoneInfo("UTC"))
     exported = repo / "docs/spike/03-data/transcripts/r01.md"
     assert exported in written
-    assert "Jorge" not in exported.read_text(encoding="utf-8")
+    assert "Mateo" not in exported.read_text(encoding="utf-8")
     fixture = repo / "evals/fixtures/transcripts/2026-10-06-claude-free-r01.md"
     assert fixture.exists()
     payload = json.loads((repo / "docs/spike/02-data/payloads/r01.json").read_text("utf-8"))
@@ -129,14 +143,14 @@ def test_export_leaks_no_name_or_email_in_any_file(
 ) -> None:
     data = _build(tmp_path, end_session_schema)
     repo = tmp_path / "repo"
-    export(data, repo, ["José", "Jorge"], ZoneInfo("UTC"))
+    export(data, repo, ["Lucía", "Mateo"], ZoneInfo("UTC"))
     files = [p for p in repo.rglob("*") if p.is_file()]
     assert files
     for path in files:
         text = unicodedata.normalize("NFC", path.read_text(encoding="utf-8")).lower()
-        assert "josé" not in text, path
-        assert "jorge" not in text, path
-        assert "\\u00e9" not in text, path
+        assert "lucía" not in text, path
+        assert "mateo" not in text, path
+        assert "\\u00ed" not in text, path
         assert not re.search(r"\w@\w", text), path
     base = repo / "docs/spike"
     assert "[name]" in (base / "02-data/payloads/r01.json").read_text("utf-8")
@@ -172,3 +186,52 @@ def test_export_refuses_transcript_outside_data_dir(
     )
     with pytest.raises(ValueError, match="r01"):
         export(data, tmp_path / "repo", ["x"], ZoneInfo("UTC"))
+
+
+def _capture_export(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    seen: list[list[str]] = []
+
+    def fake_export(data: Path, repo: Path, names: list[str], tz: ZoneInfo) -> list[Path]:
+        seen.append(names)
+        return []
+
+    monkeypatch.setattr(redact_cli, "export", fake_export)
+    return seen
+
+
+def test_cli_reads_names_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _capture_export(monkeypatch)
+    monkeypatch.setenv("SPIKE_REDACT_NAMES", " Lucía Fernández , Mateo,")
+    monkeypatch.setattr("sys.argv", ["redact"])
+    redact_cli.main()
+    assert seen == [["Lucía Fernández", "Mateo"]]
+
+
+def test_cli_names_flag_wins_over_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _capture_export(monkeypatch)
+    monkeypatch.setenv("SPIKE_REDACT_NAMES", "Mateo")
+    monkeypatch.setattr("sys.argv", ["redact", "--names", "Lucía"])
+    redact_cli.main()
+    assert seen == [["Lucía"]]
+
+
+@pytest.mark.parametrize("env", [None, "", " , "])
+def test_cli_without_names_exits(monkeypatch: pytest.MonkeyPatch, env: str | None) -> None:
+    _capture_export(monkeypatch)
+    if env is None:
+        monkeypatch.delenv("SPIKE_REDACT_NAMES", raising=False)
+    else:
+        monkeypatch.setenv("SPIKE_REDACT_NAMES", env)
+    monkeypatch.setattr("sys.argv", ["redact"])
+    with pytest.raises(SystemExit, match="SPIKE_REDACT_NAMES"):
+        redact_cli.main()
+
+
+def test_output_paths_must_stay_inside_the_repo(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    written: list[Path] = []
+    with pytest.raises(ValueError, match="outside"):
+        redact_cli._write(repo, repo / ".." / "escaped.md", "x", written)
+    assert not (tmp_path / "escaped.md").exists()
+    redact_cli._write(repo, repo / "docs" / "ok.md", "x", written)
+    assert written == [repo / "docs" / "ok.md"]
