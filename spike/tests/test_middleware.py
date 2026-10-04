@@ -19,7 +19,8 @@ async def mcp_endpoint(request: Request) -> Response:
     body = await request.json()
     if body.get("id") == 3:
         return Response(SSE_BODY, media_type="text/event-stream")
-    if body.get("method") == "tools/call" and body["params"]["arguments"].get("bad"):
+    params = body.get("params", {})
+    if body.get("method") == "tools/call" and params.get("arguments", {}).get("bad"):
         error = {"code": -32602, "message": "Unexpected field 'bad'"}
         return JSONResponse({"jsonrpc": "2.0", "id": body["id"], "error": error})
     result = {"structuredContent": {"ok": True}}
@@ -38,10 +39,10 @@ async def crash(request: Request) -> Response:
     raise RuntimeError("boom")
 
 
-def make_app(tmp_path: Path) -> RawLogMiddleware:
+def make_app(tmp_path: Path, max_capture_bytes: int | None = None) -> RawLogMiddleware:
     inner = Starlette(
         routes=[
-            Route("/mcp", mcp_endpoint, methods=["POST"]),
+            Route("/mcp", mcp_endpoint, methods=["POST", "GET"]),
             Route("/token", token_endpoint, methods=["POST"]),
             Route("/crash", crash, methods=["POST"]),
         ]
@@ -51,9 +52,10 @@ def make_app(tmp_path: Path) -> RawLogMiddleware:
     def clock() -> datetime:
         return FIXED_NOW() + timedelta(milliseconds=10 * next(ticks))
 
-    return RawLogMiddleware(
-        inner, log=JsonlLog(tmp_path, FIXED_NOW), now=clock, server_sha="abc1234"
-    )
+    kwargs: dict = {"log": JsonlLog(tmp_path, FIXED_NOW), "now": clock, "server_sha": "abc1234"}
+    if max_capture_bytes is not None:
+        kwargs["max_capture_bytes"] = max_capture_bytes
+    return RawLogMiddleware(inner, **kwargs)
 
 
 def client(app: RawLogMiddleware) -> httpx.AsyncClient:
@@ -75,14 +77,14 @@ async def test_tool_call_is_logged_with_raw_arguments_and_result(tmp_path: Path)
     assert record["kind"] == "http"
     assert record["server_sha"] == "abc1234"
     assert record["latency_ms"] >= 0
-    assert record["http"] == {
-        "method": "POST",
-        "path": "/mcp",
-        "status": 200,
-        "user_agent": "Claude-User",
-        "mcp_session_id": "sess-1",
-        "mcp_protocol_version": "2025-06-18",
-    }
+    assert record["http"]["method"] == "POST"
+    assert record["http"]["path"] == "/mcp"
+    assert record["http"]["status"] == 200
+    assert record["http"]["user_agent"] == "Claude-User"
+    assert record["http"]["mcp_session_id"] == "sess-1"
+    assert record["http"]["mcp_protocol_version"] == "2025-06-18"
+    assert record["http"]["request_truncated"] is False
+    assert record["http"]["response_truncated"] is False
     assert record["rpc"]["id"] == 7
     assert record["rpc"]["tool"] == "end_session"
     assert record["rpc"]["params_raw"]["arguments"] == {"session_id": "s", "user_turns": ["hi"]}
@@ -163,3 +165,67 @@ async def test_timestamps_are_utc_iso(tmp_path: Path) -> None:
     [record] = read_log_lines(tmp_path)
     assert datetime.fromisoformat(record["ts_in"]).tzinfo == UTC
     assert record["ts_out"] >= record["ts_in"]
+
+
+async def test_request_body_over_cap_is_truncated(tmp_path: Path) -> None:
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 9,
+        "method": "tools/call",
+        "params": {"name": "long_tool", "arguments": {"data": "x" * 200}},
+    }
+    async with client(make_app(tmp_path, max_capture_bytes=64)) as c:
+        response = await c.post("/mcp", json=payload)
+    assert response.status_code == 200
+    [record] = read_log_lines(tmp_path)
+    assert record["http"]["request_truncated"] is True
+    assert record["http"]["request_bytes"] > 64
+    assert isinstance(record["rpc"]["request_raw"], dict)
+    assert record["rpc"]["request_raw"]["truncated"] is True
+    assert "prefix" in record["rpc"]["request_raw"]
+
+
+async def test_response_body_over_cap_is_truncated(tmp_path: Path) -> None:
+    async with client(make_app(tmp_path, max_capture_bytes=64)) as c:
+        response = await c.post(
+            "/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 10,
+                "method": "tools/call",
+                "params": {"name": "test", "arguments": {}},
+            },
+        )
+    assert response.status_code == 200
+    [record] = read_log_lines(tmp_path)
+    assert record["http"]["response_truncated"] is True
+    assert record["http"]["response_bytes"] > 0
+    assert isinstance(record["rpc"]["result_raw"], dict)
+    assert record["rpc"]["result_raw"]["truncated"] is True
+
+
+async def test_get_mcp_does_not_capture_response_body(tmp_path: Path) -> None:
+    async with client(make_app(tmp_path)) as c:
+        await c.get("/mcp")
+    # GET is not allowed on /mcp, but it should still be logged
+    [record] = read_log_lines(tmp_path)
+    assert record["http"]["method"] == "GET"
+    assert record["http"]["path"] == "/mcp"
+    assert record["http"]["response_bytes"] == 0
+    assert record["rpc"] is None
+
+
+async def test_large_body_is_handled_without_exception(tmp_path: Path) -> None:
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 12,
+        "method": "tools/call",
+        "params": {"name": "large", "arguments": {"data": "y" * 5000}},
+    }
+    async with client(make_app(tmp_path, max_capture_bytes=1_000_000)) as c:
+        response = await c.post("/mcp", json=payload)
+    assert response.status_code == 200
+    [record] = read_log_lines(tmp_path)
+    assert record["kind"] == "http"
+    assert record["http"]["status"] == 200
+    assert "log_error" not in record

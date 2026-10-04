@@ -20,37 +20,61 @@ class RawLogMiddleware:
         now: Callable[[], datetime],
         server_sha: str,
         mcp_path: str = "/mcp",
+        max_capture_bytes: int = 262_144,
     ) -> None:
         self.app = app
         self._log = log
         self._now = now
         self._server_sha = server_sha
         self._mcp_path = mcp_path
+        self._max_capture_bytes = max_capture_bytes
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
         ts_in = self._now()
-        log_bodies = scope["path"].rstrip("/") == self._mcp_path
+        is_post = scope.get("method") == "POST"
+        log_bodies = is_post and scope["path"].rstrip("/") == self._mcp_path
         request_body: list[bytes] = []
         response_body: list[bytes] = []
         response_headers: dict[str, str] = {}
         status = 0
+        request_bytes_total = 0
+        response_bytes_total = 0
+        request_truncated = False
+        response_truncated = False
 
         async def receive_logged() -> Message:
+            nonlocal request_bytes_total, request_truncated
             message = await receive()
             if log_bodies and message["type"] == "http.request":
-                request_body.append(message.get("body", b""))
+                chunk = message.get("body", b"")
+                request_bytes_total += len(chunk)
+                if (
+                    not request_truncated
+                    and len(b"".join(request_body)) + len(chunk) <= self._max_capture_bytes
+                ):
+                    request_body.append(chunk)
+                else:
+                    request_truncated = True
             return message
 
         async def send_logged(message: Message) -> None:
-            nonlocal status
+            nonlocal status, response_bytes_total, response_truncated
             if message["type"] == "http.response.start":
                 status = message["status"]
                 response_headers.update(_headers(message.get("headers", [])))
             elif log_bodies and message["type"] == "http.response.body":
-                response_body.append(message.get("body", b""))
+                chunk = message.get("body", b"")
+                response_bytes_total += len(chunk)
+                if (
+                    not response_truncated
+                    and len(b"".join(response_body)) + len(chunk) <= self._max_capture_bytes
+                ):
+                    response_body.append(chunk)
+                else:
+                    response_truncated = True
             await send(message)
 
         try:
@@ -58,8 +82,8 @@ class RawLogMiddleware:
         finally:
             ts_out = self._now()
             request_headers = _headers(scope.get("headers", []))
-            self._log.write(
-                {
+            try:
+                record = {
                     "kind": "http",
                     "ts_in": ts_in.isoformat(),
                     "ts_out": ts_out.isoformat(),
@@ -73,12 +97,38 @@ class RawLogMiddleware:
                         "mcp_session_id": request_headers.get("mcp-session-id")
                         or response_headers.get("mcp-session-id"),
                         "mcp_protocol_version": request_headers.get("mcp-protocol-version"),
+                        "request_bytes": request_bytes_total,
+                        "response_bytes": response_bytes_total,
+                        "request_truncated": request_truncated,
+                        "response_truncated": response_truncated,
                     },
-                    "rpc": _rpc(b"".join(request_body), b"".join(response_body))
+                    "rpc": _rpc(
+                        b"".join(request_body),
+                        b"".join(response_body),
+                        request_truncated,
+                        response_truncated,
+                    )
                     if log_bodies
                     else None,
                 }
-            )
+                self._log.write(record)
+            except Exception as exc:
+                try:
+                    minimal_record = {
+                        "kind": "http",
+                        "ts_in": ts_in.isoformat(),
+                        "ts_out": ts_out.isoformat(),
+                        "server_sha": self._server_sha,
+                        "http": {
+                            "method": scope.get("method"),
+                            "path": scope["path"],
+                            "status": status if status else 500,
+                        },
+                        "log_error": type(exc).__name__,
+                    }
+                    self._log.write(minimal_record)
+                except Exception:  # noqa: S110
+                    pass
 
 
 def _headers(raw: Any) -> dict[str, str]:
@@ -91,13 +141,17 @@ def _headers(raw: Any) -> dict[str, str]:
     return headers
 
 
-def _parse_body(raw: bytes) -> Any:
+def _parse_body(raw: bytes, truncated: bool = False) -> Any:
+    if truncated:
+        text = raw.decode("utf-8", errors="replace")
+        prefix = text[:4096]
+        return {"truncated": True, "prefix": prefix}
     if not raw:
         return None
     text = raw.decode("utf-8", errors="replace")
     try:
         return json.loads(text)
-    except json.JSONDecodeError:
+    except (ValueError, RecursionError):
         pass
     events: list[Any] = []
     for line in text.splitlines():
@@ -105,16 +159,21 @@ def _parse_body(raw: bytes) -> Any:
             data = line[len("data:") :].strip()
             try:
                 events.append(json.loads(data))
-            except json.JSONDecodeError:
+            except (ValueError, RecursionError):
                 events.append({"unparsed": data})
     if len(events) == 1:
         return events[0]
     return events or {"unparsed": text}
 
 
-def _rpc(request_raw: bytes, response_raw: bytes) -> dict[str, Any]:
-    request = _parse_body(request_raw)
-    response = _parse_body(response_raw)
+def _rpc(
+    request_raw: bytes,
+    response_raw: bytes,
+    request_truncated: bool = False,
+    response_truncated: bool = False,
+) -> dict[str, Any]:
+    request = _parse_body(request_raw, request_truncated)
+    response = _parse_body(response_raw, response_truncated)
     rpc: dict[str, Any] = {
         "id": None,
         "method": None,
@@ -125,7 +184,7 @@ def _rpc(request_raw: bytes, response_raw: bytes) -> dict[str, Any]:
         "error_raw": None,
         "request_raw": None,
     }
-    if isinstance(request, dict):
+    if isinstance(request, dict) and not request.get("truncated"):
         params = request.get("params")
         rpc["id"] = request.get("id")
         rpc["method"] = request.get("method")
@@ -137,7 +196,7 @@ def _rpc(request_raw: bytes, response_raw: bytes) -> dict[str, Any]:
                 rpc["client_info"] = params.get("clientInfo")
     else:
         rpc["request_raw"] = request
-    if isinstance(response, dict):
+    if isinstance(response, dict) and not response.get("truncated"):
         rpc["result_raw"] = response.get("result")
         rpc["error_raw"] = response.get("error")
     else:
