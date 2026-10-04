@@ -1,0 +1,82 @@
+import json
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
+from zoneinfo import ZoneInfo
+
+from tutor_spike.analysis.__main__ import render_report
+
+HEADER = (
+    "run_id,date,account,device,app_version,mode,model_shown,situation_card,start_local,"
+    "end_local,voice_stayed_active,continued_with_result,recording_file,transcript_file,"
+    "status,abort_reason,notes\n"
+)
+
+
+def write_sample_data(tmp_path: Path, end_session_schema: dict[str, Any]) -> None:
+    """One text run r01 (free) with transcript, annotation, schema and a valid payload."""
+    (tmp_path / "runs.csv").write_text(
+        HEADER + "r01,2026-10-06,free,laptop,web,text,Sonnet,3,15:00,15:15,na,na,,"
+        "transcripts/r01.md,ok,,\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "transcripts").mkdir()
+    (tmp_path / "transcripts" / "r01.md").write_text(
+        "U: Yesterday I go to the office.\nA: Oh no.\n", encoding="utf-8"
+    )
+    (tmp_path / "annotations").mkdir()
+    (tmp_path / "annotations" / "r01.json").write_text(
+        json.dumps([{"said": "I go to the office", "correct": "I went to the office"}]),
+        encoding="utf-8",
+    )
+    t = datetime(2026, 10, 6, 15, 1, tzinfo=UTC)
+    arguments = {
+        "session_id": "sid-1",
+        "user_turns": ["Yesterday I go to the office."],
+        "errors": [{"said": "I go to the office", "correct": "I went", "category": "grammar"}],
+        "chunks_used": [],
+        "task_result": "achieved",
+        "hints_given": 0,
+        "cefr_estimate": {"speaking": "B1+", "confidence": "low", "evidence": ["e"]},
+        "confidence_1_5": 3,
+    }
+    tools_list = {"tools": [{"name": "end_session", "inputSchema": end_session_schema}]}
+    lines = [
+        {
+            "kind": "http",
+            "ts_in": t.isoformat(),
+            "http": {"status": 200},
+            "rpc": {"method": "tools/list", "result_raw": tools_list},
+        },
+        {
+            "kind": "tool",
+            "ts": t.isoformat(),
+            "tool": "get_profile",
+            "tester": "author-free",
+            "session_id": "sid-1",
+        },
+        {
+            "kind": "http",
+            "ts_in": (t + timedelta(minutes=13)).isoformat(),
+            "http": {"status": 200},
+            "rpc": {
+                "method": "tools/call",
+                "tool": "end_session",
+                "params_raw": {"name": "end_session", "arguments": arguments},
+                "result_raw": {"structuredContent": {"accepted": True}},
+                "error_raw": None,
+            },
+        },
+    ]
+    (tmp_path / "calls-2026-10-06.jsonl").write_text(
+        "\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8"
+    )
+
+
+def test_report_renders_every_section(tmp_path: Path, end_session_schema: dict[str, Any]) -> None:
+    write_sample_data(tmp_path, end_session_schema)
+    report = render_report(tmp_path, ZoneInfo("UTC"))
+    for heading in ("## 01", "## 02", "## 03", "## 04"):
+        assert heading in report
+    assert "| r01 | 2026-10-06 | web / free / text | valid (final), 1 call(s), said 1/1 |" in report
+    assert "INCOMPLETE" in report
