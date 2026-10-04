@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     "fastmcp>=4.0.10,<5",
     "jsonschema>=4.23",
+    "tzdata>=2024.2",
     "uvicorn>=0.30",
 ]
 
