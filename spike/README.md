@@ -56,6 +56,7 @@ whose `resource` is exactly `https://<spike-host>/mcp`.
 - [ ] Restart the server; call `get_profile` again without reconnecting (persistence).
 - [ ] Open the Claude app on the phone, confirm the connector is listed for both accounts.
 - [ ] Delete the test lines: move `data/raw/` to `data/setup/` so runs start clean.
+      The server recreates `data/raw/` on the next request (JsonlLog/SessionRegistry mkdir on write).
 - [ ] Freeze: `git tag spike-instructions-v1` and record `git rev-parse --short HEAD` in the
       Setup of `docs/spike/01–04`.
 
@@ -70,7 +71,7 @@ whose `resource` is exactly `https://<spike-host>/mcp`.
 - New chat. Say only "Let's practise English for 15 minutes." Never mention tools or saving.
 - Use the next card from `deck.md`. Speak naturally. Phone timer: 15 minutes.
 - Close like a person: "OK, I have to go, thanks." No nudge.
-- Add the row to `data/raw/runs.csv` (header in `runs.template.csv`).
+- Add the row to `data/raw/runs.csv` (header in `runs.template.csv`); set the `transcript_file` column to `transcripts/<run_id>.md` (path relative to data/raw).
 - Copy the conversation from claude.ai web into `data/raw/transcripts/<run_id>.md`, one turn
   per block, user lines starting `U: ` and Claude lines starting `A: `; leave tool-call
   blocks out.
@@ -87,8 +88,10 @@ uv run python -m tutor_spike.analysis --data data/raw
 uv run python -m tutor_spike.redact --names "<your name>,<other names>"
 ```
 
+In `--names`, list every spelling of each name that might appear: with and without accents (e.g. "José,Jose"), nicknames, usernames/handles and joined forms (e.g. "jorgeperez"), because a name glued to other letters is deliberately not matched.
+
 Paste the tables into `docs/spike/01–04`, review the exported files for anything personal,
 then commit them.
 
 If rule 9.2's extension triggers, run the extension series with its own data directory
-(`SPIKE_DATA_DIR=data/raw-extension`) so the first 25 runs stay unchanged.
+(`SPIKE_DATA_DIR=data/raw-extension`) and use `--data data/raw-extension` for both analysis and redact commands, so the first 25 runs stay unchanged.
