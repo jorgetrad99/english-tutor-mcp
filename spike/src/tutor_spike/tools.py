@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any
 
 from fastmcp import Context, FastMCP
-from fastmcp.exceptions import ToolError
+from fastmcp.exceptions import ToolError, ValidationError
 from fastmcp.server.auth import AuthProvider
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from fastmcp.tools import Tool
@@ -23,9 +23,7 @@ class RetryRulesMiddleware(Middleware):
     async def on_call_tool(self, context: MiddlewareContext, call_next: Any) -> Any:
         try:
             return await call_next(context)
-        except ToolError:
-            raise
-        except Exception as exc:
+        except ValidationError as exc:
             if getattr(context.message, "name", None) != "end_session":
                 raise
             raise ToolError(f"Invalid end_session arguments: {exc}. {c.RETRY_RULES}") from exc

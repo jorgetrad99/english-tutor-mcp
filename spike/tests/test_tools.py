@@ -3,11 +3,14 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from conftest import make_server, read_log_lines
+from conftest import FIXED_NOW, make_server, read_log_lines
 from fastmcp import Client
 
 from tutor_spike.contract import INSTRUCTIONS
+from tutor_spike.eventlog import JsonlLog
+from tutor_spike.sessions import SessionRegistry
 from tutor_spike.testers import parse_testers
+from tutor_spike.tools import build_mcp
 
 
 def valid_args(session_id: str) -> dict[str, Any]:
@@ -39,6 +42,12 @@ def valid_args(session_id: str) -> dict[str, Any]:
 
 def text_of(result: Any) -> str:
     return " ".join(getattr(block, "text", "") for block in result.content)
+
+
+def assert_unknown_session_logged(directory: Path) -> None:
+    [line] = [x for x in read_log_lines(directory) if x.get("tool") == "end_session"]
+    assert line["accepted"] is False
+    assert line["reason"] == "unknown_session"
 
 
 async def start(client: Client) -> str:
@@ -76,6 +85,7 @@ async def test_unknown_session_id_is_rejected(tmp_path: Path) -> None:
         result = await client.call_tool("end_session", valid_args("nope"), raise_on_error=False)
     assert result.is_error
     assert "Call get_profile" in text_of(result)
+    assert_unknown_session_logged(tmp_path)
 
 
 async def test_session_id_of_another_tester_is_rejected(tmp_path: Path) -> None:
@@ -84,6 +94,8 @@ async def test_session_id_of_another_tester_is_rejected(tmp_path: Path) -> None:
     async with Client(make_server(tmp_path, tester="author-free")) as client:
         result = await client.call_tool("end_session", valid_args(session_id), raise_on_error=False)
     assert result.is_error
+    assert "Call get_profile" in text_of(result)
+    assert_unknown_session_logged(tmp_path)
 
 
 async def test_unknown_field_is_rejected_with_retry_rules(tmp_path: Path) -> None:
@@ -93,6 +105,34 @@ async def test_unknown_field_is_rejected_with_retry_rules(tmp_path: Path) -> Non
         result = await client.call_tool("end_session", args, raise_on_error=False)
     assert result.is_error
     assert "same session_id" in text_of(result)
+
+
+async def test_unknown_field_inside_nested_object_is_rejected(tmp_path: Path) -> None:
+    async with Client(make_server(tmp_path)) as client:
+        session_id = await start(client)
+        args = valid_args(session_id)
+        args["errors"][0]["foo"] = 1
+        result = await client.call_tool("end_session", args, raise_on_error=False)
+    assert result.is_error
+
+
+async def test_server_fault_is_not_reported_as_a_schema_error(tmp_path: Path) -> None:
+    class FailingRegistry(SessionRegistry):
+        def record_end(self, session_id: str) -> int:
+            raise OSError("disk full")
+
+    server = build_mcp(
+        registry=FailingRegistry(tmp_path / "sessions.jsonl", FIXED_NOW),
+        log=JsonlLog(tmp_path, FIXED_NOW),
+        resolve_tester=lambda: "author-free",
+        now=FIXED_NOW,
+        display_name="Learner",
+    )
+    async with Client(server) as client:
+        session_id = await start(client)
+        result = await client.call_tool("end_session", valid_args(session_id), raise_on_error=False)
+    assert result.is_error
+    assert "same session_id" not in text_of(result)
 
 
 async def test_out_of_enum_category_is_rejected(tmp_path: Path) -> None:
