@@ -14,7 +14,7 @@ class SessionRegistry:
     def __init__(self, path: Path, now: Callable[[], datetime]) -> None:
         self._path = path
         self._now = now
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._owners: dict[str, str] = {}
         self._ends: dict[str, int] = {}
         if path.exists():
@@ -32,9 +32,10 @@ class SessionRegistry:
 
     def record_end(self, session_id: str) -> int:
         """Record an accepted end_session; return how many were recorded before it."""
-        previous = self._ends.get(session_id, 0)
-        self._record({"event": "ended", "session_id": session_id})
-        return previous
+        with self._lock:
+            previous = self._ends.get(session_id, 0)
+            self._record({"event": "ended", "session_id": session_id})
+            return previous
 
     def _record(self, event: dict[str, str]) -> None:
         with self._lock:

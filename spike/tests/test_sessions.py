@@ -1,3 +1,4 @@
+import threading
 import uuid
 from pathlib import Path
 
@@ -41,3 +42,24 @@ def test_blank_lines_in_the_file_are_ignored(tmp_path: Path) -> None:
     session_id = registry.issue("author-free")
     path.write_text(path.read_text(encoding="utf-8") + "\n\n", encoding="utf-8")
     assert SessionRegistry(path, FIXED_NOW).owner(session_id) == "author-free"
+
+
+def test_record_end_is_thread_safe(tmp_path: Path) -> None:
+    registry = SessionRegistry(tmp_path / "sessions.jsonl", FIXED_NOW)
+    session_id = registry.issue("author-concurrent")
+
+    num_threads = 20
+    barrier = threading.Barrier(num_threads)
+    results: list[int] = []
+
+    def call_record_end() -> None:
+        barrier.wait()  # Ensure all threads start at the same time
+        results.append(registry.record_end(session_id))
+
+    threads = [threading.Thread(target=call_record_end) for _ in range(num_threads)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert sorted(results) == list(range(num_threads))
