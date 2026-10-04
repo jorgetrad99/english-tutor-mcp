@@ -224,3 +224,89 @@ def test_exp2_with_no_errors_reported_treats_said_as_not_applicable() -> None:
     outcomes = {r.run_id: outcome(r.run_id, said=(0, 0)) for r in runs}
     summary = summarize_exp2(runs, outcomes)
     assert (summary.said_total, summary.verdict) == (0, "PASS")
+
+
+def test_assign_records_inside_enclosed_run_not_just_started_before() -> None:
+    runs = [run("r01", 0, 60), run("r02", 10, 12, status="aborted")]
+    record = http_call(30, "end_session")
+    grouped = assign(runs, [record])
+    assert grouped == {"r01": [record], "r02": []}
+
+
+def test_exp1_exactly_4_of_5_passing_is_pass() -> None:
+    runs = [
+        run("v1", 0, 15, "voice", "free", "y", "y"),
+        run("v2", 20, 35, "voice", "free", "y", "y"),
+        run("v3", 40, 55, "voice", "free", "y", "y"),
+        run("v4", 60, 75, "voice", "free", "y", "y"),
+        run("v5", 80, 95, "voice", "pro", "y", "y"),
+    ]
+    outcomes = {r.run_id: outcome(r.run_id) for r in runs}
+    summary = summarize_exp1(runs, outcomes)
+    assert summary.verdict == "PASS"
+
+
+def test_exp1_tools_fired_false_with_y_y_does_not_pass() -> None:
+    runs = [
+        run("v1", 0, 15, "voice", "free", "y", "y"),
+        run("v2", 20, 35, "voice", "free", "y", "y"),
+        run("v3", 40, 55, "voice", "free", "y", "y"),
+        run("v4", 60, 75, "voice", "free", "y", "y"),
+        run("v5", 80, 95, "voice", "pro", "y", "y"),
+    ]
+    outcomes = {r.run_id: outcome(r.run_id, fired=i > 0) for i, r in enumerate(runs)}
+    summary = summarize_exp1(runs, outcomes)
+    assert summary.passes == 4
+
+
+def test_exp1_sixth_ok_voice_run_is_ignored() -> None:
+    runs = [
+        run("v1", 0, 15, "voice", "free", "y", "y"),
+        run("v2", 20, 35, "voice", "free", "y", "y"),
+        run("v3", 40, 55, "voice", "free", "y", "y"),
+        run("v4", 60, 75, "voice", "free", "y", "y"),
+        run("v5", 80, 95, "voice", "pro", "y", "y"),
+        run("v6", 100, 115, "voice", "pro", "y", "y"),
+    ]
+    outcomes = {r.run_id: outcome(r.run_id) for r in runs}
+    summary = summarize_exp1(runs, outcomes)
+    assert summary.total == 5
+
+
+def test_exp2_18_of_25_valid_is_fail_with_fallback() -> None:
+    runs = [run(f"r{i}", i * 20, i * 20 + 15) for i in range(25)]
+    outcomes = {r.run_id: outcome(r.run_id, valid_final=i < 18) for i, r in enumerate(runs)}
+    summary = summarize_exp2(runs, outcomes)
+    assert (summary.valid_final, summary.verdict) == (18, "FAIL_WITH_FALLBACK")
+
+
+def test_exp2_n_24_ok_runs_is_incomplete() -> None:
+    runs = [run(f"r{i}", i * 20, i * 20 + 15) for i in range(24)]
+    outcomes = {r.run_id: outcome(r.run_id) for r in runs}
+    summary = summarize_exp2(runs, outcomes)
+    assert (summary.n, summary.verdict) == (24, "INCOMPLETE")
+
+
+def test_exp2_aborted_runs_excluded_from_n() -> None:
+    runs = [run(f"r{i}", i * 20, i * 20 + 15) for i in range(25)]
+    runs += [run(f"a{i}", 500 + i * 20, 500 + i * 20 + 15, status="aborted") for i in range(2)]
+    outcomes = {r.run_id: outcome(r.run_id) for r in runs}
+    summary = summarize_exp2(runs, outcomes)
+    assert summary.n == 25
+
+
+def test_exp2_beyond_25th_ok_run_ignored() -> None:
+    runs = [run(f"r{i}", i * 20, i * 20 + 15) for i in range(30)]
+    outcomes = {r.run_id: outcome(r.run_id) for r in runs}
+    summary = summarize_exp2(runs, outcomes)
+    assert summary.n == 25
+
+
+def test_score_run_first_valid_last_invalid(end_session_schema: dict[str, Any]) -> None:
+    records = [
+        issued(1, "sid-1"),
+        http_call(1, "end_session", args(), result={"structuredContent": {}}),
+        http_call(14, "end_session", {**args(), "glossary": []}, error={"code": -32602}),
+    ]
+    result = score_run(run("r01", 0, 15), records, end_session_schema)
+    assert (result.valid_first, result.valid_final) == (True, False)

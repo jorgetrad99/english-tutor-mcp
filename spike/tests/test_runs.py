@@ -32,3 +32,31 @@ def test_run_crossing_midnight_ends_next_day(tmp_path: Path) -> None:
     )
     [run] = load_runs(path, ZoneInfo("UTC"))
     assert run.end == datetime(2026, 10, 7, 0, 6, tzinfo=UTC)
+
+
+def test_load_runs_raises_on_unparsable_start_local(tmp_path: Path) -> None:
+    path = tmp_path / "runs.csv"
+    path.write_text(
+        HEADER + "r03,2026-10-06,free,iphone,1.0,voice,Sonnet,3,not-a-time,09:17,y,y,"
+        "rec.mp4,transcripts/r03.md,ok,,\n",
+        encoding="utf-8",
+    )
+    try:
+        load_runs(path, ZoneInfo("UTC"))
+        raise AssertionError("Should raise ValueError")
+    except ValueError as e:
+        assert "r03" in str(e)
+
+
+def test_load_runs_raises_on_blank_end_local(tmp_path: Path) -> None:
+    path = tmp_path / "runs.csv"
+    path.write_text(
+        HEADER + "r04,2026-10-06,free,iphone,1.0,voice,Sonnet,3,09:00,,y,y,"
+        "rec.mp4,transcripts/r04.md,ok,,\n",
+        encoding="utf-8",
+    )
+    try:
+        load_runs(path, ZoneInfo("UTC"))
+        raise AssertionError("Should raise ValueError")
+    except ValueError as e:
+        assert "r04" in str(e)

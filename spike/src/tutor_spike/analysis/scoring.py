@@ -70,9 +70,9 @@ def assign(runs: list[Run], records: list[Record]) -> dict[str, list[Record]]:
     grouped: dict[str, list[Record]] = {r.run_id: [] for r in runs}
     for record in sorted(records, key=_ts):
         ts = _ts(record)
-        started = [r for r in ordered if r.start - GRACE_BEFORE <= ts]
-        if started and ts <= started[-1].end + GRACE_AFTER:
-            grouped[started[-1].run_id].append(record)
+        contained = [r for r in ordered if r.start - GRACE_BEFORE <= ts <= r.end + GRACE_AFTER]
+        if contained:
+            grouped[contained[-1].run_id].append(record)
     return grouped
 
 

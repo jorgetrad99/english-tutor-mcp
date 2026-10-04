@@ -31,14 +31,18 @@ def load_runs(path: Path, tz: ZoneInfo) -> list[Run]:
         rows = list(csv.DictReader(f))
     runs: list[Run] = []
     for row in rows:
-        day = date.fromisoformat(row["date"])
-        start = datetime.combine(day, time.fromisoformat(row["start_local"]), tz)
-        end = datetime.combine(day, time.fromisoformat(row["end_local"]), tz)
+        run_id = row["run_id"]
+        try:
+            day = date.fromisoformat(row["date"])
+            start = datetime.combine(day, time.fromisoformat(row["start_local"]), tz)
+            end = datetime.combine(day, time.fromisoformat(row["end_local"]), tz)
+        except ValueError as e:
+            raise ValueError(f"run {run_id}: bad start_local/end_local") from e
         if end < start:
             end += timedelta(days=1)
         runs.append(
             Run(
-                run_id=row["run_id"],
+                run_id=run_id,
                 date=row["date"],
                 account=row["account"],
                 mode=row["mode"],
