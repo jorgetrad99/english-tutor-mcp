@@ -81,6 +81,11 @@ async def test_app_serves_json_and_logs_initialize_and_tool_call(tmp_path: Path)
     assert http[0]["rpc"]["client_info"] == {"name": "test-client", "version": "0"}
     assert any((x["rpc"] or {}).get("tool") == "get_profile" for x in http)
     assert {x["server_sha"] for x in http} == {"test"}
+    [call] = [x for x in read_log_lines(tmp_path) if x["kind"] == "call"]
+    assert call["tool"] == "get_profile"
+    assert call["tester"] == "author-free"
+    assert call["mcp_session_id"] == session["mcp-session-id"]
+    assert call["rpc_id"] == "2"
 
 
 async def test_unauthenticated_call_points_to_metadata_whose_resource_is_the_connector_url(

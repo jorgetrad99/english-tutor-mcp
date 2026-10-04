@@ -1,6 +1,6 @@
 """Spike MCP contract: section 7 end_session schema, descriptions, response_rules (spec §3)."""
 
-from typing import Annotated, Literal
+from typing import Annotated, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -8,6 +8,14 @@ Category = Literal["grammar", "lexis", "word_order", "register", "other"]
 TaskResult = Literal["achieved", "partial", "not_achieved"]
 Speaking = Literal["B1", "B1+", "B2", "B2+", "C1"]
 Confidence = Literal["low", "medium", "high"]
+
+# Allowed values quoted in retry errors, keyed by the field name that ends the error location.
+ENUM_VALUES: dict[str, tuple[str, ...]] = {
+    "category": get_args(Category),
+    "task_result": get_args(TaskResult),
+    "speaking": get_args(Speaking),
+    "confidence": get_args(Confidence),
+}
 
 
 class ErrorItem(BaseModel):
@@ -71,7 +79,7 @@ TaskResultField = Annotated[
 ]
 HintsGiven = Annotated[
     int,
-    Field(title="Hints given", description="How many hints you gave in the scenario.", ge=0),
+    Field(title="Hints given", description="How many hints you gave in the scenario.", ge=0, le=3),
 ]
 CefrField = Annotated[
     CefrEstimate,
@@ -83,7 +91,10 @@ Confidence15 = Annotated[
     int,
     Field(
         title="Learner confidence 1-5",
-        description="How confident the learner sounded: 1 very unsure, 5 very confident.",
+        description=(
+            "The learner's own rating of how confident they felt today, 1 (very unsure) to 5 "
+            "(very confident). Ask them during feedback if they have not said."
+        ),
         ge=1,
         le=5,
     ),
