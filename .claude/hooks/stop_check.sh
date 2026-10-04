@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Stop: if Python files changed since the last commit, keep working until check-fast is green.
 set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
 input=$(cat)
 active=$(jq -r '.stop_hook_active // false' <<<"$input" | tr -d '\r')  # native jq.exe emits CRLF

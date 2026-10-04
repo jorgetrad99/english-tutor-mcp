@@ -2,6 +2,7 @@
 # PreToolUse(Edit|Write|MultiEdit): block edits to .env*, docs/requirements.md
 # and existing alembic/versions/* files. Fails closed if jq is missing.
 set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
 block() { echo "Blocked by protect_paths: $1" >&2; exit 2; }
 command -v jq >/dev/null || block "jq not found, cannot inspect the edit."

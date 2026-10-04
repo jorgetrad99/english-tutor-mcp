@@ -2,6 +2,7 @@
 # PostToolUse(Edit|Write|MultiEdit): format + autofix the edited .py file only.
 # PostToolUse cannot fail the tool call; exit 2 only shows remaining lint errors to Claude.
 set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
 file=$(jq -r '.tool_input.file_path // empty' | tr -d '\r')  # native jq.exe emits CRLF
 [[ "$file" == *.py && -f "$file" ]] || exit 0

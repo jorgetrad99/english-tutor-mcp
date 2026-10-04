@@ -2,6 +2,7 @@
 # PreToolUse(Bash|PowerShell): block force-push, hard reset, rm -rf outside the repo,
 # compose volume deletion and reading .env files. Fails closed if jq is missing.
 set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
 block() { echo "Blocked by guard_bash: $1" >&2; exit 2; }
 command -v jq >/dev/null || block "jq not found, cannot inspect the command."
