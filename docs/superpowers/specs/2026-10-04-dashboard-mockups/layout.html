@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="es">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Brainstorm mockup (2026-10-04), reference only; not product code. Spec: ../2026-10-04-dashboard-design.md -->
+<title>Tutor Dashboard Layout</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=Baloo+2:wght@600;700;800&display=swap">
+<style>
+/* Layout: quiet page chrome; two layout options, each shown as a desktop frame next to a phone frame, in direction C's fixed light palette. */
+:root {
+  --bg: #f3f4f7; --fg: #1b1e27; --muted: #5d6476; --line: #d9dce4; --surface: #ffffff; --focus: #2f7d57;
+  --chrome: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --display: "Baloo 2", system-ui, sans-serif;
+  /* direction C, fixed */
+  --mint: #e3f4ea; --deep: #11402c; --coral: #ff6f4f; --sun: #ffcc33; --leaf: #2f9e66; --paper: #ffffff; --soft: #3f6f58; --hair: #c7e3d3;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #12141a; --fg: #e8eaf0; --muted: #9aa1b2; --line: #2a2e39; --surface: #1a1d25; --focus: #7fd1a6; color-scheme: dark } }
+:root[data-theme="dark"] { --bg: #12141a; --fg: #e8eaf0; --muted: #9aa1b2; --line: #2a2e39; --surface: #1a1d25; --focus: #7fd1a6; color-scheme: dark }
+
+body { background: var(--bg); color: var(--fg); font-family: var(--chrome); }
+.wrap { max-width: 1280px; margin: 0 auto; padding-inline: 16px; padding-block: 28px 56px; display: grid; gap: 40px; }
+header.top { display: grid; gap: 6px; max-width: 72ch; }
+.eyebrow { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+h1 { font-size: clamp(22px, 3vw, 30px); margin: 0; text-wrap: balance; }
+.lede { color: var(--muted); margin: 0; line-height: 1.55; }
+
+.opt { display: grid; gap: 14px; }
+.opt-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.letter { font-weight: 700; font-size: 13px; border: 1.5px solid var(--fg); border-radius: 50%; width: 24px; height: 24px; display: grid; place-items: center; flex: none; }
+.opt-head h2 { margin: 0; font-size: 18px; }
+.opt-head p { margin: 0; color: var(--muted); font-size: 14px; flex-basis: 100%; line-height: 1.5; max-width: 80ch; }
+.frames { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; align-items: start; }
+@media (max-width: 900px) { .frames { grid-template-columns: minmax(0, 1fr); } .phone { justify-self: center; } }
+.cap { font-size: 12px; color: var(--muted); margin-top: 6px; }
+.pick { justify-self: start; font: 600 13px var(--chrome); color: var(--fg); background: var(--surface); border: 1.5px solid var(--line); border-radius: 999px; padding: 7px 14px; cursor: pointer; }
+.pick:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.opt.chosen .pick { border-color: var(--focus); color: var(--focus); }
+.opt.chosen .app { outline: 3px solid var(--focus); outline-offset: 3px; }
+
+/* ---------- app frames (direction C) ---------- */
+.app { background: var(--mint); color: var(--deep); border-radius: 14px; overflow: hidden; font-size: 13px; line-height: 1.4; min-width: 0; }
+.desk { display: grid; }
+.desk.side { grid-template-columns: 168px minmax(0, 1fr); }
+.desk-scroll { overflow-x: auto; }
+.desk-inner { min-width: 720px; }
+.phone { width: 300px; max-width: 100%; border: 8px solid #1d2a24; border-radius: 34px; }
+.phone .app { border-radius: 26px; }
+
+.brand { font-family: var(--display); font-weight: 800; font-size: 18px; color: var(--deep); display: flex; align-items: center; gap: 8px; }
+.brand i { width: 22px; height: 22px; border-radius: 50%; background: radial-gradient(circle at 50% 70%, var(--sun) 0 35%, var(--coral) 36% 100%); }
+.sidebar { background: var(--deep); color: #dff3e8; padding: 16px 12px; display: grid; gap: 4px; align-content: start; }
+.sidebar .brand { color: #fff; margin-bottom: 12px; }
+.sidebar a, .topnav a, .tabbar a { color: inherit; text-decoration: none; }
+.sidebar a { padding: 7px 10px; border-radius: 10px; font-weight: 600; }
+.sidebar a.on { background: #1e5b40; color: #fff; }
+.sidebar .plan { margin-top: 16px; font-size: 12px; background: #1e5b40; border-radius: 10px; padding: 8px 10px; display: grid; gap: 6px; }
+.sidebar .plan b { color: var(--sun); }
+.bar { height: 6px; border-radius: 3px; background: #2c7253; overflow: hidden; }
+.bar i { display: block; height: 100%; width: 66%; background: var(--sun); }
+.topnav { display: flex; align-items: center; gap: 18px; padding: 12px 18px; background: var(--paper); border-bottom: 2px solid var(--hair); flex-wrap: wrap; }
+.topnav nav { display: flex; gap: 14px; font-weight: 600; color: var(--soft); flex-wrap: wrap; }
+.topnav nav a.on { color: var(--deep); box-shadow: inset 0 -3px 0 var(--coral); padding-bottom: 2px; }
+.topnav .right { margin-left: auto; display: flex; gap: 10px; align-items: center; font-size: 12px; color: var(--soft); }
+.chip { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 2px 10px; font-weight: 700; font-size: 12px; background: var(--paper); border: 2px solid var(--deep); }
+.chip.free { background: var(--sun); }
+
+.main { padding: 18px; display: grid; gap: 14px; align-content: start; min-width: 0; }
+.hello { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.hello h3 { font-family: var(--display); font-weight: 800; font-size: 24px; margin: 0; line-height: 1.1; }
+.streak { display: inline-flex; gap: 8px; align-items: center; background: var(--deep); color: #fff; border-radius: 999px; padding: 3px 12px 3px 5px; font-weight: 700; font-size: 13px; animation: bob 2.4s ease-in-out infinite; }
+.streak .dot { width: 22px; height: 22px; border-radius: 50%; background: radial-gradient(circle at 50% 70%, var(--sun) 0 35%, var(--coral) 36% 100%); }
+@keyframes bob { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-3px) } }
+
+.card { background: var(--paper); border-radius: 14px; padding: 14px; display: grid; gap: 8px; min-width: 0; }
+.card h4 { margin: 0; font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--soft); }
+.today { border: 2px solid var(--deep); box-shadow: 4px 4px 0 var(--deep); }
+.today .what { font-family: var(--display); font-weight: 700; font-size: 19px; line-height: 1.15; }
+.today .meta { display: flex; gap: 6px; flex-wrap: wrap; }
+.tag { font-size: 11px; font-weight: 600; background: var(--mint); border-radius: 6px; padding: 1px 7px; }
+.say { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: var(--deep); color: #fff; border-radius: 10px; padding: 8px 10px; }
+.say code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; color: var(--sun); font-size: 12.5px; }
+.say button { margin-left: auto; font: 700 11px var(--chrome); background: var(--sun); color: var(--deep); border: 0; border-radius: 6px; padding: 4px 8px; cursor: pointer; }
+.prep { font-size: 12px; color: var(--soft); }
+.prep code { font-family: ui-monospace, Consolas, monospace; color: var(--deep); }
+
+.trail svg { width: 100%; height: auto; display: block; }
+.trail .road { fill: none; stroke: var(--mint); stroke-width: 12; stroke-linecap: round; }
+.trail .dash { fill: none; stroke: var(--leaf); stroke-width: 3; stroke-dasharray: 2 9; stroke-linecap: round; animation: march 1.2s linear infinite; }
+@keyframes march { to { stroke-dashoffset: -11 } }
+.trail .done { fill: var(--leaf); stroke: #fff; stroke-width: 3; }
+.trail .now { fill: var(--coral); stroke: #fff; stroke-width: 3; transform-box: fill-box; transform-origin: center; animation: beat 1.4s ease-in-out infinite; }
+.trail .next { fill: #fff; stroke: var(--leaf); stroke-width: 2.5; stroke-dasharray: 4 3; }
+@keyframes beat { 0%,100% { transform: scale(1) } 50% { transform: scale(1.22) } }
+.trail text { font-family: var(--chrome); font-weight: 600; font-size: 11px; fill: var(--deep); }
+
+.kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.kpi { display: grid; gap: 2px; }
+.kpi .n { font-family: var(--display); font-weight: 800; font-size: 26px; line-height: 1; font-variant-numeric: tabular-nums; }
+.kpi .d { font-size: 11px; font-weight: 700; }
+.up { color: var(--leaf); } .down { color: var(--leaf); }
+.kpi .l { font-size: 11px; color: var(--soft); }
+.todo { display: grid; gap: 6px; }
+.todo div { display: flex; align-items: center; gap: 8px; }
+.todo b { font-family: var(--display); font-size: 18px; min-width: 18px; }
+.last { font-size: 12.5px; }
+.last .ok { color: var(--leaf); font-weight: 700; }
+.limit { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; background: #fff4cc; border: 2px dashed #d9a400; border-radius: 12px; padding: 8px 12px; font-size: 12.5px; }
+.limit a { margin-left: auto; font-weight: 700; color: var(--deep); }
+.stamps { display: flex; flex-wrap: wrap; gap: 6px; }
+.stamp { background: #fff; border: 2px solid var(--deep); border-radius: 8px; padding: 0 8px; font-weight: 700; font-size: 12px; box-shadow: 2px 2px 0 var(--deep); }
+.stamp.used { background: var(--sun); }
+
+.g2 { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 12px; }
+.g3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+
+/* phone */
+.ph-top { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px 4px; }
+.ph-main { padding: 8px 12px 12px; display: grid; gap: 10px; }
+.ph-main .hello h3 { font-size: 20px; }
+.ph-main .today .what { font-size: 17px; }
+.ph-main .kpi .n { font-size: 22px; }
+.tabbar { display: grid; grid-template-columns: repeat(5, 1fr); background: var(--paper); border-top: 2px solid var(--hair); padding: 6px 4px 10px; text-align: center; font-size: 10px; font-weight: 700; color: var(--soft); }
+.tabbar a { display: grid; gap: 2px; justify-items: center; }
+.tabbar a i { width: 18px; height: 18px; border-radius: 6px; border: 2px solid currentColor; }
+.tabbar a.on { color: var(--deep); }
+.tabbar a.on i { background: var(--coral); border-color: var(--coral); }
+.drawer { display: grid; gap: 4px; padding: 10px 14px 14px; background: var(--deep); color: #dff3e8; font-weight: 600; }
+.drawer span { padding: 4px 0; }
+.drawer span.on { color: var(--sun); }
+
+@media (prefers-reduced-motion: reduce) { .app *, .app *::before, .app *::after { animation: none !important; } }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <span class="eyebrow">English Tutor · dashboard brainstorm · screen 2</span>
+    <h1>How should the dashboard be organised?</h1>
+    <p class="lede">Two layouts for <b>Inicio</b>, the page you see after logging in. Both use direction C and show a Free user on day 4 of the week. All data is example data. Reply in the terminal; clicking here only highlights the card on your screen.</p>
+  </header>
+
+  <!-- OPTION A -->
+  <section class="opt" id="opt-a">
+    <div class="opt-head"><span class="letter">A</span><h2>Side menu, everything visible</h2>
+      <p>A permanent green side menu with the plan usage meter. Inicio is a dashboard grid: today, the week trail, numbers, pending items and the last session all fit on one screen. Phones get a menu drawer. Best for people who check in and scan.</p></div>
+    <div class="frames">
+      <div>
+        <div class="app desk-scroll"><div class="desk side desk-inner">
+          <aside class="sidebar">
+            <div class="brand"><i></i>Tutor</div>
+            <a class="on" href="#">Inicio</a><a href="#">Plan</a><a href="#">Progreso</a><a href="#">Sesiones</a><a href="#">Glosario</a><a href="#">Reportes</a><a href="#">Cuenta</a>
+            <div class="plan"><span>Plan <b>Gratis</b></span><span>2 de 3 sesiones esta semana</span><span class="bar"><i></i></span></div>
+          </aside>
+          <div class="main">
+            <div class="hello"><h3>Hola, Ana</h3><span class="streak"><span class="dot"></span>Racha: 6 días</span></div>
+            <div class="g2">
+              <div class="card today">
+                <h4>Hoy · jueves</h4>
+                <div class="what">Dar una actualización de estado en el standup</div>
+                <div class="meta"><span class="tag">Hablar</span><span class="tag">IT</span><span class="tag">Semana 2 · 4 de 5</span></div>
+                <div class="say"><span>En Claude di:</span><code>start my lesson</code><button type="button">Copiar</button></div>
+                <div class="prep">¿Algo mañana? Di <code>prepare me for tomorrow's demo</code></div>
+              </div>
+              <div class="card trail">
+                <h4>Tu semana</h4>
+                <svg viewBox="0 0 260 110" role="img" aria-label="3 sesiones hechas, hoy, 1 pendiente">
+                  <path class="road" d="M15 90 Q45 50 75 45 T135 75 T195 35 T245 20"/>
+                  <path class="dash" d="M15 90 Q45 50 75 45 T135 75 T195 35 T245 20"/>
+                  <circle class="done" cx="15" cy="90" r="8"/><circle class="done" cx="75" cy="45" r="8"/><circle class="done" cx="135" cy="75" r="8"/>
+                  <circle class="now" cx="195" cy="35" r="10"/><circle class="next" cx="245" cy="20" r="8"/>
+                  <text x="5" y="108">lun</text><text x="64" y="30">mar</text><text x="124" y="100">mié</text><text x="183" y="62">hoy</text><text x="232" y="44">sáb</text>
+                </svg>
+              </div>
+            </div>
+            <div class="g3">
+              <div class="card"><h4>Esta semana</h4>
+                <div class="kpis">
+                  <div class="kpi"><span class="n">27</span><span class="d up">+3</span><span class="l">palabras/min</span></div>
+                  <div class="kpi"><span class="n">3,1</span><span class="d down">−0,6</span><span class="l">errores/100</span></div>
+                  <div class="kpi"><span class="n">42%</span><span class="d up">meta 40%</span><span class="l">frases usadas</span></div>
+                </div>
+              </div>
+              <div class="card"><h4>Pendiente</h4>
+                <div class="todo"><div><b>5</b>frases para repasar</div><div><b>2</b>por confirmar en tu próxima sesión</div></div>
+              </div>
+              <div class="card"><h4>Última sesión</h4>
+                <div class="last">Ayer · voz · 18 min<br>Pedir cambios en un code review<br><span class="ok">Logrado</span> · 2 errores corregidos</div>
+              </div>
+            </div>
+            <div class="card"><h4>Frases nuevas de la semana</h4>
+              <div class="stamps"><span class="stamp used">trade-off</span><span class="stamp used">follow up on</span><span class="stamp">ballpark figure</span><span class="stamp">push back</span><span class="stamp">heads-up</span></div>
+            </div>
+          </div>
+        </div></div>
+        <div class="cap">Desktop, 1280 px wide (scrolls sideways here on small screens)</div>
+      </div>
+      <div class="phone"><div class="app">
+        <div class="ph-top"><div class="brand"><i></i>Tutor</div><span class="chip free">Menú ☰</span></div>
+        <div class="drawer"><span class="on">Inicio</span><span>Plan</span><span>Progreso</span><span>Sesiones · Glosario · Reportes · Cuenta</span></div>
+        <div class="ph-main">
+          <div class="hello"><h3>Hola, Ana</h3><span class="streak"><span class="dot"></span>6 días</span></div>
+          <div class="card today"><h4>Hoy · jueves</h4><div class="what">Actualización de estado en el standup</div><div class="say"><code>start my lesson</code><button type="button">Copiar</button></div></div>
+          <div class="card"><h4>Esta semana</h4><div class="kpis"><div class="kpi"><span class="n">27</span><span class="l">pal/min</span></div><div class="kpi"><span class="n">3,1</span><span class="l">err/100</span></div><div class="kpi"><span class="n">42%</span><span class="l">frases</span></div></div></div>
+        </div>
+      </div><div class="cap">Phone: the menu opens as a drawer (shown open)</div></div>
+    </div>
+    <button class="pick" type="button">Prefer A</button>
+  </section>
+
+  <!-- OPTION B -->
+  <section class="opt" id="opt-b">
+    <div class="opt-head"><span class="letter">B</span><h2>Top menu, today first</h2>
+      <p>A light top menu with the plan chip on the right. Inicio is one column that reads like a story: today, then the week trail across the full width, then your numbers. Phones get a bottom tab bar with the five main pages; Reportes and Cuenta sit behind your profile. Best for people who arrive to start a lesson.</p></div>
+    <div class="frames">
+      <div>
+        <div class="app desk-scroll"><div class="desk desk-inner">
+          <div class="topnav">
+            <div class="brand"><i></i>Tutor</div>
+            <nav><a class="on" href="#">Inicio</a><a href="#">Plan</a><a href="#">Progreso</a><a href="#">Sesiones</a><a href="#">Glosario</a><a href="#">Reportes</a></nav>
+            <div class="right"><span class="chip free">Gratis · 2/3</span><span>ES | EN</span><span class="chip">Ana</span></div>
+          </div>
+          <div class="main" style="max-width: 860px; margin: 0 auto; width: 100%;">
+            <div class="hello"><h3>Hola, Ana. Hoy toca el standup.</h3><span class="streak"><span class="dot"></span>Racha: 6 días</span></div>
+            <div class="card today">
+              <h4>Hoy · jueves · semana 2, sesión 4 de 5</h4>
+              <div class="what">Dar una actualización de estado en el standup</div>
+              <div class="meta"><span class="tag">Hablar</span><span class="tag">IT</span><span class="tag">Escenario: el deploy se retrasó un día</span></div>
+              <div class="say"><span>Abre Claude y di:</span><code>start my lesson</code><button type="button">Copiar</button></div>
+              <div class="prep">¿Tienes algo mañana? Di <code>prepare me for tomorrow's demo</code> y tu tutor arma la práctica.</div>
+            </div>
+            <div class="card trail">
+              <h4>Tu semana</h4>
+              <svg viewBox="0 0 520 90" role="img" aria-label="3 sesiones hechas, hoy, 1 pendiente">
+                <path class="road" d="M20 70 Q80 20 140 40 T260 50 T380 30 T500 25"/>
+                <path class="dash" d="M20 70 Q80 20 140 40 T260 50 T380 30 T500 25"/>
+                <circle class="done" cx="20" cy="70" r="8"/><circle class="done" cx="140" cy="40" r="8"/><circle class="done" cx="260" cy="50" r="8"/>
+                <circle class="now" cx="380" cy="30" r="10"/><circle class="next" cx="500" cy="25" r="8"/>
+                <text x="8" y="88">lun · logrado</text><text x="118" y="70">mar · logrado</text><text x="236" y="78">mié · parcial</text><text x="368" y="60">hoy</text><text x="486" y="52">sáb</text>
+              </svg>
+            </div>
+            <div class="g3">
+              <div class="card"><h4>Palabras por minuto</h4><div class="kpi"><span class="n">27</span><span class="d up">+3 · meta en voz 25</span></div></div>
+              <div class="card"><h4>Errores cada 100</h4><div class="kpi"><span class="n">3,1</span><span class="d down">−0,6 vs semana pasada</span></div></div>
+              <div class="card"><h4>Pendiente</h4><div class="todo"><div><b>5</b>para repasar</div><div><b>2</b>por confirmar</div></div></div>
+            </div>
+            <div class="limit">Te queda 1 sesión gratis esta semana. Con el plan anual no hay límite.<a href="#">Ver planes</a></div>
+          </div>
+        </div></div>
+        <div class="cap">Desktop, 1280 px wide (scrolls sideways here on small screens)</div>
+      </div>
+      <div class="phone"><div class="app">
+        <div class="ph-top"><div class="brand"><i></i>Tutor</div><span class="chip free">2/3</span></div>
+        <div class="ph-main">
+          <div class="hello"><h3>Hoy toca el standup</h3><span class="streak"><span class="dot"></span>6 días</span></div>
+          <div class="card today"><h4>Sesión 4 de 5</h4><div class="what">Actualización de estado en el standup</div><div class="say"><code>start my lesson</code><button type="button">Copiar</button></div></div>
+          <div class="card trail"><svg viewBox="0 0 260 70" role="img" aria-label="Semana: 3 hechas, hoy, 1 pendiente"><path class="road" d="M15 55 Q45 15 75 30 T135 40 T195 20 T245 18"/><path class="dash" d="M15 55 Q45 15 75 30 T135 40 T195 20 T245 18"/><circle class="done" cx="15" cy="55" r="7"/><circle class="done" cx="75" cy="30" r="7"/><circle class="done" cx="135" cy="40" r="7"/><circle class="now" cx="195" cy="20" r="9"/><circle class="next" cx="245" cy="18" r="7"/></svg></div>
+          <div class="card"><div class="kpis"><div class="kpi"><span class="n">27</span><span class="l">pal/min</span></div><div class="kpi"><span class="n">3,1</span><span class="l">err/100</span></div><div class="kpi"><span class="n">5</span><span class="l">repasar</span></div></div></div>
+        </div>
+        <nav class="tabbar"><a class="on" href="#"><i></i>Inicio</a><a href="#"><i></i>Plan</a><a href="#"><i></i>Progreso</a><a href="#"><i></i>Sesiones</a><a href="#"><i></i>Glosario</a></nav>
+      </div><div class="cap">Phone: bottom tab bar, always visible</div></div>
+    </div>
+    <button class="pick" type="button">Prefer B</button>
+  </section>
+</div>
+
+<script>
+  document.querySelectorAll('.pick').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var opt = btn.closest('.opt');
+      document.querySelectorAll('.opt').forEach(function (o) { if (o !== opt) o.classList.remove('chosen'); });
+      opt.classList.toggle('chosen');
+    });
+  });
+  document.querySelectorAll('.say button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var code = b.parentElement.querySelector('code').textContent;
+      var done = function () { b.textContent = 'Copiado'; setTimeout(function () { b.textContent = 'Copiar'; }, 1500); };
+      if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(code).then(done, function () {}); }
+    });
+  });
+</script>
