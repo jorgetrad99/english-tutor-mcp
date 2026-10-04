@@ -1,0 +1,37 @@
+[project]
+name = "tutor-spike"
+version = "0.0.0"
+description = "Throwaway week-0 spike (docs/superpowers/specs/2026-10-03-spike-design.md)."
+requires-python = ">=3.12"
+dependencies = [
+    "fastmcp>=4.0.10,<5",
+    "jsonschema>=4.23",
+    "tzdata>=2024.2",
+    "uvicorn>=0.30",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.24",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.22,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+extend = "../pyproject.toml"
+
+[tool.ruff.lint]
+# The frozen instructions use the spec's en dashes; tests use curly quotes and full-width text.
+ignore = ["RUF001"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
