@@ -29,6 +29,7 @@ from tutor_spike.analysis.scoring import (
     summarize_exp1,
     summarize_exp2,
     unassigned_records,
+    uncounted_too_large,
     voice_pass,
 )
 
@@ -53,8 +54,6 @@ def _fidelity_exclusion(run: Run, outcome: RunOutcome, transcript: Path | None) 
     """Why a run is left out of section 03, or None when it is measured."""
     if run.status != "ok":
         return "aborted"
-    if run.mode != "text":
-        return "not text"
     if not outcome.valid_final:
         return "invalid final"
     if transcript is None or not transcript.exists():
@@ -62,13 +61,15 @@ def _fidelity_exclusion(run: Run, outcome: RunOutcome, transcript: Path | None) 
     return None
 
 
-def _unassigned_section(unassigned: list[Record]) -> list[str]:
+def _unassigned_section(unassigned: list[Record], too_large: list[Record]) -> list[str]:
     http = [r for r in unassigned if r.get("kind") == "http"]
     calls = [r for r in unassigned if r.get("kind") == "call"]
     out = ["## Unassigned records", ""]
     for label, items in (("tools/call HTTP lines", http), ('kind:"call" records', calls)):
         stamps = ", ".join(str(r.get("ts_in") or r.get("ts")) for r in items) or "none"
         out.append(f"- {label}: {len(items)} ({stamps})")
+    stamps = ", ".join(str(r.get("ts_in") or r.get("ts")) for r in too_large) or "none"
+    out.append(f"- Uncounted 413 requests: {len(too_large)} ({stamps})")
     return [*out, ""]
 
 
@@ -175,7 +176,12 @@ def render_report(data_dir: Path, tz: ZoneInfo) -> str:
             f"{stats.sd_half_steps:.2f} | {stats.within_one_of_mode:.0%} | "
             f"{stats.full_level_jumps} |"
         )
-    out += ["", *_unassigned_section(unassigned_records(records, grouped))]
+    out += [
+        "",
+        *_unassigned_section(
+            unassigned_records(records, grouped), uncounted_too_large(runs, records, grouped)
+        ),
+    ]
     return "\n".join(out)
 
 

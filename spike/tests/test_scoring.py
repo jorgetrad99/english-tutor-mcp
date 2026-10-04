@@ -10,6 +10,7 @@ from tutor_spike.analysis.scoring import (
     summarize_exp1,
     summarize_exp2,
     unassigned_records,
+    uncounted_too_large,
 )
 
 T0 = datetime(2026, 10, 6, 15, 0, tzinfo=UTC)
@@ -368,11 +369,11 @@ def profile(minutes: float, session_id: str, mcp: str = "m1") -> list[dict[str, 
     ]
 
 
-def too_large(minutes: float) -> dict[str, Any]:
+def too_large(minutes: float, mcp: str | None = "m1") -> dict[str, Any]:
     return {
         "kind": "http",
         "ts_in": at(minutes),
-        "http": {"method": "POST", "path": "/mcp", "status": 413, "mcp_session_id": "m3"},
+        "http": {"method": "POST", "path": "/mcp", "status": 413, "mcp_session_id": mcp},
         "rpc": {"id": None, "method": None, "tool": None, "params_raw": None},
     }
 
@@ -431,3 +432,37 @@ def test_end_session_after_the_window_goes_to_the_run_that_issued_its_session(
     assert (outcomes["r01"].end_calls, outcomes["r01"].valid_final) == (1, True)
     assert outcomes["r02"].end_calls == 0
     assert unassigned_records(records, assign(runs, records)) == []
+
+
+def test_stranger_oversized_post_without_session_id_does_not_invalidate_the_run(
+    end_session_schema: dict[str, Any],
+) -> None:
+    records = [*profile(1, "sid-1"), *end_call(14, args()), too_large(14.5, mcp=None)]
+    result = scored([run("r01", 0, 15)], records, end_session_schema)["r01"]
+    assert (result.end_calls, result.valid_final) == (1, True)
+
+
+def test_oversized_post_with_another_testers_mcp_session_does_not_count(
+    end_session_schema: dict[str, Any],
+) -> None:
+    other = call(5, "get_profile", "author-pro", "m7", 1)
+    records = [*profile(1, "sid-1"), *end_call(14, args()), other, too_large(14.5, mcp="m7")]
+    result = scored([run("r01", 0, 15)], records, end_session_schema)["r01"]
+    assert (result.end_calls, result.valid_final) == (1, True)
+
+
+def test_oversized_post_with_the_run_testers_mcp_session_is_a_failed_final_attempt(
+    end_session_schema: dict[str, Any],
+) -> None:
+    records = [*profile(1, "sid-1"), *end_call(14, args()), too_large(14.5, mcp="m1")]
+    result = scored([run("r01", 0, 15)], records, end_session_schema)["r01"]
+    assert (result.end_calls, result.valid_final) == (2, False)
+
+
+def test_uncounted_too_large_lists_only_oversized_posts_no_run_counted(
+    end_session_schema: dict[str, Any],
+) -> None:
+    stranger, own = too_large(14.5, mcp=None), too_large(14.6, mcp="m1")
+    runs = [run("r01", 0, 15)]
+    records = [*profile(1, "sid-1"), *end_call(14, args()), stranger, own]
+    assert uncounted_too_large(runs, records, assign(runs, records)) == [stranger]
