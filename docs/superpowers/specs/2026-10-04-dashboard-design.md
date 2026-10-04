@@ -1,6 +1,6 @@
 # Dashboard design: installable web dashboard with a motion layer
 
-Status: draft, awaiting author approval. **Parked:** nothing here is built before the gate decision on 2026-11-30; implementation starts 2027-01-05 only if the gate passes, and scope is re-estimated at the gate (section 16).
+Status: approved 2026-10-04; amended 2026-10-04 (see Amendments). **Parked:** nothing here is built before the gate decision on 2026-11-30; implementation starts 2027-01-05 only if the gate passes, and scope is re-estimated at the gate (section 16).
 Date: 2026-10-04
 Scope: requirements section 1 ("minimal web dashboard: login, plan, progress, glossary, billing"), section 4 (dashboard stack), section 5 (dashboard session, export, deletion), section 10 (glossary table), section 11 (metrics, weekly report, monthly checkpoint), section 13 (billing), section 14 (accessibility, localization, admin settings) and the "Dashboard, billing, weekly report" row of section 16. The weekly email, the worker jobs and the plan engine have their own specs.
 
@@ -25,7 +25,7 @@ The dashboard is done when:
 | --- | --- |
 | Timing | Spec and plan now; build 2027-01-05 → 2027-01-30, only after the gate passes |
 | Stack | FastAPI + Jinja2 + HTMX (section 4, unchanged). No SPA, no JavaScript build step, no Node |
-| Motion | Plain CSS (keyframes, SVG stroke drawing), the browser's View Transitions, and Motion (motion.dev) for springs and counters. Remotion rejected: it renders videos, not interactive pages. GSAP and Lottie rejected to stay within the JavaScript budget |
+| Motion | Plain CSS (keyframes, SVG stroke drawing), the browser's View Transitions, and the Web Animations API with CSS `linear()` spring easings for springs and counters (amendment A1). Remotion rejected: it renders videos, not interactive pages. GSAP, Lottie and Motion rejected to stay within the JavaScript budget |
 | Visual direction | C, "Practice trail", with adult-tone guardrails (section 4) |
 | Layout | Desktop and tablet: A, side menu with everything visible. Phone: bottom tab bar |
 | App delivery | Installable PWA shell: manifest, icons, standalone mode, cached static assets, offline page. No personal data on the device, no push, no app store |
@@ -45,7 +45,7 @@ Ordered so the section 16 acceptance items land first. Motion is progressive enh
 | --- | --- | --- |
 | S0 | Real-device check of Google login and Stripe return in an installed PWA (section 8.4); Context7 checks (section 14.6); ADR for the dashboard stack and PWA | No |
 | S1 | Shell, login and session cookie, CSRF and CSP, i18n, design tokens, manifest, service worker, offline page, Conectar page, empty states | No |
-| S2 | Billing: pricing, checkout, webhooks, return and pending pages, Customer Portal, banners, Free-cap display | No |
+| S2 | Billing: pricing, checkout, webhooks, return pages, Customer Portal, banners, Free-cap display | No |
 | S3 | Cuenta: export, deletion, email preferences; privacy notice and terms; admin settings page | No |
 | S4 | Inicio, Sesiones (list and detail), Glosario with CSV export | Inicio and Glosario no; session detail extras yes |
 | S5 | Plan, Progreso, Reportes | Plan diff and Progreso secondary charts yes |
@@ -209,12 +209,11 @@ The frontend displays subscription state; it never decides it.
    - the 14-day refund;
    - Stripe Tax applies;
    - no CFDI in v1;
-   - accepted methods: card, plus OXXO and SPEI only if enabled (Q3).
+   - accepted method: card (amendment A2).
 3. **Checkout:** "Pagar" posts to the server. The server creates a Checkout Session for the cohort's Price, using the learner's existing Stripe customer, and redirects (303) to Stripe Checkout.
 4. **Return pages:**
    - **Success** (`/billing/return?session_id={CHECKOUT_SESSION_ID}`): shows "Confirmando tu pago…" and checks the subscription every 2 s for up to 30 s. When it is active: the celebration, then "Tu plan Annual está activo". After 30 s: "Seguimos confirmando; puedes cerrar esta página, tu plan se activará solo".
    - **Cancelled:** "No se hizo ningún cargo" and a way back.
-   - **Pending** (OXXO or SPEI): the payment reference, amount and deadline, as returned by Stripe, with a copy button.
 5. **Customer Portal:** "Gestionar pago" posts to the server, which creates a portal session and redirects. The portal handles card changes, invoices and cancellation.
 6. **Banners driven by subscription status:**
    - Payment failed: "Actualiza tu método de pago".
@@ -299,7 +298,7 @@ Requirement section 4 says "the dashboard talks only to the REST API". This desi
 
 ### 9.4 Front-end assets (no build step)
 
-- **Vendored files:** HTMX 2.x and Motion, pinned versions recorded in `static/js/VENDORED.md` with source URL, version and SHA-256. Our own code is `app.js`, under 8 KB, plain ES modules.
+- **Vendored files:** HTMX 2.0.11, pinned version recorded in `static/js/VENDORED.md` with source URL, version and SHA-256. Our own code is `app.js`, under 8 KB, plain ES modules.
 - **HTMX config:**
   - `allowEval: false`;
   - `includeIndicatorStyles: false`, because the CSP blocks injected styles and indicator styles live in our CSS.
@@ -312,7 +311,7 @@ Requirement section 4 says "the dashboard talks only to the REST API". This desi
 - **Language choice:**
   - logged in: from the learner's profile;
   - logged out: from `Accept-Language`, with `?lang=` links. Nothing is stored in a cookie (section 14: cookie-free apart from the session cookie).
-- **Formatting:** numbers and dates through Babel ("3,1" and "jueves 8 de oct." in es-MX; "3.1" and "Thu, Oct 8" in English).
+- **Formatting:** numbers and dates through Babel ("3.1" and "jueves 8 de oct." in es-MX, which writes decimals with a point; "3.1" and "Thu, Oct 8" in English).
 - **Lesson content** (phrases, chunks, errors) is English and is never translated.
 
 ### 9.6 Security headers
@@ -351,18 +350,18 @@ Rules:
 | --- | --- | --- | --- | --- | --- |
 | Week trail | Inicio first paint | Path draws up to today, then dashes march twice | SVG `stroke-dashoffset`, CSS keyframes | 900 ms draw; ≤ 4 s march | Full trail, static |
 | Today node | First paint | Two soft pulses | CSS keyframes | ≤ 2 s | Static ring |
-| Streak pill | First paint, value change | Count up, one bob | Motion `animate` | 600 ms | Final number |
-| KPI numbers | Scrolled into view | Count up to value | Motion `animate`; animated span `aria-hidden`, real value in visually hidden text | 700 ms | Final number |
+| Streak pill | First paint, value change | Count up, one bob | Web Animations API | 600 ms | Final number |
+| KPI numbers | Scrolled into view | Count up to value | Web Animations API; animated span `aria-hidden`, real value in visually hidden text | 700 ms | Final number |
 | Progress charts | Scrolled into view | Line draws, target line fades in | SVG dash + CSS | 800 ms | Static chart |
-| Phrase stamps | Scrolled into view | Used stamps press in with a spring, 60 ms stagger | Motion spring | ≤ 900 ms total | Static, filled or outlined |
-| Session errors | Scrolled into view | "dijiste" strikes through, "mejor" writes in | CSS `clip-path` | 500 ms each, staggered | Both shown, strike-through static |
+| Phrase stamps | Scrolled into view | Used stamps press in with a spring, 60 ms stagger | Web Animations API, `linear()` spring easing | ≤ 900 ms total | Static, filled or outlined |
+| Session errors | Scrolled into view | "dijiste" strikes through, "mejor" writes in | CSS `transform: scaleX` on the strike line, opacity on "mejor" | 500 ms each, staggered | Both shown, strike-through static |
 | Card → page | Navigation from Inicio | Shared-element morph (last session card → detail, today card → Plan) | Cross-document View Transitions | 250–350 ms | Instant |
 | HTMX swaps | Filter, page, inline save | 150 ms fade; saved row tints leaf once | `htmx-added` / `htmx-settling` CSS | 150–400 ms | Instant |
 | Loading | Request > 300 ms | Placeholder shapes with a soft shimmer | CSS | Until loaded | Static grey shapes |
 | Free meter | First paint | Fill grows to value | CSS `scaleX` | 600 ms | Static |
 | Tab bar / sidebar | Page change | Active indicator slides | View Transitions / CSS | 200 ms | Instant |
 | Copy buttons | Click | Label becomes "Copiado" with a check | CSS | 150 ms | Text change only |
-| Celebration | (a) first Inicio visit after a new `closed` session; (b) Annual confirmed on the return page | Leaf shapes burst, check mark draws | SVG + Motion | ≤ 1.2 s, once | Check icon and text |
+| Celebration | (a) first Inicio visit after a new `closed` session; (b) Annual confirmed on the return page | Leaf shapes burst, check mark draws | SVG + Web Animations API | ≤ 1.2 s, once | Check icon and text |
 
 The celebration fires at most once per event: (a) uses `profiles.last_celebrated_session_id`; (b) fires only when the return page's status check moves from pending to active, not on a reload. It is never triggered by streak numbers, page visits or `incomplete` sessions.
 
@@ -374,7 +373,7 @@ The celebration fires at most once per event: (a) uses `profiles.last_celebrated
 | No plan yet (diagnostic pending) | Today card: "Haz tu diagnóstico en el chat: di `start my lesson`" |
 | Loading | Placeholder shapes; HTMX requests show them only after 300 ms |
 | Free limit reached | A banner with the reset date returned by the server, and the Annual offer. The page still works; limits are enforced in the MCP tools, not here |
-| Payment failed / renewal / lapsed / pending | The banners in section 7.1 |
+| Payment failed / renewal / lapsed | The banners in section 7.1 |
 | Deletion pending | After confirming, the session ends. Login during the 24 h window shows "Tu cuenta se está eliminando" and nothing else |
 | Session expired | Full page → login with return path. HTMX request → 401 with `HX-Redirect` to login |
 | Validation error (inline edit) | The field stays in edit mode with the message beside it; nothing is lost |
@@ -453,13 +452,13 @@ A dashboard task is done when `uv run just check` passes. A branch is ready to m
 
 ### 14.6 Context7 before code (S0)
 
-HTMX 2, Motion, View Transitions, Web App Manifest and service workers, Authlib with Google OIDC, Stripe Checkout, Customer Portal and webhooks, Babel/Jinja i18n, Playwright for Python and the axe integration. CLAUDE.md requires this for OAuth and Stripe; the rest are checked as well because their APIs change often.
+HTMX 2, the Web Animations API, View Transitions, Web App Manifest and service workers, Authlib with Google OIDC, Stripe Checkout, Customer Portal and webhooks, Babel/Jinja i18n, Playwright for Python and the axe integration. CLAUDE.md requires this for OAuth and Stripe; the rest are checked as well because their APIs change often.
 
 ## 15. Open questions
 
 - **Q1, price before login.** The cohort pricing test (section 13) assigns a price per signup, but the dashboard is cookie-free for anonymous visitors. Proposal: the public pricing page shows features without the Annual price; the price appears after login, fixed per user. Author to confirm.
 - **Q2, stamps data.** Phrase stamps need each session's offered chunks stored, not just counts. The core loop should persist offered chunk ids per session. If it does not, stamps fall back to chunks confirmed this week, filled when they appear in `chunks_used`.
-- **Q3, OXXO and SPEI** for subscriptions with Stripe MX (section 15 open question). If unavailable, the pending page is not built and the pre-pay summary lists card only.
+- **Q3, OXXO and SPEI:** answered for OXXO (amendment A2): Stripe Checkout does not support it for subscriptions, so the pending page is not built and the pre-pay summary lists card only. SPEI for subscriptions is unverified and also out until checked.
 - **Q4, gateway.** Stripe vs Conekta or Mercado Pago for MXN is decided before S2; the billing port keeps templates unchanged either way.
 - **Q5, profile editing** on the dashboard (domains, pace, target) would need re-plan rules. Read-only in v1; changes go through chat (`update_plan`).
 - **Q6, confirming provisional glossary items** from the dashboard. Not in v1: principle 6 and section 10 ask at the next session start.
@@ -488,3 +487,13 @@ Requirements change only when the author edits them. These are suggestions:
 - Marketing site beyond the pricing page.
 - Remotion or any video rendering.
 - Any client-side computation of metrics, streaks, limits or prices.
+
+## Amendments
+
+Made on 2026-10-04 while writing the implementation plan, from Context7 and vendor documentation. The sections above already reflect them.
+
+- **A1, no Motion library.** Motion's browser bundle is about 47.5 KB gzip and HTMX about 16.8 KB, which breaks the 50 KB JavaScript budget (section 14.4). Springs, counters, staggers and path drawing use the Web Animations API with CSS `linear()` spring easings and `IntersectionObserver`, in `app.js`.
+- **A2, card only.** Stripe Checkout does not support OXXO in subscription mode or in the Customer Portal. Q3 is answered: the pending page and the pending banner are dropped and Annual is paid by card. A one-time "Annual prepaid" Checkout in payment mode is the documented way to add OXXO later.
+- **A3, es-MX decimals.** Mexico writes "3.1" and "1,234.5"; the earlier "3,1" example was wrong.
+- **A4, device check timing.** The real-device check from section 8.4 runs as soon as the shell, login, the installable PWA and checkout exist (plan Task 19), because it needs all four.
+- **A5, session-error effect.** The strike-and-write effect uses `transform` and `opacity` instead of `clip-path`, to keep to the rule that only `transform`, `opacity` and `stroke-dashoffset` animate.
