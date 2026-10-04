@@ -54,8 +54,8 @@ def test_match_is_none_when_there_is_nothing_to_compare() -> None:
 
 
 def test_matches_add_up_as_micro_average() -> None:
-    total = Match(1, 2, 1, 1) + Match(1, 2, 0, 1)
-    assert (total.recall, total.precision) == (0.5, 0.5)
+    total = Match(1, 1, 1, 1) + Match(1, 3, 0, 3)
+    assert (total.recall, total.precision) == (0.5, 0.25)
 
 
 def test_cefr_stats_on_half_step_scale() -> None:
@@ -70,3 +70,9 @@ def test_cefr_stats_on_half_step_scale() -> None:
 
 def test_cefr_stats_empty_is_none() -> None:
     assert cefr_stats([]) is None
+
+
+def test_cefr_mode_tie_goes_to_lower_level() -> None:
+    stats = cefr_stats(["B2", "B1+"])
+    assert stats is not None
+    assert stats.mode == "B1+"
