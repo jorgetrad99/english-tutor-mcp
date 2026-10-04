@@ -241,9 +241,15 @@ def test_exp1_exactly_4_of_5_passing_is_pass() -> None:
         run("v4", 60, 75, "voice", "free", "y", "y"),
         run("v5", 80, 95, "voice", "pro", "y", "y"),
     ]
-    outcomes = {r.run_id: outcome(r.run_id) for r in runs}
+    outcomes = {
+        runs[0].run_id: outcome(runs[0].run_id),
+        runs[1].run_id: outcome(runs[1].run_id),
+        runs[2].run_id: outcome(runs[2].run_id),
+        runs[3].run_id: outcome(runs[3].run_id),
+        runs[4].run_id: outcome(runs[4].run_id, fired=False),
+    }
     summary = summarize_exp1(runs, outcomes)
-    assert summary.verdict == "PASS"
+    assert (summary.passes, summary.total, summary.verdict) == (4, 5, "PASS")
 
 
 def test_exp1_tools_fired_false_with_y_y_does_not_pass() -> None:

@@ -2,6 +2,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from tutor_spike.analysis.runs import load_runs
 
 HEADER = (
@@ -41,11 +43,8 @@ def test_load_runs_raises_on_unparsable_start_local(tmp_path: Path) -> None:
         "rec.mp4,transcripts/r03.md,ok,,\n",
         encoding="utf-8",
     )
-    try:
+    with pytest.raises(ValueError, match="run r03"):
         load_runs(path, ZoneInfo("UTC"))
-        raise AssertionError("Should raise ValueError")
-    except ValueError as e:
-        assert "r03" in str(e)
 
 
 def test_load_runs_raises_on_blank_end_local(tmp_path: Path) -> None:
@@ -55,8 +54,5 @@ def test_load_runs_raises_on_blank_end_local(tmp_path: Path) -> None:
         "rec.mp4,transcripts/r04.md,ok,,\n",
         encoding="utf-8",
     )
-    try:
+    with pytest.raises(ValueError, match="run r04"):
         load_runs(path, ZoneInfo("UTC"))
-        raise AssertionError("Should raise ValueError")
-    except ValueError as e:
-        assert "r04" in str(e)
