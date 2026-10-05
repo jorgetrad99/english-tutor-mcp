@@ -1,0 +1,122 @@
+"""The Task 20 scripted lesson through the real server on Postgres.
+
+The app connects as the non-superuser login role; the caller is identified by a real access token
+in context, so `get_access_token()` -> `current_user_id` runs inside the tool worker thread.
+"""
+
+import zoneinfo
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
+
+import pytest
+from cryptography.fernet import Fernet
+from fastmcp import Client, FastMCP
+from fastmcp.server.auth.auth import AccessToken
+from mcp.server.auth.middleware.auth_context import auth_context_var
+from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
+from mcp.shared.exceptions import MCPError
+from mcp_lesson import Clock, call, random_sub, run_scripted_lesson
+from sqlalchemy import Engine
+
+from tutor.app import build_app
+from tutor.db.engine import check_app_role
+from tutor.db.uow import PgIdentity, pg_uow_factory
+from tutor.mcp.server import build_mcp
+from tutor.services.context import Services
+from tutor.settings import Settings
+
+pytestmark = pytest.mark.integration
+
+
+@contextmanager
+def signed_in(sub: str) -> Iterator[None]:
+    """A verified access token in context, as FastMCP's bearer middleware would leave it."""
+    token = AccessToken(
+        token="test-token",  # noqa: S106 - not a secret
+        client_id=sub,
+        scopes=[],
+        claims={"sub": sub, "email": f"{sub}@example.com", "name": "Test Learner"},
+    )
+    reset = auth_context_var.set(AuthenticatedUser(token))
+    try:
+        yield
+    finally:
+        auth_context_var.reset(reset)
+
+
+def server(login_engine: Engine, clock: Clock) -> FastMCP:
+    svc = Services(
+        uow=pg_uow_factory(login_engine),
+        clock=clock,
+        valid_timezones=frozenset(zoneinfo.available_timezones()),
+    )
+    return build_mcp(svc, PgIdentity(login_engine), auth=None)
+
+
+@pytest.mark.asyncio
+async def test_scripted_lesson_on_postgres_with_the_login_role(login_engine: Engine) -> None:
+    clock = Clock()
+    with signed_in(random_sub()):
+        await run_scripted_lesson(server(login_engine, clock), clock)
+
+
+@pytest.mark.asyncio
+async def test_a_second_user_sees_none_of_the_first_users_data(login_engine: Engine) -> None:
+    clock = Clock()
+    mcp = server(login_engine, clock)
+    with signed_in(random_sub()):
+        await run_scripted_lesson(mcp, clock)
+        async with Client(mcp) as client:
+            mine = await call(client, "get_profile", {})
+    assert mine["onboarding_needed"] is False
+    with signed_in(random_sub()):
+        async with Client(mcp) as client:
+            view = await call(client, "get_profile", {})
+    assert view["onboarding_needed"] is True
+    assert (view["streak"], view["due_reviews_count"], view["provisional_count"]) == (0, 0, 0)
+    assert view["profile"] is None
+    assert view["open_session_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_call_without_a_token_is_refused(login_engine: Engine) -> None:
+    async with Client(server(login_engine, Clock())) as client:
+        with pytest.raises(MCPError, match="Not authorized"):
+            await client.call_tool("get_profile", {})
+
+
+def app_settings(tmp_path: Path) -> Settings:
+    return Settings.from_env(
+        {
+            "TUTOR_BASE_URL": "https://tutor.example.com",
+            "DATABASE_URL": "postgresql://unused@localhost/unused",
+            "GOOGLE_CLIENT_ID": "id.apps.googleusercontent.com",
+            "GOOGLE_CLIENT_SECRET": "test-google-client-secret",
+            "TUTOR_JWT_SIGNING_KEY": "j" * 40,
+            "TUTOR_OAUTH_STORAGE_KEY": Fernet.generate_key().decode(),
+            "TUTOR_OAUTH_STORAGE_DIR": str(tmp_path / "oauth"),
+            "TUTOR_WEB_SESSION_SECRET": "w" * 40,
+        }
+    )
+
+
+def test_startup_check_accepts_the_app_login_role(login_engine: Engine) -> None:
+    check_app_role(login_engine)
+
+
+def test_startup_check_refuses_the_owner(engine: Engine) -> None:
+    with pytest.raises(SystemExit) as refused:
+        check_app_role(engine)
+    message = str(refused.value)
+    assert "DATABASE_URL" in message
+    assert "tutor:tutor" not in message
+    assert "localhost" not in message
+
+
+def test_build_app_checks_the_role_before_serving(
+    login_engine: Engine, engine: Engine, tmp_path: Path
+) -> None:
+    build_app(app_settings(tmp_path), engine=login_engine)
+    with pytest.raises(SystemExit, match="login role"):
+        build_app(app_settings(tmp_path), engine=engine)

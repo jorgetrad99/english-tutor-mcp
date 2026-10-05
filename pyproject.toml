@@ -16,6 +16,7 @@ dependencies = [
     "pyyaml>=6.0.2",
     "sqlalchemy>=2.0.40,<2.1",
     "tzdata>=2025.2",
+    "uvicorn>=0.35",
 ]
 
 [build-system]
@@ -24,6 +25,7 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28",
     "hypothesis>=6.168.3",
     "mypy>=2.4.0",
     "pip-audit>=2.10.1",

@@ -36,6 +36,10 @@ test-int:
 migrate:
     uv run alembic upgrade head
 
+# Product server: MCP, OAuth and (later) the website; reads TUTOR_* settings from the environment
+serve:
+    uv run python -m tutor
+
 # Fast gate used by the Stop hook (< 30 s)
 check-fast:
     uv run ruff check .
