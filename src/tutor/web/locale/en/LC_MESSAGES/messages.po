@@ -552,3 +552,114 @@ msgstr "medium confidence"
 
 msgid "confianza baja"
 msgstr "low confidence"
+
+msgid "%(used)s de %(cap)s elementos"
+msgstr "%(used)s of %(cap)s items"
+
+msgid "Tus repasos ocurren dentro de las lecciones; aquí puedes revisar y corregir tus frases."
+msgstr "Your reviews happen inside lessons; here you can check and correct your phrases."
+
+msgid "Buscar"
+msgstr "Search"
+
+msgid "Tipo"
+msgstr "Type"
+
+msgid "Tema"
+msgstr "Topic"
+
+msgid "Repaso"
+msgstr "Review"
+
+msgid "Cualquier fecha"
+msgstr "Any date"
+
+msgid "Para hoy"
+msgstr "Due today"
+
+msgid "Esta semana"
+msgstr "This week"
+
+msgid "Resultados: %(n)s"
+msgstr "Results: %(n)s"
+
+msgid "Exportar CSV"
+msgstr "Export CSV"
+
+msgid "Tu glosario"
+msgstr "Your glossary"
+
+msgid "Frase"
+msgstr "Phrase"
+
+msgid "Significado"
+msgstr "Meaning"
+
+msgid "Contexto"
+msgstr "Context"
+
+msgid "Acciones"
+msgstr "Actions"
+
+msgid "Nada coincide con estos filtros."
+msgstr "Nothing matches these filters."
+
+msgid "Tu glosario está vacío. Las frases que confirmes en tus lecciones aparecerán aquí."
+msgstr "Your glossary is empty. Phrases you confirm in your lessons will appear here."
+
+msgid "Editar"
+msgstr "Edit"
+
+msgid "Oración de contexto"
+msgstr "Context sentence"
+
+msgid "Máximo %(n)s caracteres."
+msgstr "At most %(n)s characters."
+
+msgid "Escribe la oración donde apareció la frase."
+msgstr "Write the sentence where the phrase appeared."
+
+msgid "Guardar"
+msgstr "Save"
+
+msgid "Cancelar"
+msgstr "Cancel"
+
+msgid "Guardado"
+msgstr "Saved"
+
+msgid "Editar frase"
+msgstr "Edit phrase"
+
+msgid "Corrección"
+msgstr "Correction"
+
+msgid "Término"
+msgstr "Term"
+
+msgid "TI"
+msgstr "IT"
+
+msgid "Día a día"
+msgstr "Everyday"
+
+msgid "Negocios"
+msgstr "Business"
+
+msgid "Por confirmar"
+msgstr "To confirm"
+
+msgid "En pausa"
+msgstr "Parked"
+
+msgid "Confirmada"
+msgstr "Confirmed"
+
+msgid "Por confirmar hasta el %(when)s"
+msgstr "To confirm by %(when)s"
+
+msgid "Toca repasar"
+msgstr "Review due"
+
+msgid "Te cuesta"
+msgstr "Tricky for you"

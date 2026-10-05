@@ -521,3 +521,12 @@ body[data-reduce-motion] *, body[data-reduce-motion] *::before, body[data-reduce
 .turns, .evidence { display: grid; gap: .5rem; padding-left: 1.25rem; }
 .turns li, .evidence li { overflow-wrap: anywhere; }
 .cefr strong { font-family: "Baloo 2", system-ui, sans-serif; font-size: 1.5rem; }
+
+/* Glosario (Task 23) */
+.table-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; margin: .75rem 0; }
+.table--glossary td, .table--glossary th { overflow-wrap: anywhere; vertical-align: top; }
+.row--editing td { background: var(--paper); }
+.edit-form { display: grid; gap: .75rem; }
+.edit-form__text { margin: 0; }
+.edit-form input, .edit-form textarea { width: 100%; min-height: 2.75rem; font: inherit; }
+.edit-form__actions { display: flex; flex-wrap: wrap; gap: .5rem; }

@@ -1,0 +1,43 @@
+{% extends "layouts/app.html" %}
+{% import "macros/labels.html" as labels %}
+{% set active_nav = "glossary" %}
+{% block title %}{{ _("Glosario") }} · English Tutor{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{{ _("Glosario") }}</h1>
+  {% if usage %}<p class="muted">{% trans used=usage.glossary_items, cap=usage.glossary_cap %}{{ used }} de {{ cap }} elementos{% endtrans %}</p>{% endif %}
+</header>
+<p class="muted">{{ _("Tus repasos ocurren dentro de las lecciones; aquí puedes revisar y corregir tus frases.") }}</p>
+<form class="filters" method="get" action="/app/glossary" role="search" hx-get="/app/glossary" hx-target="#glossary-table" hx-swap="outerHTML" hx-push-url="true" hx-trigger="change, input changed delay:300ms from:#glossary-q">
+  <label class="form-row">{{ _("Buscar") }}
+    <input id="glossary-q" type="search" name="q" value="{{ f.q }}" maxlength="100" autocomplete="off">
+  </label>
+  <label class="form-row">{{ _("Tipo") }}
+    <select name="kind">
+      <option value="">{{ _("Todos") }}</option>
+      {% for value in ("correction", "chunk", "term") %}<option value="{{ value }}"{% if f.kind == value %} selected{% endif %}>{{ labels.kind_label(value) }}</option>{% endfor %}
+    </select>
+  </label>
+  <label class="form-row">{{ _("Tema") }}
+    <select name="domain">
+      <option value="">{{ _("Todos") }}</option>
+      {% for d in domains %}<option value="{{ d }}"{% if f.domain == d %} selected{% endif %}>{{ labels.domain_label(d) }}</option>{% endfor %}
+    </select>
+  </label>
+  <label class="form-row">{{ _("Estado") }}
+    <select name="status">
+      <option value="">{{ _("Todos") }}</option>
+      {% for value in ("provisional", "confirmed", "archived") %}<option value="{{ value }}"{% if f.status == value %} selected{% endif %}>{{ labels.glossary_status_label(value) }}</option>{% endfor %}
+    </select>
+  </label>
+  <label class="form-row">{{ _("Repaso") }}
+    <select name="due">
+      <option value="">{{ _("Cualquier fecha") }}</option>
+      <option value="today"{% if f.due == "today" %} selected{% endif %}>{{ _("Para hoy") }}</option>
+      <option value="week"{% if f.due == "week" %} selected{% endif %}>{{ _("Esta semana") }}</option>
+    </select>
+  </label>
+  <button class="btn btn--ghost btn--small">{{ _("Filtrar") }}</button>
+</form>
+{% include "partials/glossary_table.html" %}
+{% endblock %}

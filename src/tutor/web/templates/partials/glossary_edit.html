@@ -1,0 +1,23 @@
+<tr id="g-{{ row.id }}" class="row--editing">
+  <td colspan="7">
+    <form class="edit-form" method="post" action="/app/glossary/{{ row.id }}" hx-post="/app/glossary/{{ row.id }}" hx-target="#g-{{ row.id }}" hx-swap="outerHTML" data-esc-cancel>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <p class="edit-form__text"><strong lang="en">{{ row.text }}</strong></p>
+      <div class="form-row">
+        <label for="meaning-{{ row.id }}">{{ _("Significado") }}</label>
+        <input id="meaning-{{ row.id }}" name="meaning" value="{{ values.meaning }}" maxlength="{{ meaning_max }}"{% if errors.get("meaning") %} aria-invalid="true" aria-describedby="meaning-error-{{ row.id }}"{% endif %}>
+        {% if errors.get("meaning") %}<p class="field-error" id="meaning-error-{{ row.id }}">{% trans n=meaning_max %}Máximo {{ n }} caracteres.{% endtrans %}</p>{% endif %}
+      </div>
+      <div class="form-row">
+        <label for="context-{{ row.id }}">{{ _("Oración de contexto") }}</label>
+        <textarea id="context-{{ row.id }}" name="context_sentence" rows="2" maxlength="{{ context_max }}" lang="en" required{% if errors.get("context_sentence") %} aria-invalid="true" aria-describedby="context-error-{{ row.id }}"{% endif %}>{{ values.context_sentence }}</textarea>
+        {% if errors.get("context_sentence") == "empty" %}<p class="field-error" id="context-error-{{ row.id }}">{{ _("Escribe la oración donde apareció la frase.") }}</p>
+        {% elif errors.get("context_sentence") == "too_long" %}<p class="field-error" id="context-error-{{ row.id }}">{% trans n=context_max %}Máximo {{ n }} caracteres.{% endtrans %}</p>{% endif %}
+      </div>
+      <div class="edit-form__actions">
+        <button class="btn btn--primary btn--small">{{ _("Guardar") }}</button>
+        <a class="btn btn--ghost btn--small" href="/app/glossary" hx-get="/app/glossary/{{ row.id }}/row" hx-target="#g-{{ row.id }}" hx-swap="outerHTML" data-cancel>{{ _("Cancelar") }}</a>
+      </div>
+    </form>
+  </td>
+</tr>
