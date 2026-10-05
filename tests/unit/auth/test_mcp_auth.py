@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -5,6 +6,7 @@ from cryptography.fernet import Fernet
 from key_value.aio.stores.memory import MemoryStore
 
 from tutor.auth.mcp_auth import (
+    ACCESS_TOKEN_SECONDS,
     CLAUDE_REDIRECT_URIS,
     MCP_CALLBACK_PATH,
     REFRESH_TOKEN_SECONDS,
@@ -38,6 +40,8 @@ def test_provider_uses_the_v0_configuration(tmp_path: Path) -> None:
     assert provider._redirect_path == MCP_CALLBACK_PATH == "/oauth/callback"
     assert provider._fallback_refresh_token_expiry_seconds == REFRESH_TOKEN_SECONDS == 2_592_000
     assert provider._allowed_client_redirect_uris == list(CLAUDE_REDIRECT_URIS)
+    assert provider._require_authorization_consent is True
+    assert provider._fastmcp_access_token_expiry_seconds == ACCESS_TOKEN_SECONDS == 3600
     assert provider.required_scopes == list(SCOPES)
     assert str(provider.base_url).rstrip("/") == "https://tutor.example.com"
 
@@ -79,3 +83,10 @@ async def test_storage_with_a_new_key_reads_as_a_miss(tmp_path: Path) -> None:
 def test_provider_builds_default_storage_in_the_settings_dir(tmp_path: Path) -> None:
     build_google_provider(settings(tmp_path))
     assert (tmp_path / "oauth").is_dir()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX modes only")
+def test_storage_directory_is_private(tmp_path: Path) -> None:
+    (tmp_path / "oauth").mkdir(mode=0o755)
+    oauth_storage(settings(tmp_path))
+    assert (tmp_path / "oauth").stat().st_mode & 0o777 == 0o700

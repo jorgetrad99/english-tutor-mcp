@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Literal, cast
+from urllib.parse import urlsplit
 
 from cryptography.fernet import Fernet
 
@@ -32,6 +34,34 @@ def _is_fernet_key(value: str) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _base_url(raw: str) -> str | None:
+    """Normalised origin, or None. https unless the host is loopback."""
+    try:
+        parts = urlsplit(raw.strip())
+        host = parts.hostname
+        parts.port  # noqa: B018 - raises ValueError on a bad port
+    except ValueError:
+        return None
+    if parts.scheme not in ("http", "https") or not host:
+        return None
+    if parts.username is not None or parts.password is not None or "@" in parts.netloc:
+        return None
+    if parts.query or parts.fragment or parts.path not in ("", "/"):
+        return None
+    if parts.scheme == "http" and not _is_loopback(host):
+        return None
+    return f"{parts.scheme}://{parts.netloc}"
+
+
+def _is_loopback(host: str) -> bool:
+    if host == "localhost":
+        return True
+    try:
+        return ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 def _port(raw: str) -> int | None:
@@ -65,25 +95,39 @@ class Settings:
         tutor_env = env.get("TUTOR_ENV", "dev").strip()
         if tutor_env not in ENVS:
             problems.append("TUTOR_ENV must be dev, test or prod")
-        base_url = env["TUTOR_BASE_URL"].strip().rstrip("/")
-        if not base_url.startswith(("https://", "http://")):
-            problems.append("TUTOR_BASE_URL must be an http(s) URL")
-        elif tutor_env == "prod" and not base_url.startswith("https://"):
-            problems.append("TUTOR_BASE_URL must use https in prod")
-        if len(env["TUTOR_JWT_SIGNING_KEY"]) < MIN_SIGNING_KEY_CHARS:
+        base_url = _base_url(env["TUTOR_BASE_URL"])
+        if base_url is None:
+            problems.append(
+                "TUTOR_BASE_URL must be an https URL (http only for localhost) "
+                "with no credentials, path, query or fragment"
+            )
+        jwt_key = env["TUTOR_JWT_SIGNING_KEY"].strip()
+        storage_key = env["TUTOR_OAUTH_STORAGE_KEY"].strip()
+        web_secret = env["TUTOR_WEB_SESSION_SECRET"].strip()
+        if len(jwt_key) < MIN_SIGNING_KEY_CHARS:
             problems.append(
                 f"TUTOR_JWT_SIGNING_KEY must be at least {MIN_SIGNING_KEY_CHARS} characters"
             )
-        if len(env["TUTOR_WEB_SESSION_SECRET"]) < MIN_WEB_SECRET_CHARS:
+        if len(web_secret) < MIN_WEB_SECRET_CHARS:
             problems.append(
                 f"TUTOR_WEB_SESSION_SECRET must be at least {MIN_WEB_SECRET_CHARS} characters"
             )
-        if not _is_fernet_key(env["TUTOR_OAUTH_STORAGE_KEY"].strip()):
+        if not _is_fernet_key(storage_key):
             problems.append("TUTOR_OAUTH_STORAGE_KEY must be a Fernet key")
+        secrets = {
+            "TUTOR_JWT_SIGNING_KEY": jwt_key,
+            "TUTOR_OAUTH_STORAGE_KEY": storage_key,
+            "TUTOR_WEB_SESSION_SECRET": web_secret,
+        }
+        reused = sorted(
+            name for name, value in secrets.items() if list(secrets.values()).count(value) > 1
+        )
+        if reused:
+            problems.append(f"{', '.join(reused)} must not share the same value")
         port = _port(env.get("TUTOR_PORT", str(DEFAULT_PORT)).strip())
         if port is None:
             problems.append("TUTOR_PORT must be a number from 1 to 65535")
-        if problems or port is None:
+        if problems or port is None or base_url is None:
             raise SystemExit("Invalid settings: " + "; ".join(problems))
         return cls(
             env=cast(Env, tutor_env),
@@ -91,12 +135,12 @@ class Settings:
             database_url=env["DATABASE_URL"].strip(),
             google_client_id=env["GOOGLE_CLIENT_ID"].strip(),
             google_client_secret=env["GOOGLE_CLIENT_SECRET"].strip(),
-            jwt_signing_key=env["TUTOR_JWT_SIGNING_KEY"],
-            oauth_storage_key=env["TUTOR_OAUTH_STORAGE_KEY"].strip(),
+            jwt_signing_key=jwt_key,
+            oauth_storage_key=storage_key,
             oauth_storage_dir=Path(
                 env.get("TUTOR_OAUTH_STORAGE_DIR", "").strip() or DEFAULT_OAUTH_STORAGE_DIR
             ),
-            web_session_secret=env["TUTOR_WEB_SESSION_SECRET"],
+            web_session_secret=web_secret,
             port=port,
             migration_database_url=env.get("MIGRATION_DATABASE_URL", "").strip() or None,
         )

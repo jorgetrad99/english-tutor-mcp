@@ -73,16 +73,51 @@ def test_storage_key_must_be_a_fernet_key() -> None:
         ({"TUTOR_ENV": "staging"}, "TUTOR_ENV must be dev, test or prod"),
         ({"TUTOR_PORT": "http"}, "TUTOR_PORT must be a number"),
         ({"TUTOR_PORT": "70000"}, "TUTOR_PORT must be a number"),
-        ({"TUTOR_BASE_URL": "tutor.example.com"}, "TUTOR_BASE_URL must be an http"),
-        (
-            {"TUTOR_ENV": "prod", "TUTOR_BASE_URL": "http://tutor.example.com"},
-            "TUTOR_BASE_URL must use https in prod",
-        ),
+        ({"TUTOR_BASE_URL": "tutor.example.com"}, "TUTOR_BASE_URL must be an https URL"),
+        ({"TUTOR_BASE_URL": "http://tutor.example.com"}, "TUTOR_BASE_URL must be an https URL"),
     ],
 )
 def test_invalid_values_are_named(overrides: dict[str, str], message: str) -> None:
     with pytest.raises(SystemExit, match=message):
         Settings.from_env(env(**overrides))
+
+
+@pytest.mark.parametrize(
+    "url", ["http://localhost:8000", "http://127.0.0.1:8000", "http://[::1]:8000", "https://x.io/"]
+)
+def test_loopback_http_and_https_are_accepted(url: str) -> None:
+    assert Settings.from_env(env(TUTOR_BASE_URL=url)).base_url == url.rstrip("/")
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://user:pw@tutor.example.com",
+        "https://tutor.example.com?a=1",
+        "https://tutor.example.com#frag",
+        "https://tutor.example.com/app",
+        "https:///nohost",
+        "http://localhost.evil.com",
+    ],
+)
+def test_malformed_base_urls_are_rejected_without_the_value(url: str) -> None:
+    with pytest.raises(SystemExit, match="TUTOR_BASE_URL must be an https URL") as info:
+        Settings.from_env(env(TUTOR_BASE_URL=url))
+    assert "pw@" not in str(info.value)
+
+
+def test_secrets_are_stripped() -> None:
+    s = Settings.from_env(env(TUTOR_JWT_SIGNING_KEY="  " + "j" * 40 + " "))
+    assert s.jwt_signing_key == "j" * 40
+
+
+def test_reused_secret_is_rejected_naming_keys_only() -> None:
+    with pytest.raises(SystemExit, match="must not share the same value") as info:
+        Settings.from_env(env(TUTOR_WEB_SESSION_SECRET="j" * 40))
+    message = str(info.value)
+    assert "TUTOR_JWT_SIGNING_KEY" in message
+    assert "TUTOR_WEB_SESSION_SECRET" in message
+    assert "j" * 40 not in message
 
 
 def test_repr_hides_secrets() -> None:

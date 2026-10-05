@@ -32,4 +32,4 @@ Thumbs.db
 .claude/settings.local.json
 
 # Local runtime data (OAuth store)
-data/
+/data/
