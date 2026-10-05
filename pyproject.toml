@@ -9,12 +9,19 @@ requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.16",
     "anyio>=4.4",
+    "authlib>=1.8.0",
+    "babel>=2.18",
     "cryptography>=45",
+    "fastapi>=0.142.2",
     "fastmcp>=4.0.10,<5",
+    "httpx>=0.28.1",
+    "jinja2>=3.1",
     "psycopg[binary]>=3.2",
     "pydantic>=2.12",
+    "python-multipart>=0.0.32",
     "pyyaml>=6.0.2",
     "sqlalchemy>=2.0.40,<2.1",
+    "stripe>=16.0.0",
     "tzdata>=2025.2",
     "uvicorn>=0.35",
 ]
@@ -25,7 +32,6 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28",
     "hypothesis>=6.168.3",
     "mypy>=2.4.0",
     "pip-audit>=2.10.1",
@@ -71,6 +77,11 @@ warn_return_any = true
 no_implicit_reexport = true
 strict_equality = true
 extra_checks = true
+
+# Authlib ships no type information.
+[[tool.mypy.overrides]]
+module = ["authlib", "authlib.*"]
+ignore_missing_imports = true
 
 [tool.pyright]
 include = ["src", "tests"]
