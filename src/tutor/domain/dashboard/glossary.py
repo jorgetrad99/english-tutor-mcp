@@ -12,7 +12,7 @@ from tutor.domain.dashboard.types import DueFilter, GlossaryFilter, GlossaryRow
 
 MEANING_MAX = 200
 CONTEXT_MAX = 300
-_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r", "\n")
 _CSV_HEADER = (
     "text",
     "kind",
@@ -74,7 +74,9 @@ def filter_glossary(
 
 
 def _cell(value: str) -> str:
-    return "'" + value if value.startswith(_FORMULA_PREFIXES) else value
+    # Strip only spaces; tabs, CR, newline are in _FORMULA_PREFIXES
+    stripped = value.lstrip(" ")
+    return "'" + value if stripped and stripped[0] in _FORMULA_PREFIXES else value
 
 
 def glossary_csv(rows: Sequence[GlossaryRow]) -> str:
@@ -89,10 +91,10 @@ def glossary_csv(rows: Sequence[GlossaryRow]) -> str:
                 r.kind.value,
                 _cell(r.meaning),
                 _cell(r.context_sentence),
-                r.domain,
+                _cell(r.domain),
                 r.status.value,
                 r.due_on.isoformat() if r.due_on else "",
                 "true" if r.leech else "false",
             ]
         )
-    return "﻿" + buf.getvalue()
+    return "\N{ZERO WIDTH NO-BREAK SPACE}" + buf.getvalue()

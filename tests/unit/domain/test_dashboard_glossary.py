@@ -92,8 +92,8 @@ def test_sort_is_due_first_then_text() -> None:
 
 def test_csv_has_bom_header_and_neutralises_formulas() -> None:
     out = glossary_csv([row('=HYPERLINK("http://x")', meaning="@cmd", due_on=TODAY)])
-    assert out.startswith("﻿")
-    parsed = list(csv.reader(io.StringIO(out.lstrip("﻿"))))
+    assert out.startswith("\N{ZERO WIDTH NO-BREAK SPACE}")
+    parsed = list(csv.reader(io.StringIO(out.lstrip("\N{ZERO WIDTH NO-BREAK SPACE}"))))
     assert parsed[0] == [
         "text",
         "kind",
@@ -108,3 +108,59 @@ def test_csv_has_bom_header_and_neutralises_formulas() -> None:
     assert parsed[1][2] == "'@cmd"
     assert parsed[1][6] == "2027-01-12"
     assert parsed[1][7] == "false"
+
+
+@pytest.mark.parametrize(
+    ("prefix", "column"),
+    [
+        ("=", "meaning"),
+        ("+", "meaning"),
+        ("-", "meaning"),
+        ("@", "meaning"),
+        ("\t", "meaning"),
+        ("\r", "meaning"),
+        ("\n", "meaning"),
+        ("  =", "meaning"),
+        ("=", "context_sentence"),
+        ("@", "context_sentence"),
+        ("  +", "context_sentence"),
+        ("-", "domain"),
+        ("+", "domain"),
+        ("\r", "domain"),
+    ],
+)
+def test_csv_neutralises_all_formula_prefixes_in_all_string_columns(
+    prefix: str, column: str
+) -> None:
+    value = f"{prefix}formula"
+    if column == "meaning":
+        out = glossary_csv([row("normal", meaning=value)])
+    elif column == "context_sentence":
+        out = glossary_csv([row("normal", context_sentence=value)])
+    else:  # domain
+        out = glossary_csv([row("normal", domain=value)])
+    parsed = list(csv.reader(io.StringIO(out.lstrip("\N{ZERO WIDTH NO-BREAK SPACE}"))))
+    col_idx = {"meaning": 2, "context_sentence": 3, "domain": 4}[column]
+    assert parsed[1][col_idx].startswith("'"), f"Column {column} not neutralized for {prefix!r}"
+
+
+def test_csv_no_prefix_passes_through_unchanged() -> None:
+    out = glossary_csv([row("normal", meaning="safe", context_sentence="good", domain="it")])
+    parsed = list(csv.reader(io.StringIO(out.lstrip("\N{ZERO WIDTH NO-BREAK SPACE}"))))
+    assert parsed[1][0] == "normal"
+    assert parsed[1][2] == "safe"
+    assert parsed[1][3] == "good"
+    assert parsed[1][4] == "it"
+
+
+def test_csv_formula_in_text_field() -> None:
+    out = glossary_csv([row("=dangerous", meaning="safe")])
+    parsed = list(csv.reader(io.StringIO(out.lstrip("\N{ZERO WIDTH NO-BREAK SPACE}"))))
+    assert parsed[1][0].startswith("'")
+
+
+def test_overdue_item_appears_under_today_filter() -> None:
+    # Item due Jan 10 is overdue when today is Jan 12; it should appear in TODAY filter
+    old_item = row("overdue", due_on=date(2027, 1, 10))
+    filtered = filter_glossary([old_item], GlossaryFilter(due=DueFilter.TODAY), TODAY)
+    assert len(filtered) == 1 and filtered[0].text == "overdue"
