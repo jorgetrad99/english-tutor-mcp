@@ -18,7 +18,6 @@ def env(**overrides: str) -> dict[str, str]:
         "GOOGLE_CLIENT_SECRET": PRIVATE_MARKER,
         "TUTOR_JWT_SIGNING_KEY": "j" * 40,
         "TUTOR_OAUTH_STORAGE_KEY": Fernet.generate_key().decode(),
-        "TUTOR_WEB_SESSION_SECRET": "w" * 40,
     }
     return {**base, **overrides}
 
@@ -112,40 +111,35 @@ def test_secrets_are_stripped() -> None:
 
 
 def test_reused_secret_is_rejected_naming_keys_only() -> None:
+    key = Fernet.generate_key().decode()
     with pytest.raises(SystemExit, match="must not share the same value") as info:
-        Settings.from_env(env(TUTOR_WEB_SESSION_SECRET="j" * 40))
+        Settings.from_env(env(TUTOR_JWT_SIGNING_KEY=key, TUTOR_OAUTH_STORAGE_KEY=key))
     message = str(info.value)
     assert "TUTOR_JWT_SIGNING_KEY" in message
-    assert "TUTOR_WEB_SESSION_SECRET" in message
-    assert "j" * 40 not in message
+    assert "TUTOR_OAUTH_STORAGE_KEY" in message
+    assert key not in message
+
+
+def test_web_session_secret_is_neither_required_nor_read() -> None:
+    # Final review M3: web sessions are random tokens stored as SHA-256 hashes; no secret.
+    assert "TUTOR_WEB_SESSION_SECRET" not in REQUIRED
+    s = Settings.from_env(env(TUTOR_WEB_SESSION_SECRET="j" * 40))
+    assert not hasattr(s, "web_session_secret")
 
 
 def test_repr_hides_secrets() -> None:
     text = repr(Settings.from_env(env()))
     assert PRIVATE_MARKER not in text
     assert "j" * 40 not in text
-    assert "w" * 40 not in text
     assert "tutor.example.com" in text
 
 
-def test_repr_and_errors_hide_the_migration_dsn() -> None:
+def test_the_migration_dsn_is_never_stored() -> None:
+    # Only the prod guard reads MIGRATION_DATABASE_URL; the app never keeps it.
     dsn = f"postgresql+psycopg://owner:{PRIVATE_MARKER}@db/tutor"
     s = Settings.from_env(env(MIGRATION_DATABASE_URL=dsn))
-    assert s.migration_database_url == dsn
+    assert not hasattr(s, "migration_database_url")
     assert PRIVATE_MARKER not in repr(s)
-    assert PRIVATE_MARKER not in str(s)
-
-
-def test_migration_dsn_is_optional() -> None:
-    assert Settings.from_env(env()).migration_database_url is None
-    assert Settings.from_env(env(MIGRATION_DATABASE_URL="  ")).migration_database_url is None
-
-
-def test_short_web_session_secret_is_rejected_without_its_value() -> None:
-    short = "w" * 31
-    with pytest.raises(SystemExit, match="TUTOR_WEB_SESSION_SECRET must be at least 32") as info:
-        Settings.from_env(env(TUTOR_WEB_SESSION_SECRET=short))
-    assert short not in str(info.value)
 
 
 @pytest.mark.parametrize("url", ["sqlite://", "mysql://u:p@h/d"])

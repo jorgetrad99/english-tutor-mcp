@@ -5,7 +5,6 @@ from tutor.web.config import WebConfig
 ENV = {
     "TUTOR_ENV": "prod",
     "TUTOR_BASE_URL": "https://tutor.example.com/",
-    "TUTOR_MCP_URL": "https://tutor.example.com/mcp",
     "TUTOR_SUPPORT_EMAIL": "soporte@example.com",
 }
 
@@ -64,3 +63,43 @@ def test_test_login_requires_a_loopback_base_url() -> None:
     with pytest.raises(ValueError, match="loopback"):
         WebConfig.from_env(env)  # https://tutor.example.com
     assert WebConfig.from_env({**env, "TUTOR_BASE_URL": "http://127.0.0.1:8780"}).test_login
+
+
+def test_tutor_env_is_stripped_like_settings() -> None:
+    # Final review M13: Settings strips TUTOR_ENV, so " prod " must not become two envs.
+    assert WebConfig.from_env({**ENV, "TUTOR_ENV": " prod "}).env == "prod"
+
+
+@pytest.mark.parametrize("value", [None, "", "  "])
+def test_mcp_url_is_derived_from_the_base_url_when_unset(value: str | None) -> None:
+    env = {k: v for k, v in ENV.items() if k != "TUTOR_MCP_URL"}
+    if value is not None:
+        env["TUTOR_MCP_URL"] = value
+    assert WebConfig.from_env(env).mcp_url == "https://tutor.example.com/mcp"
+
+
+def test_a_matching_mcp_url_is_accepted_with_spaces_stripped() -> None:
+    config = WebConfig.from_env({**ENV, "TUTOR_MCP_URL": " https://tutor.example.com/mcp "})
+    assert config.mcp_url == "https://tutor.example.com/mcp"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://other.example.com/mcp",
+        "https://tutor.example.com/mcp/",
+        "http://tutor.example.com/mcp",
+        "https://tutor.example.com/api/mcp",
+    ],
+)
+def test_a_different_mcp_url_is_refused_naming_keys_only(url: str) -> None:
+    with pytest.raises(ValueError, match="TUTOR_MCP_URL must equal TUTOR_BASE_URL") as info:
+        WebConfig.from_env({**ENV, "TUTOR_MCP_URL": url})
+    assert url not in str(info.value)
+    with pytest.raises(ValueError, match="TUTOR_MCP_URL"):
+        WebConfig(
+            env="prod",
+            base_url="https://tutor.example.com",
+            mcp_url=url,
+            support_email="soporte@example.com",
+        )

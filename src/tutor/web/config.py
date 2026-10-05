@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 from tutor.settings import is_loopback, parse_base_url
 
 _ENVS = ("dev", "test", "prod")
+MCP_PATH = "/mcp"
 
 
 @dataclass(frozen=True)
@@ -29,10 +30,13 @@ class WebConfig:
             raise ValueError("test login is only allowed with TUTOR_ENV=test")
         if self.test_login and not is_loopback(urlsplit(self.base_url).hostname or ""):
             raise ValueError("test login is only allowed on a loopback TUTOR_BASE_URL")
+        if self.mcp_url != self.base_url + MCP_PATH:
+            raise ValueError(f"TUTOR_MCP_URL must equal TUTOR_BASE_URL followed by {MCP_PATH}")
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str]) -> WebConfig:
-        env = environ.get("TUTOR_ENV", "dev")
+        """TUTOR_MCP_URL is derived from TUTOR_BASE_URL when unset; if set it must match."""
+        env = environ.get("TUTOR_ENV", "dev").strip()
         if env not in _ENVS:
             raise ValueError(f"TUTOR_ENV must be one of {_ENVS}")
         base_url = parse_base_url(environ["TUTOR_BASE_URL"])
@@ -41,7 +45,7 @@ class WebConfig:
         return cls(
             env=cast(Literal["dev", "test", "prod"], env),
             base_url=base_url,
-            mcp_url=environ["TUTOR_MCP_URL"],
+            mcp_url=environ.get("TUTOR_MCP_URL", "").strip() or base_url + MCP_PATH,
             support_email=environ["TUTOR_SUPPORT_EMAIL"],
             test_login=environ.get("TUTOR_TEST_LOGIN") == "1",
         )

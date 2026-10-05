@@ -29,7 +29,7 @@ from tutor.mcp.server import build_mcp
 from tutor.services.context import Services
 from tutor.settings import Settings
 from tutor.web.app import create_app
-from tutor.web.config import WebConfig
+from tutor.web.config import MCP_PATH, WebConfig
 from tutor.web.pg import (
     PURGE_ABSOLUTE,
     PURGE_ANONYMOUS,
@@ -46,7 +46,6 @@ Receive = Callable[[], Awaitable[Message]]
 Send = Callable[[Message], Awaitable[None]]
 ASGIApp = Callable[[Scope, Receive, Send], Awaitable[None]]
 
-MCP_PATH = "/mcp"
 MCP_PATHS: frozenset[str] = frozenset(
     {MCP_PATH, "/authorize", "/token", "/register", "/consent", MCP_CALLBACK_PATH}
 )

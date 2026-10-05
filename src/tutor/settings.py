@@ -20,12 +20,10 @@ REQUIRED = (
     "GOOGLE_CLIENT_SECRET",
     "TUTOR_JWT_SIGNING_KEY",
     "TUTOR_OAUTH_STORAGE_KEY",
-    "TUTOR_WEB_SESSION_SECRET",
 )
 # Credentials of other roles (migration owner, gate report): the production app never holds them.
 OWNER_ONLY_KEYS = ("MIGRATION_DATABASE_URL", "GATE_REPORT_DATABASE_URL")
 MIN_SIGNING_KEY_CHARS = 32
-MIN_WEB_SECRET_CHARS = 32
 DEFAULT_OAUTH_STORAGE_DIR = "data/oauth"
 DEFAULT_PORT = 8000
 
@@ -83,9 +81,7 @@ class Settings:
     jwt_signing_key: str = field(repr=False)
     oauth_storage_key: str = field(repr=False)
     oauth_storage_dir: Path
-    web_session_secret: str = field(repr=False)
     port: int = DEFAULT_PORT
-    migration_database_url: str | None = field(default=None, repr=False)
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> Settings:
@@ -105,27 +101,16 @@ class Settings:
             )
         jwt_key = env["TUTOR_JWT_SIGNING_KEY"].strip()
         storage_key = env["TUTOR_OAUTH_STORAGE_KEY"].strip()
-        web_secret = env["TUTOR_WEB_SESSION_SECRET"].strip()
         if len(jwt_key) < MIN_SIGNING_KEY_CHARS:
             problems.append(
                 f"TUTOR_JWT_SIGNING_KEY must be at least {MIN_SIGNING_KEY_CHARS} characters"
             )
-        if len(web_secret) < MIN_WEB_SECRET_CHARS:
-            problems.append(
-                f"TUTOR_WEB_SESSION_SECRET must be at least {MIN_WEB_SECRET_CHARS} characters"
-            )
         if not _is_fernet_key(storage_key):
             problems.append("TUTOR_OAUTH_STORAGE_KEY must be a Fernet key")
-        secrets = {
-            "TUTOR_JWT_SIGNING_KEY": jwt_key,
-            "TUTOR_OAUTH_STORAGE_KEY": storage_key,
-            "TUTOR_WEB_SESSION_SECRET": web_secret,
-        }
-        reused = sorted(
-            name for name, value in secrets.items() if list(secrets.values()).count(value) > 1
-        )
-        if reused:
-            problems.append(f"{', '.join(reused)} must not share the same value")
+        if jwt_key == storage_key:
+            problems.append(
+                "TUTOR_JWT_SIGNING_KEY, TUTOR_OAUTH_STORAGE_KEY must not share the same value"
+            )
         if tutor_env == "prod" and not env["DATABASE_URL"].strip().startswith(
             ("postgresql:", "postgresql+", "postgres:")
         ):
@@ -152,7 +137,5 @@ class Settings:
             oauth_storage_dir=Path(
                 env.get("TUTOR_OAUTH_STORAGE_DIR", "").strip() or DEFAULT_OAUTH_STORAGE_DIR
             ),
-            web_session_secret=web_secret,
             port=port,
-            migration_database_url=env.get("MIGRATION_DATABASE_URL", "").strip() or None,
         )

@@ -31,7 +31,6 @@ def pg_settings() -> Settings:
             "GOOGLE_CLIENT_SECRET": "test-google-client-secret",
             "TUTOR_JWT_SIGNING_KEY": "j" * 40,
             "TUTOR_OAUTH_STORAGE_KEY": Fernet.generate_key().decode(),
-            "TUTOR_WEB_SESSION_SECRET": "w" * 40,
         }
     )
 

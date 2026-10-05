@@ -29,7 +29,6 @@ FULL = {
     "TUTOR_JWT_SIGNING_KEY": "j" * 48,
     "TUTOR_OAUTH_STORAGE_KEY": Fernet.generate_key().decode(),
     "TUTOR_OAUTH_STORAGE_DIR": "/data/oauth",
-    "TUTOR_WEB_SESSION_SECRET": "w" * 48,
     "TUTOR_PORT": "8000",
     "TUTOR_HOST": "0.0.0.0",  # noqa: S104 - the container listens on its own network only
     "FORWARDED_ALLOW_IPS": "172.30.10.3",

@@ -30,15 +30,14 @@ published. Your existing host tunnel does the rest.
 
    ```
    uv run python -c "import secrets; print(secrets.token_urlsafe(48))"   # TUTOR_JWT_SIGNING_KEY
-   uv run python -c "import secrets; print(secrets.token_urlsafe(48))"   # TUTOR_WEB_SESSION_SECRET
-   uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"   # TUTOR_OAUTH_STORAGE_KEY
+      uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"   # TUTOR_OAUTH_STORAGE_KEY
    uv run python -c "import secrets; print(secrets.token_hex(24))"   # POSTGRES_PASSWORD, APP_DB_PASSWORD, REPORT_DB_PASSWORD (three different)
    ```
 
    - `local-db.env`: `POSTGRES_USER=tutor_owner`, the password, `POSTGRES_DB=tutor`.
    - `local-migrate.env`: `MIGRATION_DATABASE_URL=postgresql://tutor_owner:<POSTGRES_PASSWORD>@db:5432/tutor`
      plus `APP_DB_PASSWORD` and `REPORT_DB_PASSWORD`.
-   - `local-docker.env`: the three app secrets, and `DATABASE_URL=postgresql://tutor_login:<APP_DB_PASSWORD>@db:5432/tutor`.
+   - `local-docker.env`: the two app secrets (leave `TUTOR_MCP_URL` empty), and `DATABASE_URL=postgresql://tutor_login:<APP_DB_PASSWORD>@db:5432/tutor`.
 3. Paste the spike's Google client id and secret into `local-docker.env` (`GOOGLE_CLIENT_ID`,
    `GOOGLE_CLIENT_SECRET`), and add the redirect URIs of step 4 in Google.
 4. `uv run just up-local` builds the image, migrates, creates the roles and starts the app
@@ -76,12 +75,12 @@ Copy-Item deploy/local.env.example deploy/local.env   # PowerShell
 ```
 
 `deploy/local.env` is git-ignored (`deploy/*.env`). Edit it by hand; every `<placeholder>` must go.
-The tunnel values (`TUTOR_BASE_URL`, `TUTOR_MCP_URL`, `FORWARDED_ALLOW_IPS=127.0.0.1`) are already
-the defaults. Generate the secrets and paste each output in; the three app secrets must differ:
+The tunnel values (`TUTOR_BASE_URL`, `FORWARDED_ALLOW_IPS=127.0.0.1`) are already the defaults;
+`TUTOR_MCP_URL` stays empty (it is derived as `<TUTOR_BASE_URL>/mcp`, and a different value stops
+the server). Generate the secrets and paste each output in; the two app secrets must differ:
 
 ```
 uv run python -c "import secrets; print(secrets.token_urlsafe(48))"   # TUTOR_JWT_SIGNING_KEY
-uv run python -c "import secrets; print(secrets.token_urlsafe(48))"   # TUTOR_WEB_SESSION_SECRET
 uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"   # TUTOR_OAUTH_STORAGE_KEY
 uv run python -c "import secrets; print(secrets.token_hex(24))"   # APP_DB_PASSWORD, then REPORT_DB_PASSWORD (differ)
 ```
@@ -176,8 +175,8 @@ come from `TUTOR_BASE_URL`, not from the request scheme.
 
 ## 8. Offline variant (localhost, Claude Code only)
 
-No tunnel, no claude.ai. In `deploy/local.env` set `TUTOR_BASE_URL=http://localhost:8000` and
-`TUTOR_MCP_URL=http://localhost:8000/mcp`; register
+No tunnel, no claude.ai. In `deploy/local.env` set `TUTOR_BASE_URL=http://localhost:8000` (and
+`TUTOR_MCP_URL` empty or `http://localhost:8000/mcp`); register
 `http://localhost:8000/oauth/callback` and `http://localhost:8000/auth/callback` in Google. Open
 http://localhost:8000/login (not `127.0.0.1`) and add the MCP with
 `claude mcp add --transport http tutor http://localhost:8000/mcp`. MCP Inspector

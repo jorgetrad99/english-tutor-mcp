@@ -29,7 +29,6 @@ def settings(tmp_path: Path) -> Settings:
             "TUTOR_JWT_SIGNING_KEY": "j" * 40,
             "TUTOR_OAUTH_STORAGE_KEY": Fernet.generate_key().decode(),
             "TUTOR_OAUTH_STORAGE_DIR": str(tmp_path / "oauth"),
-            "TUTOR_WEB_SESSION_SECRET": "w" * 40,
         }
     )
 
