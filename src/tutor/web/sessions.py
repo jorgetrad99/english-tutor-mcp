@@ -124,9 +124,11 @@ class ServerSessionMiddleware:
             kept = {k: v for k, v in data.items() if k in CARRY_OVER_KEYS} if was_anonymous else {}
             return self._new(holder.login_as, kept, now)
         if session is not None:
-            if data != original or now - session.last_seen_at > _TOUCH_EVERY:
-                # Update only: a row deleted meanwhile (logout) stays deleted, no cookie refresh.
-                self.deps.sessions.touch_session(session.token_hash, now, data)
+            stale = data != original or now - session.last_seen_at > _TOUCH_EVERY
+            # Update only: a row deleted meanwhile (logout) stays deleted. Tell the browser
+            # to drop the dead token instead of refreshing it.
+            if stale and not self.deps.sessions.touch_session(session.token_hash, now, data):
+                return self._cookie("", 0)
             return None
         if data:
             return self._new(None, data, now)

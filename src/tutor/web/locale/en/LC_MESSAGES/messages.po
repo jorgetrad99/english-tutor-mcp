@@ -180,3 +180,15 @@ msgstr "Reference: %(ref)s"
 
 msgid "Reintentar"
 msgstr "Try again"
+
+msgid "Cuenta en eliminación"
+msgstr "Account being deleted"
+
+msgid "Tu cuenta se está eliminando"
+msgstr "Your account is being deleted"
+
+msgid "Recibimos tu solicitud. Borraremos todos tus datos en un máximo de 24 horas."
+msgstr "We received your request. We'll delete all your data within 24 hours."
+
+msgid "Si fue un error, escríbenos hoy a %(email)s."
+msgstr "If this was a mistake, write to us today at %(email)s."

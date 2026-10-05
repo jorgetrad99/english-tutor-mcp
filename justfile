@@ -56,3 +56,7 @@ check: lint
 # MCP Inspector (needs Node)
 inspector:
     npx @modelcontextprotocol/inspector
+
+# Dashboard over in-memory demo data (no Google, no Stripe); open http://localhost:8780/auth/test-login
+dashboard-demo:
+    uv run uvicorn tutor.web.demo_server:app --port 8780 --reload

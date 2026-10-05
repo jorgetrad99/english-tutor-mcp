@@ -81,18 +81,22 @@ async def require_csrf(request: Request) -> None:
 
 
 APP_ROUTER_DEPS = [Depends(require_csrf)]
-# Unsafe-method routes allowed to skip require_csrf (no session cookie to forge against).
-CSRF_EXEMPT_PATHS = frozenset({"/auth/test-login", "/webhooks/stripe"})
 
 
 def _depends_on(dependant: Dependant, call: object) -> bool:
     return dependant.call is call or any(_depends_on(d, call) for d in dependant.dependencies)
 
 
-def assert_csrf_everywhere(app: FastAPI) -> None:
+def csrf_exempt_paths(config: WebConfig) -> frozenset[str]:
+    """Only the test login may skip CSRF, and only where it exists (TUTOR_ENV=test)."""
+    return frozenset({"/auth/test-login"}) if config.test_login else frozenset()
+
+
+def assert_csrf_everywhere(app: FastAPI, config: WebConfig) -> None:
     """Fail at startup if an unsafe-method route forgot `require_csrf`."""
+    exempt = csrf_exempt_paths(config)
     for route in app.routes:
-        if not isinstance(route, APIRoute) or route.path in CSRF_EXEMPT_PATHS:
+        if not isinstance(route, APIRoute) or route.path in exempt:
             continue
         if ((route.methods or set()) - _SAFE_METHODS) and not _depends_on(
             route.dependant, require_csrf

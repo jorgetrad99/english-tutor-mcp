@@ -37,7 +37,7 @@ def create_app(deps: WebDeps, config: WebConfig) -> FastAPI:
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     for router in all_routers(config):
         app.include_router(router)
-    assert_csrf_everywhere(app)
+    assert_csrf_everywhere(app, config)
     _install_error_handlers(app)
     # Added first = innermost. Security headers are outermost so even error pages get them.
     app.add_middleware(ServerSessionMiddleware, deps=deps, config=config)

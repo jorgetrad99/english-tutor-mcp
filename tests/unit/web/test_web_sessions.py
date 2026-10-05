@@ -9,6 +9,7 @@ from fastapi.responses import PlainTextResponse
 from fastapi.testclient import TestClient
 
 from tutor.domain.dashboard.types import Role, User
+from tutor.web.config import WebConfig
 from tutor.web.deps import (
     APP_ROUTER_DEPS,
     assert_csrf_everywhere,
@@ -194,7 +195,8 @@ def test_session_deleted_in_flight_is_not_revived(
     response = c.get("/probe/slow-logout")
     assert response.status_code == 200
     assert backend.load_session(hash_token(token)) is None
-    assert "set-cookie" not in response.headers
+    cookie = response.headers["set-cookie"]  # the browser is told to drop the dead token
+    assert cookie.startswith(f"{COOKIE}=;") and "Max-Age=0" in cookie
 
 
 def test_create_never_replaces_and_touch_never_inserts(
@@ -352,7 +354,7 @@ def test_purge_expired_removes_idle_absolute_and_anonymous_rows(
     assert set(backend.web_sessions) == {"fresh", "anon-new"}
 
 
-def test_unprotected_unsafe_route_is_rejected_at_startup() -> None:
+def test_unprotected_unsafe_route_is_rejected_at_startup(config: WebConfig) -> None:
     bare = FastAPI()
 
     @bare.post("/oops")
@@ -360,7 +362,34 @@ def test_unprotected_unsafe_route_is_rejected_at_startup() -> None:
         return PlainTextResponse("x")
 
     with pytest.raises(RuntimeError, match="/oops"):
-        assert_csrf_everywhere(bare)
+        assert_csrf_everywhere(bare, config)
     guarded = FastAPI()
     guarded.include_router(_probe_router())
-    assert_csrf_everywhere(guarded)  # protected routes pass
+    assert_csrf_everywhere(guarded, config)  # protected routes pass
+
+
+def test_csrf_exemption_exists_only_with_test_login(config: WebConfig) -> None:
+    def build(test_login: bool) -> FastAPI:
+        bare = FastAPI()
+
+        @bare.post("/auth/test-login")
+        async def login_route() -> PlainTextResponse:
+            return PlainTextResponse("x")
+
+        assert_csrf_everywhere(bare, replace(config, test_login=test_login))
+        return bare
+
+    build(True)
+    with pytest.raises(RuntimeError, match="/auth/test-login"):
+        build(False)
+
+
+def test_stripe_webhook_path_is_not_exempt(config: WebConfig) -> None:
+    bare = FastAPI()
+
+    @bare.post("/webhooks/stripe")
+    async def hook() -> PlainTextResponse:
+        return PlainTextResponse("x")
+
+    with pytest.raises(RuntimeError, match="/webhooks/stripe"):
+        assert_csrf_everywhere(bare, config)

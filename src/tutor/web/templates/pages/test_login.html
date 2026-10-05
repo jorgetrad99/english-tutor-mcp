@@ -1,0 +1,14 @@
+{# i18n: skip #}
+{% extends "layouts/public.html" %}
+{% block title %}Demo login{% endblock %}
+{% block content %}
+<section class="card card--narrow">
+  <h1>Demo login</h1>
+  {% for u in demo_users %}
+  <form method="post" action="/auth/test-login" class="inline-form">
+    <input type="hidden" name="user_id" value="{{ u.id }}">
+    <button class="btn btn--ghost btn--block">{{ u.display_name }} · {{ u.role }}</button>
+  </form>
+  {% endfor %}
+</section>
+{% endblock %}

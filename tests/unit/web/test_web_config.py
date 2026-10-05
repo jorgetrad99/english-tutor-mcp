@@ -28,3 +28,26 @@ def test_test_login_allowed_in_test_env() -> None:
 def test_unknown_env_is_refused() -> None:
     with pytest.raises(ValueError, match="TUTOR_ENV"):
         WebConfig.from_env({**ENV, "TUTOR_ENV": "staging"})
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "",
+        "tutor.example.com",
+        "ftp://tutor.example.com",
+        "https://",
+        "http://tutor.example.com",
+        "https://user:pw@tutor.example.com",
+        "javascript://x",
+    ],
+)
+def test_bad_base_url_is_refused_naming_only_the_key(url: str) -> None:
+    with pytest.raises(ValueError, match="TUTOR_BASE_URL") as info:
+        WebConfig.from_env({**ENV, "TUTOR_BASE_URL": url})
+    assert url not in str(info.value) or url == ""
+
+
+def test_http_is_allowed_on_loopback() -> None:
+    config = WebConfig.from_env({**ENV, "TUTOR_BASE_URL": "http://localhost:8780/"})
+    assert config.base_url == "http://localhost:8780"

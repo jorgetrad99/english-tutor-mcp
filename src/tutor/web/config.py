@@ -6,6 +6,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal, cast
 
+from tutor.settings import _base_url
+
 _ENVS = ("dev", "test", "prod")
 
 
@@ -30,9 +32,12 @@ class WebConfig:
         env = environ.get("TUTOR_ENV", "dev")
         if env not in _ENVS:
             raise ValueError(f"TUTOR_ENV must be one of {_ENVS}")
+        base_url = _base_url(environ["TUTOR_BASE_URL"])
+        if base_url is None:
+            raise ValueError("TUTOR_BASE_URL must be an https origin (http only on loopback)")
         return cls(
             env=cast(Literal["dev", "test", "prod"], env),
-            base_url=environ["TUTOR_BASE_URL"].rstrip("/"),
+            base_url=base_url,
             mcp_url=environ["TUTOR_MCP_URL"],
             support_email=environ["TUTOR_SUPPORT_EMAIL"],
             test_login=environ.get("TUTOR_TEST_LOGIN") == "1",

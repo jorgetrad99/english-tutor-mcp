@@ -100,9 +100,16 @@ def missing_translations() -> list[str]:
     missing: set[str] = set()
     if not TEMPLATES_DIR.exists():
         return []
-    for _file, _line, message, _comments, _ctx in extract_from_dir(
+    skip = {
+        p.relative_to(TEMPLATES_DIR).as_posix()
+        for p in TEMPLATES_DIR.rglob("*.html")
+        if p.read_text(encoding="utf-8").startswith("{# i18n: skip #}")
+    }
+    for file, _line, message, _comments, _ctx in extract_from_dir(
         str(TEMPLATES_DIR), method_map, options
     ):
+        if Path(file).as_posix() in skip:
+            continue
         ids = message if isinstance(message, tuple) else (message,)
         msgid = ids[0]
         entry = catalog.get(msgid) if msgid else None
