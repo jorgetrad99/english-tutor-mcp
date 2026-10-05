@@ -5,17 +5,20 @@ until an isolation case is added below.
 """
 
 import re
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from uuid import UUID, uuid4
 
-from fastapi import FastAPI
+import pytest
+from fastapi import APIRouter, Depends, FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
-from starlette.routing import BaseRoute
 
 from tutor.domain.dashboard.types import ConnectedClient
+from tutor.web.config import WebConfig
 from tutor.web.demo import DemoUsers
+from tutor.web.deps import assert_csrf_everywhere, require_csrf
 from tutor.web.memory import MemoryBackend
+from tutor.web.routing import iter_api_routes
 
 from .conftest import csrf_of
 
@@ -51,24 +54,12 @@ PARAM = re.compile(r"{(\w+)(?::\w+)?}")
 Login = Callable[[UUID], TestClient]
 
 
-def _flatten(routes: Iterable[BaseRoute]) -> list[APIRoute]:
-    """FastAPI 0.142 keeps included routers as `_IncludedRouter` nodes, not APIRoutes."""
-    found: list[APIRoute] = []
-    for route in routes:
-        if isinstance(route, APIRoute):
-            found.append(route)
-        elif (included := getattr(route, "original_router", None)) is not None:
-            assert not route.include_context.prefix, "prefixed routers: extend _flatten"  # type: ignore[attr-defined]
-            found.extend(_flatten(included.routes))
-    return found
-
-
 def _methods(route: APIRoute) -> set[str]:
     return set(route.methods or ())
 
 
 def _routes(app: FastAPI) -> list[APIRoute]:
-    return _flatten(app.routes)
+    return iter_api_routes(app)
 
 
 def _fill(path: str, values: dict[str, str]) -> str:
@@ -165,3 +156,46 @@ def test_own_ids_still_work(login: Login, demo: DemoUsers, backend: MemoryBacken
 def test_postponed_pages_are_not_registered(app: FastAPI) -> None:
     paths = [route.path for route in _routes(app)]
     assert [p for p in paths if p.startswith(POSTPONED_PREFIXES)] == []
+
+
+def test_csrf_guard_sees_routes_of_included_routers(config: WebConfig) -> None:
+    router = APIRouter()
+
+    @router.post("/app/unguarded")
+    async def unguarded() -> None:  # pragma: no cover - never called
+        return None
+
+    app = FastAPI()
+    app.include_router(router)
+    with pytest.raises(RuntimeError, match="/app/unguarded"):
+        assert_csrf_everywhere(app, config)
+
+
+def test_csrf_guard_accepts_guarded_routes_of_included_routers(config: WebConfig) -> None:
+    router = APIRouter()
+
+    @router.post("/app/guarded", dependencies=[Depends(require_csrf)])
+    async def guarded() -> None:  # pragma: no cover - never called
+        return None
+
+    app = FastAPI()
+    app.include_router(router)
+    assert_csrf_everywhere(app, config)
+
+
+def test_route_walker_refuses_prefixed_includes() -> None:
+    app = FastAPI()
+    app.include_router(APIRouter(), prefix="/x")
+    app.include_router(_router_with_route(), prefix="/x")
+    with pytest.raises(RuntimeError, match="prefix"):
+        iter_api_routes(app)
+
+
+def _router_with_route() -> APIRouter:
+    router = APIRouter()
+
+    @router.get("/a")
+    async def a() -> None:  # pragma: no cover - never called
+        return None
+
+    return router

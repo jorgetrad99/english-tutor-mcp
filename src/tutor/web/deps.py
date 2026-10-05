@@ -8,12 +8,12 @@ from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.dependencies.models import Dependant
-from fastapi.routing import APIRoute
 from starlette.concurrency import run_in_threadpool
 
 from tutor.domain.dashboard.types import Role, User
 from tutor.web.config import WebConfig
 from tutor.web.ports import WebDeps
+from tutor.web.routing import iter_api_routes
 from tutor.web.security import safe_next
 
 CSRF_HEADER = "x-csrf-token"
@@ -122,8 +122,8 @@ def assert_csrf_everywhere(app: FastAPI, config: WebConfig) -> None:
 
     `require_csrf_if_session` counts only on `/auth/logout`."""
     exempt = csrf_exempt_paths(config)
-    for route in app.routes:
-        if not isinstance(route, APIRoute) or route.path in exempt:
+    for route in iter_api_routes(app):
+        if route.path in exempt:
             continue
         if not ((route.methods or set()) - _SAFE_METHODS):
             continue
