@@ -1,0 +1,478 @@
+# IT starter track, v0 draft (core loop v0 spec, section 7.1)
+#
+# Status: DRAFT for author review. Content only; the implementation plan turns it into a seed migration.
+# Fields match the `track_items` and `track_chunks` tables in spec section 5.
+#
+# Coverage (checked with a script before each commit; the plan turns it into a seed test):
+#   - 24 items: it-01..it-12 are B1, it-13..it-24 are B2, ordered as a progression.
+#   - 4 items per interaction type; no two consecutive items share a type.
+#   - Every use case has at least 3 items; 4 items have skill = writing.
+#   - 5 chunks per item, each with one example sentence.
+#
+# Review checklist for the author:
+#   1. Are the situations realistic for your testers' jobs?
+#   2. Is each chunk something a B1/B2 developer would actually use (not textbook English)?
+#   3. Is anything culturally odd for Mexican developers working with US teams?
+#   4. Any use case missing or wrongly weighted?
+#
+# Writing items: the learner writes; the character replies in writing with the obstacle.
+# Chunk text has no slot markers ("...") so it can be matched against what the learner says.
+
+domain: it
+version: 1
+items:
+  - id: it-01
+    order_no: 1
+    cefr: B1
+    skill: speaking
+    interaction_type: explain
+    use_cases: [standup]
+    can_do_en: "Can give a clear daily standup update: what I did, what I will do, and what is blocking me."
+    can_do_es: "Puedo dar una actualización clara en el standup: qué hice, qué haré y qué me bloquea."
+    character: "Sam, the team lead, who runs a fast standup and keeps time"
+    objective: "Give your update in under a minute, including one blocker and when you expect to finish."
+    obstacle: "Sam asks for a specific date for the blocked task and whether anyone can help."
+    scenario_hint: "Daily standup on a video call; you are fixing a login bug that depends on another team's API."
+    chunks:
+      - {id: it-01-c1, position: 1, text: "yesterday I worked on", example: "Yesterday I worked on the password reset flow."}
+      - {id: it-01-c2, position: 2, text: "today I'm going to", example: "Today I'm going to write the tests for the new endpoint."}
+      - {id: it-01-c3, position: 3, text: "I'm blocked on", example: "I'm blocked on the API keys from the payments team."}
+      - {id: it-01-c4, position: 4, text: "it should be done by", example: "It should be done by Thursday if the keys arrive today."}
+      - {id: it-01-c5, position: 5, text: "I'll keep you posted", example: "I'll ping them again after standup. I'll keep you posted."}
+
+  - id: it-02
+    order_no: 2
+    cefr: B1
+    skill: speaking
+    interaction_type: small_talk
+    use_cases: [client_call, one_on_one]
+    can_do_en: "Can keep a short, friendly small-talk exchange going at the start of a call and move on to the agenda."
+    can_do_es: "Puedo mantener una plática breve y amable al inicio de una llamada y pasar a la agenda."
+    character: "Priya, a client project manager who joins the call two minutes early"
+    objective: "Keep the small talk going for about two minutes, then politely move to the agenda."
+    obstacle: "Her audio cuts out, and she asks about your weekend plans just as others are about to join."
+    scenario_hint: "Weekly video call with a client; you joined first and Priya is the first to arrive."
+    chunks:
+      - {id: it-02-c1, position: 1, text: "how's your week going so far", example: "Hi Priya, how's your week going so far?"}
+      - {id: it-02-c2, position: 2, text: "can you hear me okay", example: "Sorry, can you hear me okay now?"}
+      - {id: it-02-c3, position: 3, text: "anything fun planned for the weekend", example: "Anything fun planned for the weekend?"}
+      - {id: it-02-c4, position: 4, text: "shall we get started", example: "Looks like everyone is here. Shall we get started?"}
+      - {id: it-02-c5, position: 5, text: "thanks for making the time", example: "Thanks for making the time today."}
+
+  - id: it-03
+    order_no: 3
+    cefr: B1
+    skill: speaking
+    interaction_type: ask_for_help
+    use_cases: [standup, incident]
+    can_do_en: "Can ask a busy colleague for help with a technical problem and explain what I have already tried."
+    can_do_es: "Puedo pedir ayuda a un colega ocupado con un problema técnico y explicar lo que ya intenté."
+    character: "Tom, a senior engineer who is busy preparing a release"
+    objective: "Get Tom to agree to look at your problem with you today."
+    obstacle: "Tom says he is busy and asks what you have already tried before he commits any time."
+    scenario_hint: "A test fails only in CI, not on your laptop, and you have been stuck for two hours."
+    chunks:
+      - {id: it-03-c1, position: 1, text: "do you have a minute", example: "Hey Tom, do you have a minute?"}
+      - {id: it-03-c2, position: 2, text: "I've been stuck on this for", example: "I've been stuck on this for about two hours."}
+      - {id: it-03-c3, position: 3, text: "so far I've tried", example: "So far I've tried clearing the cache and rerunning the pipeline."}
+      - {id: it-03-c4, position: 4, text: "could you take a look at", example: "Could you take a look at the logs with me?"}
+      - {id: it-03-c5, position: 5, text: "whenever you have time", example: "No rush, whenever you have time after the release."}
+
+  - id: it-04
+    order_no: 4
+    cefr: B1
+    skill: writing
+    interaction_type: give_feedback
+    use_cases: [code_review, async_writing]
+    can_do_en: "Can write clear, kind code review comments that praise good work and point out a problem."
+    can_do_es: "Puedo escribir comentarios de code review claros y amables que reconozcan el buen trabajo y señalen un problema."
+    character: "Ana, a junior developer who opened her first big pull request"
+    objective: "Write three review comments: one specific compliment, one blocking issue, and one optional suggestion."
+    obstacle: "Ana replies to your blocking comment: 'It works on my machine, why does it matter?'"
+    scenario_hint: "Ana's pull request adds a search endpoint with no input validation and one very long function."
+    chunks:
+      - {id: it-04-c1, position: 1, text: "nice work on", example: "Nice work on the pagination, it's really easy to follow."}
+      - {id: it-04-c2, position: 2, text: "could we add", example: "Could we add validation for the query parameter here?"}
+      - {id: it-04-c3, position: 3, text: "this might break if", example: "This might break if the search term is empty."}
+      - {id: it-04-c4, position: 4, text: "not a blocker, but", example: "Not a blocker, but this function could be split in two."}
+      - {id: it-04-c5, position: 5, text: "happy to pair on this", example: "Happy to pair on this if it helps."}
+
+  - id: it-05
+    order_no: 5
+    cefr: B1
+    skill: speaking
+    interaction_type: negotiate
+    use_cases: [standup, one_on_one]
+    can_do_en: "Can negotiate a realistic deadline or a smaller scope with my manager."
+    can_do_es: "Puedo negociar con mi manager una fecha de entrega realista o un alcance más pequeño."
+    character: "Laura, an engineering manager under pressure from sales"
+    objective: "Agree either on two more days or on a smaller first version for Friday."
+    obstacle: "Laura says the Friday date was already promised to a client."
+    scenario_hint: "You estimated a feature at five days, but it is due in three; the database migration turned out bigger."
+    chunks:
+      - {id: it-05-c1, position: 1, text: "to be realistic", example: "To be realistic, it will take at least five days."}
+      - {id: it-05-c2, position: 2, text: "if we leave out", example: "If we leave out the export button, we could ship on Friday."}
+      - {id: it-05-c3, position: 3, text: "what's the priority here", example: "What's the priority here, the date or the full feature?"}
+      - {id: it-05-c4, position: 4, text: "I'd rather", example: "I'd rather ship a smaller version than a buggy one."}
+      - {id: it-05-c5, position: 5, text: "does that work for you", example: "Does that work for you?"}
+
+  - id: it-06
+    order_no: 6
+    cefr: B1
+    skill: speaking
+    interaction_type: disagree
+    use_cases: [code_review]
+    can_do_en: "Can politely disagree with a teammate's technical proposal and give one clear reason."
+    can_do_es: "Puedo estar en desacuerdo con la propuesta técnica de un compañero de forma educada y dar una razón clara."
+    character: "Raj, a teammate who wants to add a new date library to the project"
+    objective: "Convince Raj to use the library the project already has, or agree on a small test first."
+    obstacle: "Raj says the new library is the industry standard and everyone uses it."
+    scenario_hint: "A review meeting about Raj's pull request, which adds a 300 KB dependency for one date format."
+    chunks:
+      - {id: it-06-c1, position: 1, text: "I see your point, but", example: "I see your point, but we already have a library for dates."}
+      - {id: it-06-c2, position: 2, text: "my concern is", example: "My concern is the bundle size."}
+      - {id: it-06-c3, position: 3, text: "have we considered", example: "Have we considered just writing a small helper?"}
+      - {id: it-06-c4, position: 4, text: "what if we", example: "What if we try it in one module first?"}
+      - {id: it-06-c5, position: 5, text: "let's agree to", example: "Let's agree to check the bundle size before we merge."}
+
+  - id: it-07
+    order_no: 7
+    cefr: B1
+    skill: speaking
+    interaction_type: explain
+    use_cases: [demo, client_call]
+    can_do_en: "Can explain a feature I built to a non-technical person in simple words."
+    can_do_es: "Puedo explicar una funcionalidad que construí a una persona no técnica con palabras sencillas."
+    character: "Mia, a product owner who is not technical and needs to tell customers about it"
+    objective: "Explain what the feature does, who it helps, and one limitation, without jargon."
+    obstacle: "Mia asks if customers can use it tomorrow, but it is only enabled for internal users."
+    scenario_hint: "You built automatic invoice reminders that email customers three days before a due date."
+    chunks:
+      - {id: it-07-c1, position: 1, text: "basically, it lets users", example: "Basically, it lets users get a reminder before an invoice is due."}
+      - {id: it-07-c2, position: 2, text: "the main benefit is", example: "The main benefit is fewer late payments."}
+      - {id: it-07-c3, position: 3, text: "behind the scenes", example: "Behind the scenes, a job checks the due dates every night."}
+      - {id: it-07-c4, position: 4, text: "for now, it only", example: "For now, it only works for internal accounts."}
+      - {id: it-07-c5, position: 5, text: "does that make sense", example: "Does that make sense so far?"}
+
+  - id: it-08
+    order_no: 8
+    cefr: B1
+    skill: writing
+    interaction_type: ask_for_help
+    use_cases: [async_writing, incident]
+    can_do_en: "Can write a short, polite Slack message asking another team for access or information."
+    can_do_es: "Puedo escribir un mensaje corto y educado en Slack para pedir acceso o información a otro equipo."
+    character: "Ken, a DevOps engineer in another time zone who gets many requests"
+    objective: "Write a Slack message that gets you read access to the staging database today."
+    obstacle: "Ken replies asking you to open a ticket and explain why you need access."
+    scenario_hint: "You need to check why some test orders in staging are stuck in the wrong status."
+    chunks:
+      - {id: it-08-c1, position: 1, text: "quick question", example: "Hi Ken, quick question about staging access."}
+      - {id: it-08-c2, position: 2, text: "would it be possible to", example: "Would it be possible to get read access to the staging database?"}
+      - {id: it-08-c3, position: 3, text: "I need it to", example: "I need it to check why some test orders are stuck."}
+      - {id: it-08-c4, position: 4, text: "no rush, but", example: "No rush, but it would help me finish this today."}
+      - {id: it-08-c5, position: 5, text: "thanks in advance", example: "Thanks in advance!"}
+
+  - id: it-09
+    order_no: 9
+    cefr: B1
+    skill: speaking
+    interaction_type: small_talk
+    use_cases: [interview]
+    can_do_en: "Can handle the first minutes of a job interview: small talk and a short introduction of myself."
+    can_do_es: "Puedo manejar los primeros minutos de una entrevista de trabajo: plática inicial y una breve presentación personal."
+    character: "Emma, a friendly recruiter at a US software company"
+    objective: "Answer the small talk naturally and introduce yourself in about one minute."
+    obstacle: "Emma interrupts to ask why you want to leave your current job."
+    scenario_hint: "First video interview for a remote backend role; the recruiter starts with small talk."
+    chunks:
+      - {id: it-09-c1, position: 1, text: "thanks for having me", example: "Thanks for having me, it's nice to meet you."}
+      - {id: it-09-c2, position: 2, text: "years of experience in", example: "I have five years of experience in backend development."}
+      - {id: it-09-c3, position: 3, text: "right now I'm working on", example: "Right now I'm working on a payments platform."}
+      - {id: it-09-c4, position: 4, text: "I'm looking for", example: "I'm looking for a role where I can work with a bigger team."}
+      - {id: it-09-c5, position: 5, text: "what I enjoy most is", example: "What I enjoy most is solving performance problems."}
+
+  - id: it-10
+    order_no: 10
+    cefr: B1
+    skill: speaking
+    interaction_type: give_feedback
+    use_cases: [one_on_one]
+    can_do_en: "Can give a teammate positive feedback and ask for one change in a friendly way."
+    can_do_es: "Puedo darle retroalimentación positiva a un compañero y pedirle un cambio de forma amable."
+    character: "Leo, a helpful teammate who often joins standup late"
+    objective: "Thank Leo for something specific and agree on how he can join standup on time."
+    obstacle: "Leo says the standup time does not work because he takes his kids to school."
+    scenario_hint: "A one-on-one coffee call; you run the team's standup this month."
+    chunks:
+      - {id: it-10-c1, position: 1, text: "I really appreciated", example: "I really appreciated your help with the deployment last week."}
+      - {id: it-10-c2, position: 2, text: "one thing I noticed", example: "One thing I noticed is that you often join standup late."}
+      - {id: it-10-c3, position: 3, text: "it would help the team if", example: "It would help the team if we all started on time."}
+      - {id: it-10-c4, position: 4, text: "how do you feel about", example: "How do you feel about posting your update in Slack on those days?"}
+      - {id: it-10-c5, position: 5, text: "what would work better for you", example: "What would work better for you?"}
+
+  - id: it-11
+    order_no: 11
+    cefr: B1
+    skill: speaking
+    interaction_type: negotiate
+    use_cases: [client_call]
+    can_do_en: "Can reschedule a meeting with a client and agree on a new time."
+    can_do_es: "Puedo reprogramar una reunión con un cliente y acordar un nuevo horario."
+    character: "Daniel, a client who is very busy and travelling this week"
+    objective: "Move tomorrow's review call and agree on a new date and time that works for both of you."
+    obstacle: "Daniel only has early-morning slots, before your working day starts."
+    scenario_hint: "You need to move the call because the build you planned to show is not ready."
+    chunks:
+      - {id: it-11-c1, position: 1, text: "would you mind if we moved", example: "Would you mind if we moved tomorrow's call?"}
+      - {id: it-11-c2, position: 2, text: "I'm afraid", example: "I'm afraid the build isn't ready yet."}
+      - {id: it-11-c3, position: 3, text: "how about", example: "How about Thursday at ten?"}
+      - {id: it-11-c4, position: 4, text: "that works for me", example: "That works for me."}
+      - {id: it-11-c5, position: 5, text: "I'll send you an updated invite", example: "I'll send you an updated invite right after this."}
+
+  - id: it-12
+    order_no: 12
+    cefr: B1
+    skill: speaking
+    interaction_type: disagree
+    use_cases: [standup]
+    can_do_en: "Can disagree with an estimate in a planning meeting and explain why."
+    can_do_es: "Puedo estar en desacuerdo con una estimación en una reunión de planeación y explicar por qué."
+    character: "Carlos, a tech lead who wants to estimate a task as small"
+    objective: "Get the team to raise the estimate or split the task into two."
+    obstacle: "Carlos says, 'It's just one endpoint, how hard can it be?'"
+    scenario_hint: "Sprint planning; the task needs an endpoint, a migration and changes in two other services."
+    chunks:
+      - {id: it-12-c1, position: 1, text: "I'm not sure about that", example: "I'm not sure about that estimate."}
+      - {id: it-12-c2, position: 2, text: "it's bigger than it looks", example: "It's bigger than it looks because of the migration."}
+      - {id: it-12-c3, position: 3, text: "we also need to", example: "We also need to update two other services."}
+      - {id: it-12-c4, position: 4, text: "maybe we should split it", example: "Maybe we should split it into two tickets."}
+      - {id: it-12-c5, position: 5, text: "to be on the safe side", example: "To be on the safe side, I'd say five points."}
+
+  - id: it-13
+    order_no: 13
+    cefr: B2
+    skill: speaking
+    interaction_type: explain
+    use_cases: [incident, client_call]
+    can_do_en: "Can give a clear incident update to stakeholders: impact, cause so far, and next steps, without blaming anyone."
+    can_do_es: "Puedo dar una actualización clara de un incidente a los interesados: impacto, causa hasta ahora y próximos pasos, sin culpar a nadie."
+    character: "Helen, a director of customer support who keeps receiving angry tickets"
+    objective: "Explain the impact, what you know about the cause, and when the next update will come."
+    obstacle: "Helen pushes for an exact time when everything will be fixed and asks whose fault it was."
+    scenario_hint: "Checkout has failed for 15% of users for 40 minutes after a deployment; a rollback is in progress."
+    chunks:
+      - {id: it-13-c1, position: 1, text: "the impact so far is", example: "The impact so far is that about fifteen percent of checkouts are failing."}
+      - {id: it-13-c2, position: 2, text: "we've identified", example: "We've identified a configuration change in the last deployment."}
+      - {id: it-13-c3, position: 3, text: "we're in the process of", example: "We're in the process of rolling it back."}
+      - {id: it-13-c4, position: 4, text: "I can't give you an exact time yet, but", example: "I can't give you an exact time yet, but we expect to recover within the hour."}
+      - {id: it-13-c5, position: 5, text: "the next update will be at", example: "The next update will be at three o'clock."}
+
+  - id: it-14
+    order_no: 14
+    cefr: B2
+    skill: speaking
+    interaction_type: disagree
+    use_cases: [code_review]
+    can_do_en: "Can challenge a proposal in an architecture discussion, weigh the trade-offs and suggest an alternative."
+    can_do_es: "Puedo cuestionar una propuesta en una discusión de arquitectura, comparar ventajas y desventajas y sugerir una alternativa."
+    character: "Marta, a principal engineer who proposes rewriting a service in a new language"
+    objective: "Argue for an incremental refactor and get agreement on a small proof of concept first."
+    obstacle: "Marta says the current code is impossible to maintain and the rewrite will pay off in six months."
+    scenario_hint: "Architecture review of the notifications service; the team has two people and a busy quarter."
+    chunks:
+      - {id: it-14-c1, position: 1, text: "I'm not fully convinced that", example: "I'm not fully convinced that a rewrite is the fastest path."}
+      - {id: it-14-c2, position: 2, text: "the trade-off here is", example: "The trade-off here is speed now versus risk later."}
+      - {id: it-14-c3, position: 3, text: "from what I've seen", example: "From what I've seen, most bugs come from two modules."}
+      - {id: it-14-c4, position: 4, text: "wouldn't it make more sense to", example: "Wouldn't it make more sense to refactor those first?"}
+      - {id: it-14-c5, position: 5, text: "could we start with a proof of concept", example: "Could we start with a proof of concept and decide in two weeks?"}
+
+  - id: it-15
+    order_no: 15
+    cefr: B2
+    skill: speaking
+    interaction_type: ask_for_help
+    use_cases: [client_call]
+    can_do_en: "Can ask a client clarifying questions about vague requirements and confirm what was agreed."
+    can_do_es: "Puedo hacerle preguntas aclaratorias a un cliente sobre requisitos vagos y confirmar lo acordado."
+    character: "Olivia, a client founder who explains ideas quickly and changes her mind"
+    objective: "Turn a vague request into three clear requirements and read them back for confirmation."
+    obstacle: "Olivia answers 'just make it like Amazon' and wants it by next month."
+    scenario_hint: "Discovery call for a new 'recommended products' section in an online store."
+    chunks:
+      - {id: it-15-c1, position: 1, text: "just to make sure I understand", example: "Just to make sure I understand, you want recommendations on the product page?"}
+      - {id: it-15-c2, position: 2, text: "could you walk me through", example: "Could you walk me through how a customer would use it?"}
+      - {id: it-15-c3, position: 3, text: "what does success look like", example: "What does success look like for you in three months?"}
+      - {id: it-15-c4, position: 4, text: "do you mean", example: "When you say like Amazon, do you mean based on purchase history?"}
+      - {id: it-15-c5, position: 5, text: "let me summarize what we agreed", example: "Let me summarize what we agreed so far."}
+
+  - id: it-16
+    order_no: 16
+    cefr: B2
+    skill: writing
+    interaction_type: give_feedback
+    use_cases: [async_writing, code_review]
+    can_do_en: "Can write constructive feedback on a design document, balancing strengths, risks and questions."
+    can_do_es: "Puedo escribir retroalimentación constructiva sobre un documento de diseño, equilibrando fortalezas, riesgos y preguntas."
+    character: "Ivan, a mid-level engineer who wrote his first design document and asked for comments"
+    objective: "Write a short comment with one strength, two risks and one question, ending with a clear recommendation."
+    obstacle: "Ivan replies that the deadline doesn't leave time for the changes you suggest."
+    scenario_hint: "Ivan's design adds a cache in front of the pricing API but does not say how the cache is invalidated."
+    chunks:
+      - {id: it-16-c1, position: 1, text: "overall, this is a solid", example: "Overall, this is a solid proposal."}
+      - {id: it-16-c2, position: 2, text: "one risk I see is", example: "One risk I see is stale prices after an update."}
+      - {id: it-16-c3, position: 3, text: "it's not clear to me how", example: "It's not clear to me how the cache gets invalidated."}
+      - {id: it-16-c4, position: 4, text: "I'd suggest", example: "I'd suggest adding a short section on failure modes."}
+      - {id: it-16-c5, position: 5, text: "happy to discuss further", example: "Happy to discuss further in our next sync."}
+
+  - id: it-17
+    order_no: 17
+    cefr: B2
+    skill: speaking
+    interaction_type: negotiate
+    use_cases: [interview]
+    can_do_en: "Can negotiate salary and conditions at the end of a hiring process, politely but firmly."
+    can_do_es: "Puedo negociar salario y condiciones al final de un proceso de contratación, con cortesía pero con firmeza."
+    character: "Michael, a hiring manager making a verbal offer"
+    objective: "Get a higher salary or an extra benefit, and agree on next steps without accepting on the spot."
+    obstacle: "Michael says the salary band is fixed and asks for an answer today."
+    scenario_hint: "Final call with the hiring manager; the offer is about 10% below what you expected."
+    chunks:
+      - {id: it-17-c1, position: 1, text: "I'm really excited about the role", example: "I'm really excited about the role and the team."}
+      - {id: it-17-c2, position: 2, text: "based on my experience", example: "Based on my experience, I was expecting something closer to ninety thousand."}
+      - {id: it-17-c3, position: 3, text: "is there any flexibility on", example: "Is there any flexibility on the base salary?"}
+      - {id: it-17-c4, position: 4, text: "could we look at", example: "If the salary is fixed, could we look at a signing bonus?"}
+      - {id: it-17-c5, position: 5, text: "could I get back to you by", example: "Could I get back to you by Friday?"}
+
+  - id: it-18
+    order_no: 18
+    cefr: B2
+    skill: speaking
+    interaction_type: small_talk
+    use_cases: [demo, client_call]
+    can_do_en: "Can make natural small talk with a client after a demo and keep the relationship warm."
+    can_do_es: "Puedo platicar de forma natural con un cliente después de una demo y mantener una buena relación."
+    character: "George, a client's head of operations who stays on the call after the demo"
+    objective: "Keep a relaxed conversation for a few minutes and find out how his team really felt about the demo."
+    obstacle: "George jokes that your product is 'slow like our old system' and waits for your reaction."
+    scenario_hint: "The formal demo just ended; most attendees left and George is still on the call."
+    chunks:
+      - {id: it-18-c1, position: 1, text: "what did you make of it", example: "That went well, I think. What did you make of it?"}
+      - {id: it-18-c2, position: 2, text: "out of curiosity", example: "Out of curiosity, how does your team handle this today?"}
+      - {id: it-18-c3, position: 3, text: "fair point", example: "Fair point, we're working on speed this quarter."}
+      - {id: it-18-c4, position: 4, text: "I'd love to hear", example: "I'd love to hear what your team thinks."}
+      - {id: it-18-c5, position: 5, text: "let's stay in touch", example: "Let's stay in touch before the next demo."}
+
+  - id: it-19
+    order_no: 19
+    cefr: B2
+    skill: speaking
+    interaction_type: explain
+    use_cases: [interview]
+    can_do_en: "Can describe a difficult technical problem I solved, with the context, my actions and the result."
+    can_do_es: "Puedo describir un problema técnico difícil que resolví, con el contexto, mis acciones y el resultado."
+    character: "Nina, a senior interviewer who asks for details and follow-ups"
+    objective: "Tell a two-minute story about a hard problem and answer one follow-up question in detail."
+    obstacle: "Nina asks what you would do differently, and what you did versus what your teammates did."
+    scenario_hint: "Behavioral interview question: 'Tell me about a time you solved a difficult technical problem.'"
+    chunks:
+      - {id: it-19-c1, position: 1, text: "the context was", example: "The context was a reporting service that timed out every Monday."}
+      - {id: it-19-c2, position: 2, text: "what I did first was", example: "What I did first was add metrics to find the slow query."}
+      - {id: it-19-c3, position: 3, text: "it turned out that", example: "It turned out that an index was missing."}
+      - {id: it-19-c4, position: 4, text: "as a result", example: "As a result, the report went from ten minutes to forty seconds."}
+      - {id: it-19-c5, position: 5, text: "looking back, I would", example: "Looking back, I would have added monitoring earlier."}
+
+  - id: it-20
+    order_no: 20
+    cefr: B2
+    skill: speaking
+    interaction_type: ask_for_help
+    use_cases: [incident]
+    can_do_en: "Can coordinate help during an outage: ask for specific support, split the work and confirm who does what."
+    can_do_es: "Puedo coordinar ayuda durante una caída del sistema: pedir apoyo específico, repartir el trabajo y confirmar quién hace qué."
+    character: "Victor, an on-call database engineer who was just paged and is half awake"
+    objective: "Get Victor to check the database while you handle the application side, and agree on how to keep in touch."
+    obstacle: "Victor says it's probably not the database and asks why you paged him."
+    scenario_hint: "It's 2 a.m.; the API is timing out and database connections are at the limit."
+    chunks:
+      - {id: it-20-c1, position: 1, text: "sorry to wake you, but", example: "Sorry to wake you, but we have an outage."}
+      - {id: it-20-c2, position: 2, text: "here's what we know so far", example: "Here's what we know so far: the API is timing out."}
+      - {id: it-20-c3, position: 3, text: "could you check whether", example: "Could you check whether the connection pool is full?"}
+      - {id: it-20-c4, position: 4, text: "in the meantime, I'll", example: "In the meantime, I'll restart the workers."}
+      - {id: it-20-c5, position: 5, text: "let's sync again in", example: "Let's sync again in ten minutes."}
+
+  - id: it-21
+    order_no: 21
+    cefr: B2
+    skill: speaking
+    interaction_type: disagree
+    use_cases: [client_call, demo]
+    can_do_en: "Can push back on scope creep with a client while protecting the relationship and offering options."
+    can_do_es: "Puedo frenar el aumento de alcance con un cliente, cuidando la relación y ofreciendo opciones."
+    character: "Sophie, a client product lead who asks for 'one small extra' a week before the demo"
+    objective: "Decline adding the feature before the demo and agree on an option: a later release, a trade-off or a change request."
+    obstacle: "Sophie says her boss already saw a mock-up and expects it in the demo."
+    scenario_hint: "Planning call one week before a big demo; the request would add a new user role and permissions."
+    chunks:
+      - {id: it-21-c1, position: 1, text: "I understand why this matters", example: "I understand why this matters for your boss."}
+      - {id: it-21-c2, position: 2, text: "the challenge is", example: "The challenge is that permissions touch every screen."}
+      - {id: it-21-c3, position: 3, text: "if we add this now", example: "If we add this now, we risk the whole demo."}
+      - {id: it-21-c4, position: 4, text: "what we could do instead is", example: "What we could do instead is show a clickable prototype."}
+      - {id: it-21-c5, position: 5, text: "I'd recommend we", example: "I'd recommend we schedule it for the next release."}
+
+  - id: it-22
+    order_no: 22
+    cefr: B2
+    skill: speaking
+    interaction_type: give_feedback
+    use_cases: [one_on_one]
+    can_do_en: "Can give my manager feedback about a process problem, with examples and a proposal."
+    can_do_es: "Puedo darle retroalimentación a mi manager sobre un problema de proceso, con ejemplos y una propuesta."
+    character: "Andrew, your manager, who likes adding last-minute tasks to the sprint"
+    objective: "Explain the impact of mid-sprint changes with an example and agree on one concrete change."
+    obstacle: "Andrew says the business needs flexibility and that other teams don't complain."
+    scenario_hint: "Monthly one-on-one; three urgent tasks were added mid-sprint last month and two features slipped."
+    chunks:
+      - {id: it-22-c1, position: 1, text: "there's something I'd like to raise", example: "There's something I'd like to raise about our sprints."}
+      - {id: it-22-c2, position: 2, text: "for example, last sprint", example: "For example, last sprint we added three urgent tasks."}
+      - {id: it-22-c3, position: 3, text: "the impact on the team is", example: "The impact on the team is that planned work slips."}
+      - {id: it-22-c4, position: 4, text: "what if we tried", example: "What if we tried keeping a small buffer for urgent work?"}
+      - {id: it-22-c5, position: 5, text: "I'm open to other ideas", example: "I'm open to other ideas, of course."}
+
+  - id: it-23
+    order_no: 23
+    cefr: B2
+    skill: writing
+    interaction_type: negotiate
+    use_cases: [async_writing, demo]
+    can_do_en: "Can write an email that negotiates priorities with another team and proposes a clear plan."
+    can_do_es: "Puedo escribir un correo que negocie prioridades con otro equipo y proponga un plan claro."
+    character: "Rachel, the lead of the mobile team, whose work you depend on for a demo"
+    objective: "Write an email that gets the mobile team to deliver one API change before your demo, offering something in return."
+    obstacle: "Rachel replies that her team is fully booked and the change is not on their roadmap."
+    scenario_hint: "Your demo in two weeks needs the mobile app to send one new field; the mobile team plans its own releases."
+    chunks:
+      - {id: it-23-c1, position: 1, text: "I'm reaching out because", example: "I'm reaching out because our demo depends on one small change."}
+      - {id: it-23-c2, position: 2, text: "would it be feasible to", example: "Would it be feasible to add the field before the 20th?"}
+      - {id: it-23-c3, position: 3, text: "in return, we could", example: "In return, we could write the API tests for your team."}
+      - {id: it-23-c4, position: 4, text: "I completely understand if", example: "I completely understand if your roadmap is full."}
+      - {id: it-23-c5, position: 5, text: "let me know if a quick call would help", example: "Let me know if a quick call would help."}
+
+  - id: it-24
+    order_no: 24
+    cefr: B2
+    skill: speaking
+    interaction_type: small_talk
+    use_cases: [one_on_one]
+    can_do_en: "Can build rapport with a new manager in a first one-on-one, talking about my background, motivation and working style."
+    can_do_es: "Puedo crear una buena relación con un nuevo manager en la primera reunión uno a uno, hablando de mi trayectoria, motivación y forma de trabajar."
+    character: "Grace, a new manager who just joined from another company"
+    objective: "Share your background and how you like to work, and ask her two questions."
+    obstacle: "Grace asks what you would change about the team if you could change one thing."
+    scenario_hint: "First one-on-one with a new manager, informal and on video."
+    chunks:
+      - {id: it-24-c1, position: 1, text: "a bit about my background", example: "A bit about my background: I started as a QA engineer."}
+      - {id: it-24-c2, position: 2, text: "what motivates me is", example: "What motivates me is seeing people actually use what I build."}
+      - {id: it-24-c3, position: 3, text: "I work best when", example: "I work best when I have clear goals and some autonomy."}
+      - {id: it-24-c4, position: 4, text: "how about you", example: "How about you, what brought you here?"}
+      - {id: it-24-c5, position: 5, text: "if I could change one thing", example: "If I could change one thing, it would be fewer meetings."}
