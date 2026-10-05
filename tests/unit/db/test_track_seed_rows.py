@@ -1,3 +1,6 @@
+import hashlib
+import json
+
 import pytest
 
 from tutor.content import load_track
@@ -44,3 +47,20 @@ def test_track_rows_match_the_table_columns_and_values() -> None:
         "text": chunk.text,
         "example": chunk.example,
     }
+
+
+# v0 track snapshot seeded by revision 0003. Before the first production deploy, update this hash
+# when the author edits the track. After it, every change to track_it_v0.yaml must ship with a new
+# seed revision (upsert/delete by id) and then update this hash.
+TRACK_SNAPSHOT_SHA256 = "fcc01e9b02ed5cf1a953c5aecedd3aabdd42131b14e0ca51a76ef3cac21a4d6d"
+
+
+def test_seeded_track_snapshot_is_pinned() -> None:
+    items, chunks = track_rows(load_track())
+    canonical = json.dumps(
+        {"items": items, "chunks": chunks},
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    assert hashlib.sha256(canonical.encode("utf-8")).hexdigest() == TRACK_SNAPSHOT_SHA256

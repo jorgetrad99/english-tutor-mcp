@@ -2,6 +2,7 @@ from uuid import UUID
 
 import pytest
 from sqlalchemy import Engine, text
+from sqlalchemy.exc import ProgrammingError
 
 from tutor.content import load_track
 from tutor.services.ports import UowFactory
@@ -28,3 +29,9 @@ def test_track_repo_returns_the_seeded_track_in_order(
     expected = tuple(sorted(it_items, key=lambda i: i.order_no))
     with uow_factory(user_id) as uow:
         assert uow.track.items("it") == expected
+
+
+def test_tutor_app_cannot_write_the_track(uow_factory: UowFactory, user_id: UUID) -> None:
+    with pytest.raises(ProgrammingError, match="permission denied"):  # noqa: SIM117
+        with uow_factory(user_id) as uow:
+            uow.conn.execute(text("INSERT INTO track_items (id) VALUES ('x')"))  # type: ignore[attr-defined]
