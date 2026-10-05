@@ -36,3 +36,40 @@ def test_valid_values_are_canonicalised(kind: SettingType, raw: str, canonical: 
 def test_invalid_values_raise(kind: SettingType, raw: str) -> None:
     with pytest.raises(SettingError):
         parse_setting(kind, raw)
+
+
+def test_very_long_int_is_rejected() -> None:
+    with pytest.raises(SettingError):
+        parse_setting(SettingType.INT, "1" * 5000)
+
+
+def test_very_long_float_is_rejected() -> None:
+    with pytest.raises(SettingError):
+        parse_setting(SettingType.FLOAT, "1." + "1" * 400)
+
+
+def test_inf_and_nan_strings_raise() -> None:
+    with pytest.raises(SettingError):
+        parse_setting(SettingType.FLOAT, "inf")
+    with pytest.raises(SettingError):
+        parse_setting(SettingType.FLOAT, "nan")
+
+
+def test_whitespace_only_str_is_empty() -> None:
+    assert parse_setting(SettingType.STR, "   \t\n  ") == ""
+
+
+def test_inf_string_float_raises() -> None:
+    with pytest.raises(SettingError):
+        parse_setting(SettingType.FLOAT, "inf")
+
+
+def test_negative_inf_string_float_raises() -> None:
+    with pytest.raises(SettingError):
+        parse_setting(SettingType.FLOAT, "-inf")
+
+
+def test_overflow_float_raises() -> None:
+    # 1e309 overflows to infinity
+    with pytest.raises(SettingError):
+        parse_setting(SettingType.FLOAT, "1e309")

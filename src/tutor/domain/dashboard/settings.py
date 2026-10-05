@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 
 from tutor.domain.dashboard.glossary import TextError, clean_user_text
@@ -11,6 +12,7 @@ _INT = re.compile(r"-?\d+")
 _FLOAT = re.compile(r"-?\d+(\.\d+)?")
 _TRUE = {"true", "1", "si", "sí", "yes"}
 _FALSE = {"false", "0", "no"}
+_MAX_RAW_LEN = 30
 STR_MAX = 200
 
 
@@ -22,13 +24,22 @@ def parse_setting(kind: SettingType, raw: str) -> str:
     value = raw.strip()
     match kind:
         case SettingType.INT:
-            if not _INT.fullmatch(value):
+            if len(value) > _MAX_RAW_LEN or not _INT.fullmatch(value):
                 raise SettingError(kind)
-            return str(int(value))
+            try:
+                return str(int(value))
+            except ValueError as exc:
+                raise SettingError(kind) from exc
         case SettingType.FLOAT:
-            if not _FLOAT.fullmatch(value):
+            if len(value) > _MAX_RAW_LEN or not _FLOAT.fullmatch(value):
                 raise SettingError(kind)
-            return str(float(value))
+            try:
+                parsed = float(value)
+                if not math.isfinite(parsed):
+                    raise SettingError(kind)
+                return str(parsed)
+            except ValueError as exc:
+                raise SettingError(kind) from exc
         case SettingType.BOOL:
             lowered = value.casefold()
             if lowered in _TRUE:
