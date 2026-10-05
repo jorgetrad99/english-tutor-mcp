@@ -4,6 +4,7 @@ The app connects as the non-superuser login role; the caller is identified by a 
 in context, so `get_access_token()` -> `current_user_id` runs inside the tool worker thread.
 """
 
+import secrets
 import zoneinfo
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -17,7 +18,8 @@ from mcp.server.auth.middleware.auth_context import auth_context_var
 from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
 from mcp.shared.exceptions import MCPError
 from mcp_lesson import Clock, call, random_sub, run_scripted_lesson
-from sqlalchemy import Engine
+from sqlalchemy import Engine, text
+from sqlalchemy.engine import make_url
 
 from tutor.app import build_app
 from tutor.db.engine import check_app_role
@@ -120,3 +122,66 @@ def test_build_app_checks_the_role_before_serving(
     build_app(app_settings(tmp_path), engine=login_engine)
     with pytest.raises(SystemExit, match="login role"):
         build_app(app_settings(tmp_path), engine=engine)
+
+
+OWNER_MEMBER = "tutor_owner_member_test"
+
+
+@pytest.fixture
+def owner_member_engine(engine: Engine) -> Iterator[Engine]:
+    """A NOSUPERUSER login that is a member of tutor_app AND of the table owner's role."""
+    from tutor.db.engine import make_engine
+    from tutor.db.tables import USER_TABLES
+
+    owner = engine.connect()
+    with owner:
+        who = owner.execute(
+            text("SELECT tableowner FROM pg_tables WHERE tablename = :t"), {"t": USER_TABLES[0]}
+        ).scalar_one()
+        password = secrets.token_hex(16)
+        with engine.begin() as conn:
+            conn.execute(text(f"DROP ROLE IF EXISTS {OWNER_MEMBER}"))
+            conn.execute(
+                text(
+                    f"CREATE ROLE {OWNER_MEMBER} LOGIN NOSUPERUSER NOBYPASSRLS "
+                    f"PASSWORD '{password}'"
+                )
+            )
+            conn.execute(text(f"GRANT tutor_app TO {OWNER_MEMBER}"))
+            conn.execute(text(f'GRANT "{who}" TO {OWNER_MEMBER}'))
+    url = make_url(engine.url.render_as_string(hide_password=False)).set(
+        username=OWNER_MEMBER, password=password
+    )
+    eng = make_engine(url.render_as_string(hide_password=False))
+    yield eng
+    eng.dispose()
+    with engine.begin() as conn:
+        conn.execute(text(f"DROP ROLE IF EXISTS {OWNER_MEMBER}"))
+
+
+def test_startup_check_refuses_a_login_that_is_a_member_of_the_owner(
+    owner_member_engine: Engine,
+) -> None:
+    with pytest.raises(SystemExit, match="login role"):
+        check_app_role(owner_member_engine)
+
+
+def test_startup_check_refuses_a_login_outside_tutor_app(engine: Engine) -> None:
+    from tutor.db.engine import make_engine
+
+    password = secrets.token_hex(16)
+    name = "tutor_no_app_test"
+    with engine.begin() as conn:
+        conn.execute(text(f"DROP ROLE IF EXISTS {name}"))
+        conn.execute(
+            text(f"CREATE ROLE {name} LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD '{password}'")
+        )
+    try:
+        url = engine.url.set(username=name, password=password)
+        eng = make_engine(url.render_as_string(hide_password=False))
+        with pytest.raises(SystemExit, match="not a member of tutor_app"):
+            check_app_role(eng)
+        eng.dispose()
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text(f"DROP ROLE IF EXISTS {name}"))

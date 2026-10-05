@@ -43,6 +43,7 @@ SCRUBBED_LOGGERS = (
     "mcp.shared.jsonrpc_dispatcher",
     "mcp.server.auth.handlers.authorize",
     "mcp.server.auth.middleware.bearer_auth",
+    "uvicorn.error",  # "Exception in ASGI application" with the traceback of an OAuth route
 )
 # The OAuth proxy logs authorization codes and token fragments (a replayed code at ERROR),
 # often in f-strings no filter can clean, so its whole subtree is silenced.

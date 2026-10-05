@@ -146,3 +146,11 @@ def test_short_web_session_secret_is_rejected_without_its_value() -> None:
     with pytest.raises(SystemExit, match="TUTOR_WEB_SESSION_SECRET must be at least 32") as info:
         Settings.from_env(env(TUTOR_WEB_SESSION_SECRET=short))
     assert short not in str(info.value)
+
+
+@pytest.mark.parametrize("url", ["sqlite://", "mysql://u:p@h/d"])
+def test_prod_requires_a_postgres_database_url(url: str) -> None:
+    with pytest.raises(SystemExit, match="DATABASE_URL") as info:
+        Settings.from_env(env(TUTOR_ENV="prod", DATABASE_URL=url))
+    assert url not in str(info.value)
+    assert Settings.from_env(env(DATABASE_URL=url)).env == "dev"

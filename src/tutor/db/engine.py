@@ -25,15 +25,26 @@ def make_engine(database_url: str) -> Engine:
     )
 
 
-def role_problems(*, superuser: bool, bypassrls: bool, owned_tables: Sequence[str]) -> list[str]:
+def role_problems(
+    *,
+    superuser: bool,
+    bypassrls: bool,
+    reaches_privileged: bool,
+    owned_tables: Sequence[str],
+    in_tutor_app: bool,
+) -> list[str]:
     """What is wrong with the app's login role; empty when it is safe to serve with."""
     problems: list[str] = []
     if superuser:
         problems.append("the login role is a superuser")
     if bypassrls:
         problems.append("the login role has BYPASSRLS")
+    if reaches_privileged:
+        problems.append("the login role is a member of a superuser or BYPASSRLS role")
     if owned_tables:
-        problems.append("the login role owns user tables")
+        problems.append("the login role owns user tables, directly or through a role")
+    if not in_tutor_app:
+        problems.append("the login role is not a member of tutor_app")
     return problems
 
 
@@ -41,25 +52,40 @@ def check_app_role(engine: Engine) -> None:
     """Refuse to start unless row-level security binds this engine's login role.
 
     PostgreSQL skips RLS for superusers and BYPASSRLS roles, and a table's owner can alter its
-    policies, so DATABASE_URL must be a plain LOGIN role that is only a member of tutor_app (the
-    owner's URL is MIGRATION_DATABASE_URL). Messages never carry the URL.
+    policies. Membership counts (pg_has_role ... 'MEMBER'), because SET ROLE reaches any role
+    the login is a member of. DATABASE_URL must be a plain LOGIN role that is only a member of
+    tutor_app (the owner's URL is MIGRATION_DATABASE_URL). Messages never carry the URL.
     """
     with engine.connect() as conn:
         row = conn.execute(
-            text("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = session_user")
+            text(
+                "SELECT r.rolsuper, r.rolbypassrls, "
+                "EXISTS (SELECT 1 FROM pg_roles p WHERE (p.rolsuper OR p.rolbypassrls) "
+                "AND pg_has_role(session_user, p.oid, 'MEMBER')), "
+                "pg_has_role(session_user, 'tutor_app', 'MEMBER') "
+                "FROM pg_roles r WHERE r.rolname = session_user"
+            )
         ).one()
         owned = (
             conn.execute(
                 text(
-                    "SELECT tablename FROM pg_tables WHERE schemaname = current_schema() "
-                    "AND tableowner = session_user AND tablename = ANY(:tables)"
+                    "SELECT c.relname FROM pg_class c "
+                    "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                    "WHERE n.nspname = current_schema() AND c.relname = ANY(:tables) "
+                    "AND pg_has_role(session_user, c.relowner, 'MEMBER')"
                 ),
                 {"tables": list(USER_TABLES)},
             )
             .scalars()
             .all()
         )
-    problems = role_problems(superuser=row[0], bypassrls=row[1], owned_tables=owned)
+    problems = role_problems(
+        superuser=row[0],
+        bypassrls=row[1],
+        reaches_privileged=row[2],
+        owned_tables=owned,
+        in_tutor_app=row[3],
+    )
     if problems:
         raise SystemExit(
             "DATABASE_URL must be a non-superuser LOGIN role without BYPASSRLS that is a member "

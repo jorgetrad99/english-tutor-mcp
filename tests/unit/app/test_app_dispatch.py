@@ -142,8 +142,49 @@ async def test_get_requests_pass_the_guard_untouched() -> None:
 def test_role_problems_name_each_unsafe_property() -> None:
     from tutor.db.engine import role_problems
 
-    assert role_problems(superuser=False, bypassrls=False, owned_tables=[]) == []
-    assert len(role_problems(superuser=True, bypassrls=True, owned_tables=["users"])) == 3
-    assert role_problems(superuser=False, bypassrls=False, owned_tables=["users"]) == [
-        "the login role owns user tables"
+    safe = {
+        "superuser": False,
+        "bypassrls": False,
+        "reaches_privileged": False,
+        "owned_tables": [],
+        "in_tutor_app": True,
+    }
+    assert role_problems(**safe) == []  # type: ignore[arg-type]
+    unsafe = {
+        "superuser": True,
+        "bypassrls": True,
+        "reaches_privileged": True,
+        "owned_tables": ["users"],
+        "in_tutor_app": False,
+    }
+    assert len(role_problems(**unsafe)) == 5  # type: ignore[arg-type]
+    for key, bad in unsafe.items():
+        [problem] = role_problems(**{**safe, key: bad})  # type: ignore[arg-type]
+        assert problem
+
+
+@pytest.mark.parametrize("method", ["PUT", "PATCH", "DELETE"])
+@pytest.mark.asyncio
+async def test_every_method_that_can_carry_a_body_is_capped(method: str) -> None:
+    inner = Recorder("mcp")
+    sent = await drive(BodySizeGuard(inner), http("/token", method), b"x" * 70_000, 3)
+    assert (sent[0]["status"], inner.seen) == (413, [])
+
+
+@pytest.mark.asyncio
+async def test_a_disconnect_while_buffering_never_reaches_the_app() -> None:
+    inner = Recorder("mcp")
+    sent: list[Message] = []
+    queue: list[Message] = [
+        {"type": "http.request", "body": b"abc", "more_body": True},
+        {"type": "http.disconnect"},
     ]
+
+    async def receive() -> Message:
+        return queue.pop(0)
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    await BodySizeGuard(inner)(http("/mcp", "POST"), receive, send)
+    assert (sent, inner.seen) == ([], [])

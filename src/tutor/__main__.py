@@ -16,11 +16,15 @@ from tutor.settings import Settings
 
 def run_kwargs(settings: Settings, env: Mapping[str, str]) -> dict[str, Any]:
     """No access log: it would print /oauth/callback?code=... and /authorize query strings."""
+    allowed = env.get("FORWARDED_ALLOW_IPS", "127.0.0.1")
+    if settings.env == "prod" and "*" in allowed:
+        raise SystemExit("FORWARDED_ALLOW_IPS must list the proxy addresses, not '*', in prod")
     return {
         "host": env.get("TUTOR_HOST", "127.0.0.1"),
         "port": settings.port,
         "proxy_headers": True,
-        "forwarded_allow_ips": env.get("FORWARDED_ALLOW_IPS", "127.0.0.1"),
+        "forwarded_allow_ips": allowed,
+        "server_header": False,
         "access_log": False,
     }
 

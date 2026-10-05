@@ -124,6 +124,10 @@ class Settings:
         )
         if reused:
             problems.append(f"{', '.join(reused)} must not share the same value")
+        if tutor_env == "prod" and not env["DATABASE_URL"].strip().startswith(
+            ("postgresql:", "postgresql+", "postgres:")
+        ):
+            problems.append("DATABASE_URL must be a PostgreSQL URL when TUTOR_ENV is prod")
         port = _port(env.get("TUTOR_PORT", str(DEFAULT_PORT)).strip())
         if port is None:
             problems.append("TUTOR_PORT must be a number from 1 to 65535")

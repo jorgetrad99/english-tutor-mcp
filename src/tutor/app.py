@@ -35,6 +35,7 @@ MCP_PATHS: frozenset[str] = frozenset(
 )
 WELL_KNOWN_PREFIX = "/.well-known/"
 MAX_BODY_BYTES = 65_536
+BODY_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 MAX_LOGGED_PATH = 200
 
 _routes = logging.getLogger("tutor.http")
@@ -56,14 +57,17 @@ async def send_json(send: Send, status: int, body: dict[str, Any]) -> None:
 
 
 class BodySizeGuard:
-    """Rejects POST bodies over 64 KB with 413 before the MCP app reads them (spec section 5)."""
+    """Rejects bodies over 64 KB (POST, PUT, PATCH, DELETE) with 413 before the app reads them.
+
+    Spec section 5.
+    """
 
     def __init__(self, app: ASGIApp, limit: int = MAX_BODY_BYTES) -> None:
         self.app = app
         self._limit = limit
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or scope.get("method") != "POST":
+        if scope["type"] != "http" or scope.get("method") not in BODY_METHODS:
             await self.app(scope, receive, send)
             return
         headers = {k.decode("latin-1").lower(): v for k, v in scope.get("headers", [])}
@@ -75,6 +79,8 @@ class BodySizeGuard:
         size = 0
         while True:
             message = await receive()
+            if message["type"] == "http.disconnect":
+                return  # the client left: nothing to answer, nothing for the app to do
             if message["type"] != "http.request":
                 break
             chunk = message.get("body", b"")

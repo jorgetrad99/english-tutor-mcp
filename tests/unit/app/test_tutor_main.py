@@ -44,6 +44,7 @@ def test_uvicorn_runs_behind_the_proxy_without_access_log(tmp_path: Path) -> Non
         "port": 8123,
         "proxy_headers": True,
         "forwarded_allow_ips": "172.18.0.0/16",
+        "server_header": False,
         "access_log": False,
     }
     assert entry.run_kwargs(settings, {"TUTOR_HOST": "::"})["forwarded_allow_ips"] == "127.0.0.1"
@@ -90,3 +91,45 @@ def test_configure_logging_leaves_the_library_log_guards_alone(
     assert after == before
     for name in SCRUBBED_LOGGERS:
         assert any(isinstance(f, ScrubFilter) for f in logging.getLogger(name).filters)
+
+
+def test_prod_refuses_a_wildcard_for_trusted_proxies(tmp_path: Path) -> None:
+    prod = Settings.from_env(
+        {**env(tmp_path), "TUTOR_ENV": "prod", "DATABASE_URL": "postgresql://x/y"}
+    )
+    with pytest.raises(SystemExit, match="FORWARDED_ALLOW_IPS"):
+        entry.run_kwargs(prod, {"FORWARDED_ALLOW_IPS": "*"})
+    with pytest.raises(SystemExit, match="FORWARDED_ALLOW_IPS"):
+        entry.run_kwargs(prod, {"FORWARDED_ALLOW_IPS": "10.0.0.1,*"})
+    dev = Settings.from_env(env(tmp_path))
+    assert entry.run_kwargs(dev, {"FORWARDED_ALLOW_IPS": "*"})["forwarded_allow_ips"] == "*"
+
+
+def test_uvicorn_error_log_loses_exception_text_even_after_uvicorn_configures_logging(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import logging.config
+
+    from uvicorn.config import LOGGING_CONFIG
+
+    from tutor.mcp.observe import guard_library_logs
+
+    names = ("uvicorn", "uvicorn.error", "uvicorn.access")
+    saved = {
+        n: (list(logging.getLogger(n).handlers), logging.getLogger(n).propagate) for n in names
+    }
+    try:
+        guard_library_logs()
+        logging.config.dictConfig(LOGGING_CONFIG)  # what uvicorn.run does at startup
+        try:
+            raise RuntimeError("code=SECRET-CODE")
+        except RuntimeError as exc:
+            logging.getLogger("uvicorn.error").error("Exception in ASGI application", exc_info=exc)
+    finally:
+        for n, (handlers, propagate) in saved.items():
+            logging.getLogger(n).handlers[:] = handlers
+            logging.getLogger(n).propagate = propagate
+    output = capsys.readouterr().err
+    assert "Exception in ASGI application" in output
+    assert "SECRET-CODE" not in output
+    assert "Traceback" not in output
