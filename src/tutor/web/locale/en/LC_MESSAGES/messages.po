@@ -1,0 +1,8 @@
+# English translations for the dashboard. msgids are the es-MX source text.
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: en\n"
+
+msgid "Entrar con Google"
+msgstr "Sign in with Google"
