@@ -18,14 +18,21 @@ chmod 700 "$BACKUP_DIR"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 dump="$BACKUP_DIR/tutor-$stamp.dump"
 roles="$BACKUP_DIR/tutor-roles-$stamp.sql"
-# compose.prod.yml by default. Under Coolify (docs/v0/coolify.md, "Backups") set DB_CONTAINER to
-# the db container's name and OAUTH_VOLUME to the oauth volume's name.
-if [ -n "${DB_CONTAINER:-}" ]; then
-  db="docker exec -i $DB_CONTAINER"
+# compose.prod.yml by default. Under Coolify (docs/v0/coolify.md, "Backups") set COMPOSE_PROJECT
+# to the application's uuid: the db container is found by its compose labels (its name changes
+# between deploys) and the OAuth volume is <uuid>_oauth.
+if [ -n "${COMPOSE_PROJECT:-}" ]; then
+  container="$(docker ps -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+    --filter "label=com.docker.compose.service=db")"
+  case "$container" in
+    "" | *[!0-9a-f]*) echo "expected one running db container in $COMPOSE_PROJECT" >&2; exit 1 ;;
+  esac
+  db="docker exec -i $container"
+  OAUTH_VOLUME="${COMPOSE_PROJECT}_oauth"
 else
   db="docker compose -f compose.prod.yml exec -T db"
+  OAUTH_VOLUME="tutor_oauth"
 fi
-OAUTH_VOLUME="${OAUTH_VOLUME:-tutor_oauth}"
 oauth="$BACKUP_DIR/tutor-oauth-$stamp.tgz"
 # Pinned like the other images; bump together with the runbook.
 ALPINE="alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc"
