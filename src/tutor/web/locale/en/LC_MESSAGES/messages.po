@@ -247,8 +247,8 @@ msgstr "In a new chat, say:"
 msgid "Abrir Claude"
 msgstr "Open Claude"
 
-msgid "Tu tutor ya registró tu primera sesión."
-msgstr "Your tutor has recorded your first session."
+msgid "Tu tutor ya está conectado."
+msgstr "Your tutor is connected."
 
 msgid "Aún no vemos tu primera sesión. Cuando termines una lección en Claude, revisa de nuevo."
 msgstr "We don't see your first session yet. When you finish a lesson in Claude, check again."

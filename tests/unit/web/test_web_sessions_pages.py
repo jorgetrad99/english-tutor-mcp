@@ -4,7 +4,7 @@ from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 
-from tutor.domain.dashboard.types import Lang
+from tutor.domain.dashboard.types import Lang, SessionStatus
 from tutor.web.demo import DemoUsers
 from tutor.web.memory import MemoryBackend
 
@@ -114,3 +114,21 @@ def test_status_filter_accepts_only_closed_and_incomplete(login: Login, demo: De
         html = c.get(f"/app/sessions?status={raw}").text
         assert "selected>Completa" not in html and '<option value="closed" selected>' not in html
         assert "Explicar un bloqueo técnico" in html
+
+
+def test_detail_hides_the_level_opinion_when_excluded_or_incomplete(
+    login: Login, demo: DemoUsers, backend: MemoryBackend
+) -> None:
+    # Final review M7: an estimate the server excluded, or one from an incomplete lesson,
+    # is not shown as the model's opinion.
+    detail = backend.session_rows[demo.ana][0]
+    assert detail.cefr is not None
+    session_id = detail.summary.id
+    backend.cefr_excluded.add(session_id)
+    assert backend.session_detail(demo.ana, session_id).cefr is None  # type: ignore[union-attr]
+    html = login(demo.ana).get(f"/app/sessions/{session_id}").text
+    assert "opinión del modelo" not in html
+    backend.cefr_excluded.clear()
+    incomplete = replace(detail.summary, status=SessionStatus.INCOMPLETE)
+    backend.session_rows[demo.ana][0] = replace(detail, summary=incomplete)
+    assert backend.session_detail(demo.ana, session_id).cefr is None  # type: ignore[union-attr]

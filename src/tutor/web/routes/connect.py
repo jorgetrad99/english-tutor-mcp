@@ -17,7 +17,7 @@ POLL_LIMIT = 60  # one check every 10 s: ten minutes, then a "check again" butto
 
 
 def connect_context(request: Request, user: User, n: int = 0) -> dict[str, Any]:
-    connected = get_deps(request).reader.has_any_session(user.id)
+    connected = get_deps(request).reader.has_connected(user.id)
     return {
         "mcp_url": get_config(request).mcp_url,
         "connected": connected,

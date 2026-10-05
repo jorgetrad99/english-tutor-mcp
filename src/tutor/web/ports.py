@@ -118,7 +118,9 @@ class DashboardReader(Protocol):
 
     def account(self, user_id: UUID) -> AccountData: ...
 
-    def has_any_session(self, user_id: UUID) -> bool: ...
+    def has_connected(self, user_id: UUID) -> bool:
+        """True once an MCP tool call reached the server for this user, or any session exists."""
+        ...
 
 
 class GlossaryEditor(Protocol):

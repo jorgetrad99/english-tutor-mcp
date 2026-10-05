@@ -5,7 +5,7 @@ applies to the web exactly as to MCP. Learner data is read and written with `app
 (which also takes the per-user advisory lock); a web session is reached by `app.web_session`
 (the cookie token's SHA-256), which the session middleware knows before it knows the user.
 No method uses an owner connection; the cross-user purge of expired web sessions goes
-through the SECURITY DEFINER function of migration 0004.
+through the SECURITY DEFINER function `purge_expired_web_sessions` (migration 0005's version).
 
 Every method blocks: callers run them in a worker thread, never on the event loop.
 """
@@ -84,6 +84,7 @@ _SESSION_COLUMNS = (
     sessions.c.hints_given,
     sessions.c.cefr_estimate_speaking,
     sessions.c.cefr_confidence,
+    sessions.c.cefr_excluded,
     sessions.c.confidence_1_5,
     sessions.c.chunks_offered,
     sessions.c.raw_evidence,
@@ -435,7 +436,7 @@ class PgWebBackend:
                 domain=item["domain"],
             )
         return dash.HomeData(
-            has_connected=latest is not None,
+            has_connected=latest is not None or me["mcp_first_seen_at"] is not None,
             has_plan=plan is not None,
             today=today_item,
             week_start=start,
@@ -534,7 +535,8 @@ class PgWebBackend:
         turns = tuple(t for t in (raw.get("user_turns") or ()) if isinstance(t, str))
         used = _valid_used(raw, offered)
         cefr = None
-        if m["cefr_estimate_speaking"] is not None:
+        shown = m["status"] == "closed" and not m["cefr_excluded"]  # never an excluded estimate
+        if shown and m["cefr_estimate_speaking"] is not None:
             estimate = raw.get("cefr_estimate") or {}
             evidence = tuple(str(e) for e in (estimate.get("evidence") or ()))
             confidence = dash.Confidence(m["cefr_confidence"] or "low")
@@ -608,8 +610,11 @@ class PgWebBackend:
             install_prompt_dismissed=me["install_prompt_dismissed_at"] is not None,
         )
 
-    def has_any_session(self, user_id: UUID) -> bool:
+    def has_connected(self, user_id: UUID) -> bool:
+        """A tool call set users.mcp_first_seen_at, or the learner has any session."""
         with scoped_connection(self._engine, user_id=user_id) as conn:
+            if _me(conn, user_id)["mcp_first_seen_at"] is not None:
+                return True
             found = conn.execute(
                 select(sessions.c.id).where(sessions.c.user_id == user_id).limit(1)
             ).scalar_one_or_none()

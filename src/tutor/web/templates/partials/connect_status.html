@@ -1,6 +1,6 @@
 <div id="connect-status" class="card connect-status"{% if connected or gave_up %} role="status"{% else %} hx-get="/app/connect/status?n={{ n + 1 }}" hx-trigger="every 10s" hx-swap="outerHTML"{% endif %}>
   {% if connected %}
-  <p><svg class="icon" aria-hidden="true"><use href="{{ asset('icons/sprite.svg') }}#check"></use></svg> {{ _("Tu tutor ya registró tu primera sesión.") }}</p>
+  <p><svg class="icon" aria-hidden="true"><use href="{{ asset('icons/sprite.svg') }}#check"></use></svg> {{ _("Tu tutor ya está conectado.") }}</p>
   <a class="btn btn--primary" href="/app/">{{ _("Ir a Inicio") }}</a>
   {% elif gave_up %}
   <p>{{ _("Aún no vemos tu primera sesión. Cuando termines una lección en Claude, revisa de nuevo.") }}</p>

@@ -18,7 +18,7 @@ from sqlalchemy.exc import DBAPIError
 from web_pg_support import BASE, WEB_CONFIG, csrf_token, google_login, pg_settings, pg_web_app
 
 from tutor.app import PeriodicPurge, build_app
-from tutor.db.tables import audit_log, glossary_items, users, web_sessions
+from tutor.db.tables import audit_log, glossary_items, sessions, users, web_sessions
 from tutor.db.uow import scoped_connection
 from tutor.domain.dashboard import types as dash
 from tutor.domain.dashboard.billing import banners_for
@@ -497,6 +497,32 @@ def test_session_detail(
     assert backend.session_detail(user_id, uuid4()) is None
 
 
+def test_session_detail_hides_an_excluded_or_incomplete_cefr_estimate(
+    engine: Engine,
+    backend: PgWebBackend,
+    seeded: LessonStart,
+    svc: Services,
+    clock: FixedClock,
+    user_id: UUID,
+) -> None:
+    # Final review M7: the server excluded the estimate, so the page must not show it.
+    with engine.begin() as conn:
+        conn.execute(
+            update(sessions).where(sessions.c.id == seeded.session_id).values(cefr_excluded=True)
+        )
+    detail = backend.session_detail(user_id, seeded.session_id)
+    assert detail is not None and detail.cefr is None
+    clock.advance(timedelta(minutes=1))
+    short = start_lesson(svc, user_id, StartLessonRequest(mode="text"))
+    clock.advance(timedelta(minutes=1))
+    ev = _evidence([], turns=("Short answer only.",), errors=())
+    end_session(svc, user_id, short.session_id, ev, _raw(ev))
+    incomplete = backend.session_detail(user_id, short.session_id)
+    assert incomplete is not None
+    assert incomplete.summary.status is dash.SessionStatus.INCOMPLETE
+    assert incomplete.cefr is None
+
+
 def test_glossary_hides_declined_and_uses_local_dates(
     backend: PgWebBackend, seeded: LessonStart, user_id: UUID, other_user_id: UUID
 ) -> None:
@@ -537,11 +563,26 @@ def test_update_glossary_text_is_scoped_to_the_owner(
     assert backend.update_glossary_text(user_id, declined, "x", "y") is None
 
 
-def test_has_any_session(
+def test_has_connected_after_a_session(
     backend: PgWebBackend, seeded: LessonStart, user_id: UUID, other_user_id: UUID
 ) -> None:
-    assert backend.has_any_session(user_id)
-    assert not backend.has_any_session(other_user_id)
+    assert backend.has_connected(user_id)
+    assert not backend.has_connected(other_user_id)
+
+
+def test_a_first_tool_call_counts_as_connected_before_any_session(
+    backend: PgWebBackend, svc: Services, user_id: UUID, other_user_id: UUID, now: datetime
+) -> None:
+    # Final review M4: get_profile sets users.mcp_first_seen_at before any session exists.
+    save_profile(svc, user_id, PROFILE)
+    assert not backend.has_connected(user_id)
+    assert not backend.home(user_id, TODAY).has_connected
+    with svc.uow(user_id) as uow:
+        assert uow.users.note_mcp_use(now)
+    assert backend.has_connected(user_id)
+    assert backend.home(user_id, TODAY).has_connected
+    assert not backend.has_connected(other_user_id)
+    assert not backend.home(other_user_id, TODAY).has_connected
 
 
 def test_account_preferences_and_install_prompt(

@@ -34,6 +34,7 @@ from tutor.domain.dashboard.types import (
     SessionDetail,
     SessionFilter,
     SessionPage,
+    SessionStatus,
     Setting,
     Subscription,
     SubStatus,
@@ -131,6 +132,8 @@ class MemoryBackend:
     seen_events: set[str] = field(default_factory=set)
     settings_rows: dict[str, Setting] = field(default_factory=dict)
     celebrated: dict[UUID, UUID] = field(default_factory=dict)
+    mcp_seen: set[UUID] = field(default_factory=set)  # users.mcp_first_seen_at is set
+    cefr_excluded: set[UUID] = field(default_factory=set)  # session ids
     audit: list[tuple[str, UUID, str]] = field(default_factory=list)
 
     # --- setup helpers ----------------------------------------------------
@@ -200,7 +203,8 @@ class MemoryBackend:
     def home(self, user_id: UUID, today: date) -> HomeData:
         home = self.homes.get(user_id, empty_home(today))
         celebrated = self.celebrated.get(user_id, home.last_celebrated_session_id)
-        return replace(home, last_celebrated_session_id=celebrated)
+        connected = home.has_connected or self.has_connected(user_id)
+        return replace(home, last_celebrated_session_id=celebrated, has_connected=connected)
 
     def usage(self, user_id: UUID, today: date) -> FreeUsage:
         resets = week_start(today) + timedelta(days=7)
@@ -233,7 +237,11 @@ class MemoryBackend:
     def session_detail(self, user_id: UUID, session_id: UUID) -> SessionDetail | None:
         for detail in self.session_rows.get(user_id, []):
             if detail.summary.id == session_id:
-                return detail
+                shown = (
+                    detail.summary.status is SessionStatus.CLOSED
+                    and session_id not in self.cefr_excluded
+                )
+                return detail if shown else replace(detail, cefr=None)
         return None
 
     def glossary(self, user_id: UUID, f: GlossaryFilter, today: date) -> tuple[GlossaryRow, ...]:
@@ -257,8 +265,8 @@ class MemoryBackend:
             install_prompt_dismissed=user_id in self.install_dismissed,
         )
 
-    def has_any_session(self, user_id: UUID) -> bool:
-        return bool(self.session_rows.get(user_id))
+    def has_connected(self, user_id: UUID) -> bool:
+        return user_id in self.mcp_seen or bool(self.session_rows.get(user_id))
 
     # --- GlossaryEditor ---------------------------------------------------
 
