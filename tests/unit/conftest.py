@@ -47,6 +47,30 @@ def _immutable(value: Any) -> bool:
     return isinstance(value, _IMMUTABLE)
 
 
+class _Identity:
+    """Key an object by identity while keeping it alive, so its id can never be reused."""
+
+    __slots__ = ("obj",)
+
+    def __init__(self, obj: Any) -> None:
+        self.obj = obj
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, _Identity) and other.obj is self.obj
+
+    def __hash__(self) -> int:
+        return id(self.obj)
+
+
+def _tag(value: Any) -> Any:
+    """Type-tag an immutable value so 1, 1.0, True, 0.0 and -0.0 never collide."""
+    if isinstance(value, tuple | frozenset):
+        return (type(value), tuple(_tag(item) for item in value))
+    if isinstance(value, float):
+        return (float, repr(value))
+    return (type(value), value)
+
+
 def _function_key(fn: Any) -> Any:
     """What decides a filter or test's behaviour, for constant folding at compile time.
 
@@ -55,13 +79,20 @@ def _function_key(fn: Any) -> Any:
     keyed on its code object, defaults and closure cell contents; a `functools.partial` on its
     target, arguments and keywords. That key is used only when every captured value is immutable
     (str, number, bytes, None, Enum, or tuples of those) and any global the code reads is module
-    state shared by all copies. Anything else is keyed on the object itself, which never shares.
+    state shared by all copies (the globals dict is part of the key). Anything else is keyed on the
+    object itself, which never shares. The cache assumes filter inputs (captured objects and module
+    state) do not change during the session.
     """
     if isinstance(fn, partial):
         inner = _function_key(fn.func)
         values = (*fn.args, *fn.keywords.values())
         if inner is not fn.func and _immutable(values):
-            return ("partial", inner, fn.args, tuple(sorted(fn.keywords.items())))
+            return (
+                "partial",
+                inner,
+                _tag(fn.args),
+                tuple(sorted((k, _tag(v)) for k, v in fn.keywords.items())),
+            )
         return fn
     code = getattr(fn, "__code__", None)
     if code is None or type(fn) is not FunctionType:
@@ -76,9 +107,10 @@ def _function_key(fn: Any) -> Any:
     return (
         "function",
         code,
-        cells,
-        fn.__defaults__,
-        tuple(sorted((fn.__kwdefaults__ or {}).items())),
+        _Identity(fn.__globals__),
+        _tag(cells),
+        _tag(fn.__defaults__),
+        tuple(sorted((k, _tag(v)) for k, v in (fn.__kwdefaults__ or {}).items())),
     )
 
 
@@ -86,6 +118,12 @@ def _callables(table: dict[str, Any]) -> tuple[Any, ...]:
     """Name, pass-argument marker and the function's behaviour key."""
     entries = ((name, _PassArg.from_obj(fn), _function_key(fn)) for name, fn in table.items())
     return tuple(sorted(entries, key=lambda entry: entry[0]))
+
+
+def _policies(env: Environment) -> tuple[Any, ...]:
+    """Policies such as `truncate.leeway` and `json.dumps_kwargs` change filter output."""
+    items = ((k, _tag(v) if _immutable(v) else _Identity(v)) for k, v in env.policies.items())
+    return tuple(sorted(items, key=lambda item: item[0]))
 
 
 def _compile_key(env: Environment) -> tuple[Any, ...]:
@@ -100,6 +138,7 @@ def _compile_key(env: Environment) -> tuple[Any, ...]:
         tuple(extensions),
         _callables(env.filters),
         _callables(env.tests),
+        _policies(env),
     )
 
 

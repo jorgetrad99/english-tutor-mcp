@@ -76,3 +76,40 @@ def test_closures_with_mutable_captures_never_share_code() -> None:
 
     assert build(["1"]) == "X1"
     assert build(["2"]) == "X2"
+
+
+@pytest.mark.parametrize(("first", "second"), [(1, 1.0), (1, True), (1.0, True), (0.0, -0.0)])
+def test_equal_but_differently_typed_captures_do_not_share_code(first: Any, second: Any) -> None:
+    def build(fn: Any) -> str:
+        env = Environment(autoescape=True)
+        env.filters["s"] = fn
+        return env.from_string("{{ 'X'|s }}").render()
+
+    def make(value: Any) -> Any:
+        def show(v: str) -> str:
+            return v + repr(value)
+
+        return show
+
+    assert build(make(first)) == "X" + repr(first)
+    assert build(make(second)) == "X" + repr(second)
+
+
+def test_policies_are_part_of_the_cache_key() -> None:
+    def build(leeway: int) -> str:
+        env = Environment(autoescape=True)
+        env.policies["truncate.leeway"] = leeway
+        return env.from_string("{{ 'abcdefghij'|truncate(8) }}").render()
+
+    assert build(0) == "abcde..."
+    assert build(5) == "abcdefghij"
+
+
+def test_json_policy_difference_does_not_share_code() -> None:
+    def build(kwargs: dict[str, Any]) -> str:
+        env = Environment(autoescape=True)
+        env.policies["json.dumps_kwargs"] = kwargs
+        return str(env.from_string("{{ {'b': 1, 'a': 2}|tojson }}").render())
+
+    assert build({"sort_keys": True}).index("a") < build({"sort_keys": True}).index("b")
+    assert build({"sort_keys": False}).index("b") < build({"sort_keys": False}).index("a")
