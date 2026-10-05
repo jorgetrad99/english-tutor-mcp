@@ -41,12 +41,6 @@ def test_clean_exit_commits_and_an_exception_rolls_back(
         assert list(events) == ["kept"]
 
 
-def test_repositories_not_built_yet_raise(uow_factory: UowFactory, user_id: UUID) -> None:
-    # Removed in Task 17, when the last placeholder repository is replaced.
-    with uow_factory(user_id) as uow, pytest.raises(NotImplementedError):
-        uow.glossary.count_provisional()
-
-
 def test_identity_finds_or_creates_by_sub_never_by_email(
     engine: Engine, identity: IdentityResolver, now: datetime
 ) -> None:

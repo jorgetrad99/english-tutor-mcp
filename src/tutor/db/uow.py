@@ -7,14 +7,15 @@ app.web_session with set_config(..., true), so the settings and the role end wit
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
-from typing import NoReturn, cast
 from uuid import UUID
 
 from sqlalchemy import Connection, Engine, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from tutor.db.repos.glossary import PgGlossaryRepo, PgReviewRepo
 from tutor.db.repos.people import PgAuditRepo, PgProfileRepo, PgUserRepo
 from tutor.db.repos.plans import PgPlanRepo
+from tutor.db.repos.sessions import PgSessionRepo
 from tutor.db.repos.track import PgTrackRepo
 from tutor.db.tables import users
 from tutor.services.ports import (
@@ -67,16 +68,6 @@ def scoped_connection(
         yield conn
 
 
-class _Pending:
-    """Stands in for a repository a later task implements (Tasks 15-17 replace each one)."""
-
-    def __init__(self, name: str) -> None:
-        self._name = name
-
-    def __getattr__(self, attr: str) -> NoReturn:
-        raise NotImplementedError(f"uow.{self._name}.{attr} is not implemented on Postgres yet")
-
-
 class PgUnitOfWork:
     """One transaction for one user; every repository shares the connection."""
 
@@ -97,9 +88,9 @@ class PgUnitOfWork:
         self.profiles = PgProfileRepo(conn, user_id)
         self.track = PgTrackRepo(conn)
         self.plans = PgPlanRepo(conn, user_id)
-        self.sessions = cast(SessionRepo, _Pending("sessions"))
-        self.glossary = cast(GlossaryRepo, _Pending("glossary"))
-        self.reviews = cast(ReviewRepo, _Pending("reviews"))
+        self.sessions = PgSessionRepo(conn, user_id)
+        self.glossary = PgGlossaryRepo(conn, user_id)
+        self.reviews = PgReviewRepo(conn, user_id)
         self.audit = PgAuditRepo(conn, user_id)
 
 

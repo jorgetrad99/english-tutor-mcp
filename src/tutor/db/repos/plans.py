@@ -9,7 +9,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import Connection, func, insert, select, update
 from sqlalchemy.engine import RowMapping
 
-from tutor.db.tables import plan_items, plans
+from tutor.db.tables import plan_items, plans, sessions
 from tutor.domain.plan_lite import PlannedItem
 from tutor.services.ports import ActivePlan, PlanItemRow
 
@@ -95,6 +95,13 @@ class PgPlanRepo:
         return self._with_items(row)
 
     def mark_done(self, plan_item_id: UUID, session_id: UUID) -> bool:
+        mine = self._conn.execute(
+            select(sessions.c.id).where(
+                sessions.c.id == session_id, sessions.c.user_id == self._user_id
+            )
+        ).scalar_one_or_none()
+        if mine is None:
+            raise LookupError("session not found")
         result = self._conn.execute(
             update(plan_items)
             .where(

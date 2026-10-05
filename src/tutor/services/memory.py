@@ -302,6 +302,8 @@ class MemoryPlanRepo(_Repo):
         return self._view(plan)
 
     def mark_done(self, plan_item_id: UUID, session_id: UUID) -> bool:
+        if not self._owns_session(session_id):
+            raise LookupError("session not found")
         item = self._t.plan_items.get(plan_item_id)
         if item is None or item.user_id != self._uid or item.status == "done":
             return False

@@ -454,6 +454,19 @@ class RepoContract:
             assert uow.plans.done_base_track_ids() == frozenset({track[0].id})
             assert present(uow.sessions.get(session.id)).plan_item_id == v1.items[0].id
 
+    def test_mark_done_with_another_users_session_raises_lookup_error(
+        self, uow_factory: UowFactory, user_id: UUID, other_user_id: UUID, now: datetime
+    ) -> None:
+        with uow_factory(user_id) as uow:
+            plan = uow.plans.create(planned_items(uow.track.items("it")), RATIONALE, now)
+            session = start_session(uow, first_item(uow), now)
+        with uow_factory(other_user_id) as uow, pytest.raises(LookupError):
+            uow.plans.mark_done(plan.items[0].id, session.id)
+        with uow_factory(user_id) as uow, pytest.raises(LookupError):
+            uow.plans.mark_done(plan.items[0].id, uuid4())
+        with uow_factory(user_id) as uow:
+            assert [i.status for i in present(uow.plans.active()).items] == ["pending"] * 3
+
     def test_done_base_track_ids_ignore_complications_and_pending_items(
         self, uow_factory: UowFactory, user_id: UUID, now: datetime
     ) -> None:
@@ -475,10 +488,10 @@ class RepoContract:
     ) -> None:
         with uow_factory(user_id) as uow:
             plan = uow.plans.create(planned_items(uow.track.items("it")), RATIONALE, now)
-            session = start_session(uow, first_item(uow), now)
         with uow_factory(other_user_id) as uow:
             assert uow.plans.active() is None
-            assert uow.plans.mark_done(plan.items[0].id, session.id) is False
+            mine = start_session(uow, first_item(uow), now)
+            assert uow.plans.mark_done(plan.items[0].id, mine.id) is False
             assert uow.plans.done_base_track_ids() == frozenset()
         with uow_factory(user_id) as uow:
             assert [i.status for i in present(uow.plans.active()).items] == ["pending"] * 3

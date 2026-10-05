@@ -2,7 +2,7 @@
 
 from dataclasses import replace
 from datetime import date, datetime, timedelta
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import pytest
 from sqlalchemy import Engine, text
@@ -82,7 +82,16 @@ def test_new_plan_supersedes_the_old_one_and_old_items_can_still_be_done(
         assert (v1.version, v2.version) == (1, 2)
         assert uow.plans.active() == v2
         assert [i.status for i in v1.items] == ["pending", "pending"]
-        session_id = uuid4()
+        session_id = uow.sessions.create(
+            plan_item_id=None,
+            track_item_id=track[0].id,
+            prep_text=None,
+            mode="voice",
+            client="claude",
+            brief_variant="base",
+            chunks_offered=[],
+            now=now,
+        ).id
         assert uow.plans.mark_done(v1.items[0].id, session_id) is True
         assert uow.plans.mark_done(v1.items[0].id, session_id) is False
         assert uow.plans.done_base_track_ids() == frozenset({track[0].id})
