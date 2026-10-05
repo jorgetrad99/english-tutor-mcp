@@ -1,0 +1,767 @@
+# English translations for the dashboard. msgids are the es-MX source text.
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: en\n"
+
+msgid "Entrar con Google"
+msgstr "Sign in with Google"
+
+msgid "Saltar al contenido"
+msgstr "Skip to content"
+
+msgid "Idioma"
+msgstr "Language"
+
+msgid "Precios"
+msgstr "Pricing"
+
+msgid "Aviso de privacidad"
+msgstr "Privacy notice"
+
+msgid "Términos"
+msgstr "Terms"
+
+msgid "Inicio"
+msgstr "Home"
+
+msgid "Plan"
+msgstr "Plan"
+
+msgid "Progreso"
+msgstr "Progress"
+
+msgid "Sesiones"
+msgstr "Sessions"
+
+msgid "Glosario"
+msgstr "Glossary"
+
+msgid "Reportes"
+msgstr "Reports"
+
+msgid "Cuenta"
+msgstr "Account"
+
+msgid "Secciones"
+msgstr "Sections"
+
+msgid "Ajustes"
+msgstr "Settings"
+
+msgid "Annual"
+msgstr "Annual"
+
+msgid "Free"
+msgstr "Free"
+
+msgid "%(used)s de %(cap)s sesiones esta semana"
+msgstr "%(used)s of %(cap)s sessions this week"
+
+msgid "Cerrar sesión"
+msgstr "Log out"
+
+msgid "Más"
+msgstr "More"
+
+msgid "No pudimos cobrar tu renovación. Actualiza tu método de pago para conservar Annual."
+msgstr "We couldn't charge your renewal. Update your payment method to keep Annual."
+
+msgid "Actualizar método de pago"
+msgstr "Update payment method"
+
+msgid "Tu plan Annual se renueva el %(when)s por %(amount)s."
+msgstr "Your Annual plan renews on %(when)s for %(amount)s."
+
+msgid "Gestionar pago"
+msgstr "Manage payment"
+
+msgid "Tu plan volvió a Free; no se borró nada."
+msgstr "Your plan is back on Free; nothing was deleted."
+
+msgid "Volver a Annual"
+msgstr "Go back to Annual"
+
+msgid "Usaste tus sesiones Free de esta semana. Se renuevan el %(when)s."
+msgstr "You've used this week's Free sessions. They renew on %(when)s."
+
+msgid "Ver Annual"
+msgstr "See Annual"
+
+msgid "Tu glosario llegó a 50 elementos, el máximo en Free. Lo que ya tienes se queda."
+msgstr "Your glossary reached 50 items, the Free maximum. What you have stays."
+
+msgid "Entrar"
+msgstr "Sign in"
+
+msgid "Habla con confianza en el trabajo"
+msgstr "Speak with confidence at work"
+
+msgid "Tu tutor de inglés recuerda cada sesión, tus errores y tus frases. Tu progreso vive en tu servidor, no dentro de un solo chat."
+msgstr "Your English tutor remembers every session, your mistakes and your phrases. Your progress lives on your server, not inside one chat."
+
+msgid "No pudimos iniciar sesión con Google. Intenta de nuevo."
+msgstr "We couldn't sign you in with Google. Please try again."
+
+msgid "Al entrar aceptas los <a href=\"%(terms)s\">términos</a> y el <a href=\"%(privacy)s\">aviso de privacidad</a>."
+msgstr "By signing in you accept the <a href=\"%(terms)s\">terms</a> and the <a href=\"%(privacy)s\">privacy notice</a>."
+
+msgid "Qué datos guardamos"
+msgstr "What we store"
+
+msgid "Tu nombre y correo de Google, tu plan de estudio, los turnos de conversación que tu asistente reporta al terminar cada sesión, tus errores corregidos y tu glosario. No guardamos audio ni transcripciones completas."
+msgstr "Your Google name and email, your study plan, the conversation turns your assistant reports at the end of each session, your corrected mistakes and your glossary. We store no audio and no full transcripts."
+
+msgid "Para qué"
+msgstr "Why"
+
+msgid "Tu asistente de IA"
+msgstr "Your AI assistant"
+
+msgid "El contenido de tus lecciones pasa por el proveedor de tu asistente (por ejemplo Claude) bajo los términos de ese proveedor."
+msgstr "Your lesson content passes through your assistant's vendor (for example Claude) under that vendor's terms."
+
+msgid "Cookies"
+msgstr "Cookies"
+
+msgid "Solo usamos una cookie de sesión para mantenerte dentro del tablero. No hay analítica ni publicidad."
+msgstr "We only use one session cookie to keep you signed in to the dashboard. No analytics, no advertising."
+
+msgid "Tus derechos"
+msgstr "Your rights"
+
+msgid "Contacto: %(email)s"
+msgstr "Contact: %(email)s"
+
+msgid "Términos del servicio"
+msgstr "Terms of service"
+
+msgid "English Tutor te ayuda a practicar inglés hablado y escrito para el trabajo a través de tu asistente de IA."
+msgstr "English Tutor helps you practise spoken and written English for work through your AI assistant."
+
+msgid "Lo que no hace"
+msgstr "What it does not do"
+
+msgid "No evalúa pronunciación ni audio y no emite certificados de nivel. Los niveles CEFR que ves son la opinión del modelo, mostrada como tendencia."
+msgstr "It does not score pronunciation or audio and issues no level certificates. The CEFR levels you see are the model's opinion, shown as a trend."
+
+msgid "Algo salió mal"
+msgstr "Something went wrong"
+
+msgid "No encontramos esta página"
+msgstr "We couldn't find this page"
+
+msgid "Ir a Inicio"
+msgstr "Go to Home"
+
+msgid "Tu sesión cambió"
+msgstr "Your session changed"
+
+msgid "Recarga la página e intenta de nuevo."
+msgstr "Reload the page and try again."
+
+msgid "Tu progreso está a salvo. Intenta de nuevo en un momento."
+msgstr "Your progress is safe. Try again in a moment."
+
+msgid "Referencia: %(ref)s"
+msgstr "Reference: %(ref)s"
+
+msgid "Reintentar"
+msgstr "Try again"
+
+msgid "Cuenta en eliminación"
+msgstr "Account being deleted"
+
+msgid "Tu cuenta se está eliminando"
+msgstr "Your account is being deleted"
+
+msgid "Recibimos tu solicitud. Borraremos todos tus datos en un máximo de 24 horas."
+msgstr "We received your request. We'll delete all your data within 24 hours."
+
+msgid "Si fue un error, escríbenos hoy a %(email)s."
+msgstr "If this was a mistake, write to us today at %(email)s."
+
+msgid "Sin conexión"
+msgstr "Offline"
+
+msgid "Sin conexión. Tu progreso está a salvo en el servidor."
+msgstr "You're offline. Your progress is safe on the server."
+
+msgid "Instala English Tutor"
+msgstr "Install English Tutor"
+
+msgid "Ábrelo desde tu pantalla de inicio, como una app. No necesitas tienda de apps."
+msgstr "Open it from your home screen, like an app. No app store needed."
+
+msgid "Instalar"
+msgstr "Install"
+
+msgid "Toca Compartir en la barra de Safari."
+msgstr "Tap Share in Safari's toolbar."
+
+msgid "Elige «Agregar a pantalla de inicio»."
+msgstr "Choose “Add to Home Screen”."
+
+msgid "Toca «Agregar». English Tutor aparecerá junto a tus apps."
+msgstr "Tap “Add”. English Tutor will appear next to your apps."
+
+msgid "Ahora no"
+msgstr "Not now"
+
+msgid "Copiado"
+msgstr "Copied"
+
+msgid "No se pudo copiar; selecciona el texto."
+msgstr "Couldn't copy; select the text instead."
+
+msgid "Conectar"
+msgstr "Connect"
+
+msgid "Conecta tu tutor"
+msgstr "Connect your tutor"
+
+msgid "Tu tutor vive dentro de Claude. Conéctalo una vez; después solo di la frase de inicio."
+msgstr "Your tutor lives inside Claude. Connect it once; after that, just say the start phrase."
+
+msgid "Copia la dirección de tu tutor"
+msgstr "Copy your tutor's address"
+
+msgid "Copiar"
+msgstr "Copy"
+
+msgid "Agrégalo a Claude"
+msgstr "Add it to Claude"
+
+msgid "En Claude web, escritorio o celular: Configuración → Conectores → Agregar conector personalizado. Pega la dirección y entra con tu cuenta de Google."
+msgstr "In Claude on the web, desktop or phone: Settings → Connectors → Add custom connector. Paste the address and sign in with your Google account."
+
+msgid "En Claude Code, ejecuta:"
+msgstr "In Claude Code, run:"
+
+msgid "Empieza tu primera lección"
+msgstr "Start your first lesson"
+
+msgid "En un chat nuevo, di:"
+msgstr "In a new chat, say:"
+
+msgid "Abrir Claude"
+msgstr "Open Claude"
+
+msgid "Tu tutor ya está conectado."
+msgstr "Your tutor is connected."
+
+msgid "Aún no vemos tu primera sesión. Cuando termines una lección en Claude, revisa de nuevo."
+msgstr "We don't see your first session yet. When you finish a lesson in Claude, check again."
+
+msgid "Revisar de nuevo"
+msgstr "Check again"
+
+msgid "Esperando tu primera sesión…"
+msgstr "Waiting for your first session…"
+
+msgid "Hola, %(name)s"
+msgstr "Hi, %(name)s"
+
+msgid "Sesión guardada. Buen trabajo."
+msgstr "Session saved. Nice work."
+
+msgid "Tu siguiente paso"
+msgstr "Your next step"
+
+msgid "Práctica de hoy"
+msgstr "Today's practice"
+
+msgid "Hoy no hay práctica en tu plan"
+msgstr "No practice planned for today"
+
+msgid "Si tienes una reunión pronto, prepárala igual."
+msgstr "If you have a meeting soon, prepare for it anyway."
+
+msgid "Copiar frase"
+msgstr "Copy phrase"
+
+msgid "¿Tienes una reunión? Di <code lang=\"en\">prepare me for tomorrow's demo</code> y la lección se arma alrededor de ella."
+msgstr "Got a meeting? Say <code lang=\"en\">prepare me for tomorrow's demo</code> and the lesson is built around it."
+
+msgid "Ver plan"
+msgstr "See plan"
+
+msgid "Tu semana"
+msgstr "Your week"
+
+msgid "día seguido"
+msgstr "day in a row"
+
+msgid "días seguidos"
+msgstr "days in a row"
+
+msgid "Días seguidos: %(n)s"
+msgstr "Days in a row: %(n)s"
+
+msgid "Frases de la semana"
+msgstr "This week's phrases"
+
+msgid "usada en una sesión"
+msgstr "used in a session"
+
+msgid "aún sin usar"
+msgstr "not used yet"
+
+msgid "Se marcan cuando las usas en una sesión."
+msgstr "They're marked when you use them in a session."
+
+msgid "Las frases de tu próxima lección aparecerán aquí."
+msgstr "Your next lesson's phrases will appear here."
+
+msgid "Última sesión"
+msgstr "Last session"
+
+msgid "%(minutes)s min"
+msgstr "%(minutes)s min"
+
+msgid "%(wpm)s palabras por minuto"
+msgstr "%(wpm)s words per minute"
+
+msgid "Ver detalle"
+msgstr "See details"
+
+msgid "Pendiente"
+msgstr "To do"
+
+msgid "repasos esperan en tu próxima lección"
+msgstr "reviews waiting in your next lesson"
+
+msgid "frases por confirmar"
+msgstr "phrases to confirm"
+
+msgid "Se te preguntará al iniciar tu próxima sesión."
+msgstr "You'll be asked when your next session starts."
+
+msgid "Ver glosario"
+msgstr "See glossary"
+
+msgid "Reporte de la semana del %(when)s"
+msgstr "Report for the week of %(when)s"
+
+msgid "sesiones hechas de %(planned)s planeadas"
+msgstr "sessions done of %(planned)s planned"
+
+msgid "minutos hablando"
+msgstr "minutes speaking"
+
+msgid "errores que dejaste de cometer"
+msgstr "mistakes you stopped making"
+
+msgid "frases activadas"
+msgstr "phrases activated"
+
+msgid "+%(extra)s prep"
+msgstr "+%(extra)s prep"
+
+msgid "Hecho"
+msgstr "Done"
+
+msgid "Hoy"
+msgstr "Today"
+
+msgid "Próximo"
+msgstr "Upcoming"
+
+msgid "Sin sesión"
+msgstr "No session"
+
+msgid "Descanso"
+msgstr "Rest"
+
+msgid "Voz"
+msgstr "Voice"
+
+msgid "Texto"
+msgstr "Text"
+
+msgid "Logrado"
+msgstr "Achieved"
+
+msgid "Parcial"
+msgstr "Partial"
+
+msgid "No logrado"
+msgstr "Not achieved"
+
+msgid "Incompleta"
+msgstr "Incomplete"
+
+msgid "En curso"
+msgstr "In progress"
+
+msgid "Baja confianza"
+msgstr "Low trust"
+
+msgid "Completa"
+msgstr "Complete"
+
+msgid "Modo"
+msgstr "Mode"
+
+msgid "Todos"
+msgstr "All"
+
+msgid "Estado"
+msgstr "Status"
+
+msgid "Filtrar"
+msgstr "Filter"
+
+msgid "Tus sesiones, de la más reciente a la más antigua"
+msgstr "Your sessions, newest first"
+
+msgid "Fecha"
+msgstr "Date"
+
+msgid "Práctica"
+msgstr "Practice"
+
+msgid "Cliente"
+msgstr "Client"
+
+msgid "Duración"
+msgstr "Duration"
+
+msgid "Palabras/min"
+msgstr "Words/min"
+
+msgid "Resultado"
+msgstr "Result"
+
+msgid "Páginas"
+msgstr "Pages"
+
+msgid "Más recientes"
+msgstr "Newer"
+
+msgid "Anteriores"
+msgstr "Older"
+
+msgid "Ninguna sesión coincide con estos filtros."
+msgstr "No session matches these filters."
+
+msgid "Aún no tienes sesiones. Cuando termines tu primera lección en Claude, aparecerá aquí."
+msgstr "You have no sessions yet. When you finish your first lesson in Claude, it will appear here."
+
+msgid "Cómo conectar"
+msgstr "How to connect"
+
+msgid "Sesión"
+msgstr "Session"
+
+msgid "Todas las sesiones"
+msgstr "All sessions"
+
+msgid "Sesión incompleta: no cuenta para tus tendencias."
+msgstr "Incomplete session: it doesn't count towards your trends."
+
+msgid "Evidencia poco confiable: guardamos tus palabras, pero no los errores de esta sesión."
+msgstr "Unreliable evidence: we kept your words but not this session's mistakes."
+
+msgid "Correcciones"
+msgstr "Corrections"
+
+msgid "dijiste"
+msgstr "you said"
+
+msgid "mejor"
+msgstr "better"
+
+msgid "La usaste después en la sesión"
+msgstr "You used it later in the session"
+
+msgid "Sin correcciones en esta sesión."
+msgstr "No corrections in this session."
+
+msgid "Tarea"
+msgstr "Task"
+
+msgid "Pistas"
+msgstr "Hints"
+
+msgid "Palabras por minuto"
+msgstr "Words per minute"
+
+msgid "Tu confianza"
+msgstr "Your confidence"
+
+msgid "%(n)s de 5"
+msgstr "%(n)s of 5"
+
+msgid "Frases"
+msgstr "Phrases"
+
+msgid "Esta sesión no tuvo frases propuestas."
+msgstr "This session had no suggested phrases."
+
+msgid "Nivel estimado"
+msgstr "Estimated level"
+
+msgid "Es la opinión del modelo, no una certificación."
+msgstr "It's the model's opinion, not a certification."
+
+msgid "Lo basó en:"
+msgstr "Based on:"
+
+msgid "Lo que dijiste"
+msgstr "What you said"
+
+msgid "Gramática"
+msgstr "Grammar"
+
+msgid "Vocabulario"
+msgstr "Vocabulary"
+
+msgid "Orden de palabras"
+msgstr "Word order"
+
+msgid "Registro"
+msgstr "Register"
+
+msgid "Otro"
+msgstr "Other"
+
+msgid "confianza alta"
+msgstr "high confidence"
+
+msgid "confianza media"
+msgstr "medium confidence"
+
+msgid "confianza baja"
+msgstr "low confidence"
+
+msgid "%(used)s de %(cap)s elementos"
+msgstr "%(used)s of %(cap)s items"
+
+msgid "Tus repasos ocurren dentro de las lecciones; aquí puedes revisar y corregir tus frases."
+msgstr "Your reviews happen inside lessons; here you can check and correct your phrases."
+
+msgid "Buscar"
+msgstr "Search"
+
+msgid "Tipo"
+msgstr "Type"
+
+msgid "Tema"
+msgstr "Topic"
+
+msgid "Repaso"
+msgstr "Review"
+
+msgid "Cualquier fecha"
+msgstr "Any date"
+
+msgid "Para hoy"
+msgstr "Due today"
+
+msgid "Esta semana"
+msgstr "This week"
+
+msgid "Resultados: %(n)s"
+msgstr "Results: %(n)s"
+
+msgid "Exportar CSV"
+msgstr "Export CSV"
+
+msgid "Tu glosario"
+msgstr "Your glossary"
+
+msgid "Frase"
+msgstr "Phrase"
+
+msgid "Significado"
+msgstr "Meaning"
+
+msgid "Contexto"
+msgstr "Context"
+
+msgid "Acciones"
+msgstr "Actions"
+
+msgid "Nada coincide con estos filtros."
+msgstr "Nothing matches these filters."
+
+msgid "Tu glosario está vacío. Las frases que confirmes en tus lecciones aparecerán aquí."
+msgstr "Your glossary is empty. Phrases you confirm in your lessons will appear here."
+
+msgid "Editar"
+msgstr "Edit"
+
+msgid "Oración de contexto"
+msgstr "Context sentence"
+
+msgid "Máximo %(n)s caracteres."
+msgstr "At most %(n)s characters."
+
+msgid "Escribe la oración donde apareció la frase."
+msgstr "Write the sentence where the phrase appeared."
+
+msgid "Guardar"
+msgstr "Save"
+
+msgid "Cancelar"
+msgstr "Cancel"
+
+msgid "Guardado"
+msgstr "Saved"
+
+msgid "Editar frase"
+msgstr "Edit phrase"
+
+msgid "Corrección"
+msgstr "Correction"
+
+msgid "Término"
+msgstr "Term"
+
+msgid "TI"
+msgstr "IT"
+
+msgid "Día a día"
+msgstr "Everyday"
+
+msgid "Negocios"
+msgstr "Business"
+
+msgid "Por confirmar"
+msgstr "To confirm"
+
+msgid "En pausa"
+msgstr "Parked"
+
+msgid "Confirmada"
+msgstr "Confirmed"
+
+msgid "Por confirmar hasta el %(when)s"
+msgstr "To confirm by %(when)s"
+
+msgid "Toca repasar"
+msgstr "Review due"
+
+msgid "Te cuesta"
+msgstr "Tricky for you"
+
+msgid "Ninguna sesión coincide con esta página."
+msgstr "No session on this page."
+
+msgid "Volver a la primera página"
+msgstr "Back to the first page"
+
+msgid "Perfil"
+msgstr "Profile"
+
+msgid "Responde estas preguntas y armamos tu plan de práctica. También puedes hacerlo en el chat con tu tutor."
+msgstr "Answer these questions and we'll build your practice plan. You can also do it in the chat with your tutor."
+
+msgid "Tu cuenta"
+msgstr "Your account"
+
+msgid "Para borrar tu cuenta y tus datos, escríbenos a %(email)s."
+msgstr "To delete your account and your data, write to us at %(email)s."
+
+msgid "Elige tu nivel de inglés de hoy."
+msgstr "Choose your English level today."
+
+msgid "Elige tu área."
+msgstr "Choose your field."
+
+msgid "Elige al menos 1 situación."
+msgstr "Choose at least 1 situation."
+
+msgid "Elige como máximo 4 situaciones."
+msgstr "Choose at most 4 situations."
+
+msgid "Elige situaciones de la lista."
+msgstr "Choose situations from the list."
+
+msgid "Elige 15, 20 o 30 minutos."
+msgstr "Choose 15, 20 or 30 minutes."
+
+msgid "Elige de 2 a 7 días."
+msgstr "Choose 2 to 7 days."
+
+msgid "Elige el nivel que quieres alcanzar."
+msgstr "Choose the level you want to reach."
+
+msgid "Tu meta debe ser igual o más alta que tu nivel de hoy."
+msgstr "Your goal must be your current level or higher."
+
+msgid "Elige una fecha entre 4 semanas y 1 año a partir de hoy, o déjala vacía."
+msgstr "Choose a date between 4 weeks and 1 year from today, or leave it empty."
+
+msgid "Máximo 300 caracteres."
+msgstr "300 characters at most."
+
+msgid "No reconocimos la zona horaria de tu navegador. Recarga la página e intenta de nuevo."
+msgstr "We didn't recognise your browser's time zone. Reload the page and try again."
+
+msgid "Guardamos tu perfil."
+msgstr "Your profile is saved."
+
+msgid "Tus respuestas"
+msgstr "Your answers"
+
+msgid "Días a la semana"
+msgstr "Days a week"
+
+msgid "Fecha meta (opcional)"
+msgstr "Target date (optional)"
+
+msgid "Para qué lo quieres, en una frase (opcional)"
+msgstr "Why you want it, in one sentence (optional)"
+
+msgid "Guardar perfil"
+msgstr "Save profile"
+
+msgid "Tu plan"
+msgstr "Your plan"
+
+msgid "%(weeks)s semanas · %(planned)s sesiones planeadas · %(done)s hechas"
+msgstr "%(weeks)s weeks · %(planned)s sessions planned · %(done)s done"
+
+msgid "Semana %(n)s"
+msgstr "Week %(n)s"
+
+msgid "Hablar"
+msgstr "Speaking"
+
+msgid "Escribir"
+msgstr "Writing"
+
+msgid "Hecha"
+msgstr "Done"
+
+msgid "Saltada"
+msgstr "Skipped"
+
+msgid "Responde tu perfil y armamos tu plan de práctica."
+msgstr "Fill in your profile and we'll build your practice plan."
+
+msgid "Ir a tu perfil"
+msgstr "Go to your profile"
+
+msgid "Guardamos tu perfil, tu plan, lo que dices en cada lección (como lo reporta tu asistente), tus errores y tu glosario; nunca audio. Tus lecciones pasan por el proveedor de tu asistente, por ejemplo Claude. Para borrar tus datos, escribe a %(email)s."
+msgstr "We store your profile, your plan, what you say in each lesson (as your assistant reports it), your mistakes and your glossary; never audio. Your lessons pass through your assistant's provider, for example Claude. To delete your data, write to %(email)s."
+
+msgid "Para continuar cada sesión donde quedó la anterior y calcular tu progreso."
+msgstr "To continue each session where the last one ended and to compute your progress."
+
+msgid "En esta versión de prueba pides una copia de tus datos o el borrado de tu cuenta escribiendo a %(email)s; lo hacemos a mano y te confirmamos por correo."
+msgstr "In this trial version you ask for a copy of your data or for your account to be deleted by writing to %(email)s; we do it by hand and confirm by email."
+
+msgid "Precio"
+msgstr "Price"
+
+msgid "Esta versión de prueba no tiene cobros."
+msgstr "This trial version has no charges."
+
+msgid "Demasiadas solicitudes"
+msgstr "Too many requests"
+
+msgid "Espera un minuto e intenta de nuevo."
+msgstr "Wait a minute and try again."

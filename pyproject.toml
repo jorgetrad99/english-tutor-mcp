@@ -6,7 +6,25 @@ authors = [
     { name = "Jorge", email = "jetradl@gmail.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "alembic>=1.16",
+    "anyio>=4.4",
+    "authlib>=1.8.0",
+    "babel>=2.18",
+    "cryptography>=45",
+    "fastapi>=0.142.2",
+    "fastmcp>=4.0.10,<5",
+    "httpx>=0.28.1",
+    "jinja2>=3.1",
+    "psycopg[binary]>=3.2",
+    "pydantic>=2.12",
+    "python-multipart>=0.0.32",
+    "pyyaml>=6.0.2",
+    "sqlalchemy>=2.0.40,<2.1",
+    "stripe>=16.0.0",
+    "tzdata>=2025.2",
+    "uvicorn>=0.35",
+]
 
 [build-system]
 requires = ["uv_build>=0.12.22,<0.13.0"]
@@ -22,8 +40,10 @@ dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "pytest-cov>=7.1.0",
+    "pytest-xdist>=3.8.0",
     "ruff>=0.16.10",
     "rust-just>=1.58.0",
+    "types-pyyaml>=6.0.12.20260906",
 ]
 
 [tool.ruff]
@@ -35,10 +55,11 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "S", "ASYNC"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101"]
+"evals/test_*.py" = ["S101"]
 
 [tool.mypy]
 python_version = "3.12"
-mypy_path = "src"
+mypy_path = "src,tests"
 files = ["src", "tests", "evals"]
 warn_unused_configs = true
 warn_redundant_casts = true
@@ -59,6 +80,11 @@ no_implicit_reexport = true
 strict_equality = true
 extra_checks = true
 
+# Authlib ships no type information.
+[[tool.mypy.overrides]]
+module = ["authlib", "authlib.*"]
+ignore_missing_imports = true
+
 [tool.pyright]
 include = ["src", "tests"]
 pythonVersion = "3.12"
@@ -66,7 +92,8 @@ venvPath = "."
 venv = ".venv"
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "evals"]
+pythonpath = ["tests"]
 addopts = ["--strict-markers", "--strict-config"]
 markers = [
     "unit: fast, no I/O",

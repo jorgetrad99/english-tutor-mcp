@@ -1,0 +1,31 @@
+<div id="glossary-table">
+  <p class="table-meta">
+    <span>{% trans n=rows|length %}Resultados: {{ n }}{% endtrans %}</span>
+    <a class="btn btn--ghost btn--small" href="{{ csv_url }}" download>{{ _("Exportar CSV") }}</a>
+  </p>
+  {% if rows %}
+  <div class="table-wrap">
+    <table class="table table--stack table--glossary">
+      <caption class="sr-only">{{ _("Tu glosario") }}</caption>
+      <thead>
+        <tr>
+          <th scope="col">{{ _("Frase") }}</th>
+          <th scope="col">{{ _("Tipo") }}</th>
+          <th scope="col">{{ _("Significado") }}</th>
+          <th scope="col">{{ _("Contexto") }}</th>
+          <th scope="col">{{ _("Tema") }}</th>
+          <th scope="col">{{ _("Estado") }}</th>
+          <th scope="col"><span class="sr-only">{{ _("Acciones") }}</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}{% include "partials/glossary_row.html" %}{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% elif f.kind or f.domain or f.status or f.due or f.q %}
+  <p class="empty">{{ _("Nada coincide con estos filtros.") }}</p>
+  {% else %}
+  <p class="empty">{{ _("Tu glosario está vacío. Las frases que confirmes en tus lecciones aparecerán aquí.") }}</p>
+  {% endif %}
+</div>

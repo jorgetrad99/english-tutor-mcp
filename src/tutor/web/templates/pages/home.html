@@ -1,0 +1,102 @@
+{% extends "layouts/app.html" %}
+{% import "macros/labels.html" as labels %}
+{% set active_nav = "home" %}
+{% block title %}{{ _("Inicio") }} · English Tutor{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{% trans name=user.display_name %}Hola, {{ name }}{% endtrans %}</h1>
+  <p class="muted">{{ today|day("weekday") }}</p>
+</header>
+{% if celebrate %}
+<p class="celebrate" data-celebrate role="status"><svg class="icon" aria-hidden="true"><use href="{{ asset('icons/sprite.svg') }}#check"></use></svg> {{ _("Sesión guardada. Buen trabajo.") }}</p>
+{% endif %}
+{% if not home.has_connected %}
+  {% include "partials/connect_steps.html" %}
+  {% include "partials/connect_status.html" %}
+{% else %}
+<div class="grid">
+  {% if not home.has_plan %}
+  <section class="card card--wide today" aria-labelledby="next-title">
+    <h2 id="next-title" class="card__title">{{ _("Tu siguiente paso") }}</h2>
+    <p>{{ _("Responde tu perfil y armamos tu plan de práctica.") }}</p>
+    <a class="btn btn--primary" href="/app/profile">{{ _("Ir a tu perfil") }}</a>
+  </section>
+  {% else %}
+  <section class="card card--wide today vt-today" aria-labelledby="today-title">
+    {% if home.today %}
+    <p class="muted">{{ _("Práctica de hoy") }}</p>
+    <h2 id="today-title" class="card__title">{{ home.today.title }}</h2>
+    <p>{{ home.today.scenario_hint }}</p>
+    {% else %}
+    <h2 id="today-title" class="card__title">{{ _("Hoy no hay práctica en tu plan") }}</h2>
+    <p>{{ _("Si tienes una reunión pronto, prepárala igual.") }}</p>
+    {% endif %}
+    <div class="code-copy">
+      <code lang="en">start my lesson</code>
+      <button type="button" class="btn btn--primary btn--small copy" data-copy="start my lesson">{{ _("Copiar frase") }}</button>
+    </div>
+    <p class="muted">{% trans %}¿Tienes una reunión? Di <code lang="en">prepare me for tomorrow's demo</code> y la lección se arma alrededor de ella.{% endtrans %}</p>
+    <div class="card__foot">
+      <a class="btn btn--ghost" href="https://claude.ai" target="_blank" rel="noopener noreferrer">{{ _("Abrir Claude") }}</a>
+      <a href="/app/profile">{{ _("Ver plan") }}</a>
+    </div>
+  </section>
+
+  <section class="card card--wide" aria-labelledby="week-title">
+    <h2 id="week-title" class="card__title">{{ _("Tu semana") }}</h2>
+    <p class="streak"><span class="streak__num" aria-hidden="true" data-count-to="{{ home.streak }}" data-count-decimals="0">{{ home.streak|integer }}</span> <span aria-hidden="true">{{ _("día seguido") if home.streak == 1 else _("días seguidos") }}</span><span class="sr-only">{% trans n=home.streak|integer %}Días seguidos: {{ n }}{% endtrans %}</span></p>
+    {% include "partials/trail.html" %}
+  </section>
+
+  <section class="card" aria-labelledby="stamps-title">
+    <h2 id="stamps-title" class="card__title">{{ _("Frases de la semana") }}</h2>
+    {% if home.stamps %}
+    <ul class="stamps" data-pop>
+      {% for s in home.stamps %}
+      <li class="stamp{% if s.used %} stamp--used{% endif %}"><span lang="en">{{ s.text }}</span> <span class="sr-only">{{ _("usada en una sesión") if s.used else _("aún sin usar") }}</span></li>
+      {% endfor %}
+    </ul>
+    <p class="muted">{{ _("Se marcan cuando las usas en una sesión.") }}</p>
+    {% else %}
+    <p class="empty">{{ _("Las frases de tu próxima lección aparecerán aquí.") }}</p>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  {% if home.last_session %}
+  {% set s = home.last_session %}
+  <section class="card vt-last-session" aria-labelledby="last-title">
+    <h2 id="last-title" class="card__title">{{ _("Última sesión") }}</h2>
+    <p>{{ s.label }}</p>
+    <p class="muted">{{ s.started_at|day("weekday") }} · {{ labels.mode_label(s.mode) }} · {% trans minutes=s.duration_min %}{{ minutes }} min{% endtrans %}</p>
+    <p>{{ labels.status_chip(s) }}{% if s.words_per_min is not none %} <span>{% trans wpm=s.words_per_min|decimal(0) %}{{ wpm }} palabras por minuto{% endtrans %}</span>{% endif %}</p>
+    <a class="btn btn--ghost btn--small" href="/app/sessions/{{ s.id }}">{{ _("Ver detalle") }}</a>
+  </section>
+  {% endif %}
+
+  <section class="card" aria-labelledby="pending-title">
+    <h2 id="pending-title" class="card__title">{{ _("Pendiente") }}</h2>
+    <ul class="pending">
+      <li><strong>{{ home.reviews_due|integer }}</strong> {{ _("repasos esperan en tu próxima lección") }}</li>
+      <li><strong>{{ home.provisional_items|integer }}</strong> {{ _("frases por confirmar") }}</li>
+    </ul>
+    {% if home.provisional_items %}<p class="muted">{{ _("Se te preguntará al iniciar tu próxima sesión.") }}</p>{% endif %}
+    <a href="/app/glossary">{{ _("Ver glosario") }}</a>
+  </section>
+
+  {% if home.latest_report and subscription.tier == "annual" %}
+  {% set r = home.latest_report %}
+  <section class="card card--wide" aria-labelledby="report-title">
+    <h2 id="report-title" class="card__title">{% trans when=r.week_start|day("long") %}Reporte de la semana del {{ when }}{% endtrans %}</h2>
+    <div class="kpis">
+      {{ labels.kpi(r.sessions_done, _("sesiones hechas de %(planned)s planeadas", planned=r.sessions_planned)) }}
+      {{ labels.kpi(r.minutes_spoken, _("minutos hablando")) }}
+      {{ labels.kpi(r.errors_stopped, _("errores que dejaste de cometer")) }}
+      {{ labels.kpi(r.chunks_activated, _("frases activadas")) }}
+    </div>
+  </section>
+  {% endif %}
+</div>
+{% endif %}
+{% include "partials/install.html" %}
+{% endblock %}

@@ -1,0 +1,17 @@
+<div class="error-box" role="alert">
+  {% if status == 404 %}
+    <h1>{{ _("No encontramos esta página") }}</h1>
+    <a class="btn btn--ghost" href="/app/">{{ _("Ir a Inicio") }}</a>
+  {% elif status == 429 %}
+    <h1>{{ _("Demasiadas solicitudes") }}</h1>
+    <p>{{ _("Espera un minuto e intenta de nuevo.") }}</p>
+  {% elif status == 403 %}
+    <h1>{{ _("Tu sesión cambió") }}</h1>
+    <p>{{ _("Recarga la página e intenta de nuevo.") }}</p>
+  {% else %}
+    <h1>{{ _("Algo salió mal") }}</h1>
+    <p>{{ _("Tu progreso está a salvo. Intenta de nuevo en un momento.") }}</p>
+    {% if ref %}<p class="muted">{% trans ref=ref %}Referencia: {{ ref }}{% endtrans %}</p>{% endif %}
+    <a class="btn btn--ghost" href="">{{ _("Reintentar") }}</a>
+  {% endif %}
+</div>

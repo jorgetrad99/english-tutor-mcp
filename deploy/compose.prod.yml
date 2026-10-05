@@ -1,0 +1,94 @@
+# Production stack on the homelab (core loop v0; runbook: docs/v0/runbook.md).
+# Run from deploy/:  docker compose -f compose.prod.yml up -d --build
+# Nothing is published on the host. Two networks:
+#   backend (internal, no egress)  db, migrate, app
+#   edge                           app, cloudflared (only here is X-Forwarded-* trusted)
+#
+# Database roles (three, never one owner URL for the app):
+#   db.env / migrate.env  owner       -> migrate service only (migrations, role provisioning)
+#   tutor.env             app login   -> app service only (DATABASE_URL, no owner credentials)
+#   tutor_report          gate report -> on demand, GATE_REPORT_DATABASE_URL (runbook)
+name: tutor
+
+services:
+  db:
+    # PostgreSQL 16 or later is required (see runbook). Digest pinned (postgres:16).
+    image: postgres:16@sha256:1a6ab3f5345eb6dbe04a1349529caabdb0ab09293a09590fad07b2246bfa4b54
+    restart: unless-stopped
+    env_file: db.env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [backend]
+    security_opt: ["no-new-privileges:true"]
+    # The official entrypoint chowns the data dir and drops to the postgres user.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: tutor:latest
+    pull_policy: build # always built from this checkout, never pulled
+    # alembic upgrade head, then create/update the app login role and tutor_report.
+    entrypoint: ["tutor-migrate"]
+    restart: "no"
+    env_file: migrate.env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [backend]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    read_only: true
+
+  app:
+    image: tutor:latest
+    pull_policy: never # built by `migrate`; a registry image of this name is never pulled
+    restart: unless-stopped
+    env_file: tutor.env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - oauth:/data/oauth
+    networks: [backend, edge] # edge gives the app egress to Google and the tunnel path in
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: ["/tmp"]
+    # The image HEALTHCHECK calls an MCP-side path; website paths reject any Host but the public one.
+
+  cloudflared:
+    # Digest pinned (cloudflare/cloudflared, pulled 2026-10-05); bump deliberately, see the runbook.
+    image: cloudflare/cloudflared@sha256:072c067d25ccbe61d46e18f0d0723255f2bb5304f7317caa95b27031520ff92c
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    env_file: tunnel.env
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      edge:
+        ipv4_address: 172.30.10.3 # the only FORWARDED_ALLOW_IPS entry; outside edge's ip_range
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    read_only: true
+
+networks:
+  backend:
+    internal: true # no route out: the database and the migration job cannot reach the internet
+  edge:
+    ipam:
+      config:
+        - subnet: 172.30.10.0/24 # choose another /24 if this collides with your LAN
+          ip_range: 172.30.10.128/25 # dynamic addresses stay clear of the fixed 172.30.10.3
+
+volumes:
+  pgdata:
+  oauth:

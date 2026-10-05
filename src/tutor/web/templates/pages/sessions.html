@@ -1,0 +1,24 @@
+{% extends "layouts/app.html" %}
+{% set active_nav = "sessions" %}
+{% block title %}{{ _("Sesiones") }} · English Tutor{% endblock %}
+{% block content %}
+<header class="page-head"><h1>{{ _("Sesiones") }}</h1></header>
+<form class="filters" method="get" action="/app/sessions" hx-get="/app/sessions" hx-target="#sessions-table" hx-swap="outerHTML" hx-push-url="true" hx-trigger="change">
+  <label class="form-row">{{ _("Modo") }}
+    <select name="mode">
+      <option value="">{{ _("Todos") }}</option>
+      <option value="voice"{% if f.mode == "voice" %} selected{% endif %}>{{ _("Voz") }}</option>
+      <option value="text"{% if f.mode == "text" %} selected{% endif %}>{{ _("Texto") }}</option>
+    </select>
+  </label>
+  <label class="form-row">{{ _("Estado") }}
+    <select name="status">
+      <option value="">{{ _("Todos") }}</option>
+      <option value="closed"{% if f.status == "closed" %} selected{% endif %}>{{ _("Completa") }}</option>
+      <option value="incomplete"{% if f.status == "incomplete" %} selected{% endif %}>{{ _("Incompleta") }}</option>
+    </select>
+  </label>
+  <button class="btn btn--ghost btn--small">{{ _("Filtrar") }}</button>
+</form>
+{% include "partials/sessions_table.html" %}
+{% endblock %}

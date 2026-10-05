@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block body %}
+<header class="public-head">
+  <a class="brand" href="{{ public_url('/login') }}">English Tutor</a>
+  <nav class="public-head__nav" aria-label="{{ _('Idioma') }}">
+    {% if lang == "es_MX" %}<a href="?lang=en{{ next_qs }}" hreflang="en" lang="en">English</a>
+    {% else %}<a href="?lang=es{{ next_qs }}" hreflang="es" lang="es">Español</a>{% endif %}
+  </nav>
+</header>
+<main id="main" class="public-main">
+  {% block content %}{% endblock %}
+</main>
+<footer class="public-foot">
+  <a href="{{ public_url('/privacy') }}">{{ _("Aviso de privacidad") }}</a>
+  <a href="{{ public_url('/terms') }}">{{ _("Términos") }}</a>
+</footer>
+{% endblock %}

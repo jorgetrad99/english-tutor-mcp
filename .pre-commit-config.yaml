@@ -15,3 +15,4 @@ repos:
     hooks:
       - id: check-added-large-files
       - id: end-of-file-fixer
+        exclude: ^src/tutor/web/static/js/htmx\.min\.js$  # vendored byte-for-byte (hash-pinned)

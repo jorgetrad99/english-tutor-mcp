@@ -1,0 +1,20 @@
+{% for banner in banners %}
+<div class="banner banner--{{ 'warn' if banner.kind in ('payment_failed', 'session_limit', 'glossary_limit') else 'info' }}" role="status">
+  {% if banner.kind == "payment_failed" %}
+    <p>{{ _("No pudimos cobrar tu renovación. Actualiza tu método de pago para conservar Annual.") }}</p>
+    <form method="post" action="/billing/portal"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn btn--primary btn--small">{{ _("Actualizar método de pago") }}</button></form>
+  {% elif banner.kind == "renewal_soon" %}
+    <p>{% trans when=banner.on|day("long"), amount=banner.amount_cents|money %}Tu plan Annual se renueva el {{ when }} por {{ amount }}.{% endtrans %}</p>
+    <form method="post" action="/billing/portal"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn btn--ghost btn--small">{{ _("Gestionar pago") }}</button></form>
+  {% elif banner.kind == "lapsed" %}
+    <p>{{ _("Tu plan volvió a Free; no se borró nada.") }}</p>
+    <a class="btn btn--ghost btn--small" href="/billing/checkout">{{ _("Volver a Annual") }}</a>
+  {% elif banner.kind == "session_limit" %}
+    <p>{% trans when=banner.on|day("weekday") %}Usaste tus sesiones Free de esta semana. Se renuevan el {{ when }}.{% endtrans %}</p>
+    <a class="btn btn--ghost btn--small" href="/billing/checkout">{{ _("Ver Annual") }}</a>
+  {% elif banner.kind == "glossary_limit" %}
+    <p>{{ _("Tu glosario llegó a 50 elementos, el máximo en Free. Lo que ya tienes se queda.") }}</p>
+    <a class="btn btn--ghost btn--small" href="/billing/checkout">{{ _("Ver Annual") }}</a>
+  {% endif %}
+</div>
+{% endfor %}

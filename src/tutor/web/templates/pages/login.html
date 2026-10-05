@@ -1,0 +1,12 @@
+{% extends "layouts/public.html" %}
+{% block title %}{{ _("Entrar") }} · English Tutor{% endblock %}
+{% block content %}
+<section class="card card--narrow">
+  <h1>{{ _("Habla con confianza en el trabajo") }}</h1>
+  <p>{{ _("Tu tutor de inglés recuerda cada sesión, tus errores y tus frases. Tu progreso vive en tu servidor, no dentro de un solo chat.") }}</p>
+  {% if error is defined and error %}<p class="form-error" role="alert">{{ _("No pudimos iniciar sesión con Google. Intenta de nuevo.") }}</p>{% endif %}
+  <a class="btn btn--primary btn--block" href="/auth/google{% if next %}?next={{ next|urlencode }}{% endif %}">{{ _("Entrar con Google") }}</a>
+  <p class="muted">{% trans email=config.support_email %}Guardamos tu perfil, tu plan, lo que dices en cada lección (como lo reporta tu asistente), tus errores y tu glosario; nunca audio. Tus lecciones pasan por el proveedor de tu asistente, por ejemplo Claude. Para borrar tus datos, escribe a {{ email }}.{% endtrans %}</p>
+  <p class="muted">{% trans privacy=public_url('/privacy'), terms=public_url('/terms') %}Al entrar aceptas los <a href="{{ terms }}">términos</a> y el <a href="{{ privacy }}">aviso de privacidad</a>.{% endtrans %}</p>
+</section>
+{% endblock %}

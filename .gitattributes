@@ -1,3 +1,7 @@
 * text=auto
 *.sh text eol=lf
 justfile text eol=lf
+
+src/tutor/web/static/js/htmx.min.js -text
+src/tutor/web/static/fonts/*.woff2 binary
+src/tutor/web/static/icons/*.png binary

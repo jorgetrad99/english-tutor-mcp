@@ -1,0 +1,22 @@
+{% extends "layouts/app.html" %}
+{% set active_nav = "profile" %}
+{% block title %}{{ _("Perfil") }} · English Tutor{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{{ _("Perfil") }}</h1>
+</header>
+{% include "partials/profile_body.html" %}
+<section class="card" aria-labelledby="account-title">
+  <h2 id="account-title" class="card__title">{{ _("Tu cuenta") }}</h2>
+  <form method="post" action="/app/lang" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="back" value="/app/profile">
+    <button class="btn btn--ghost btn--small" name="lang" value="{{ 'en' if lang == 'es_MX' else 'es_MX' }}">{{ "English" if lang == "es_MX" else "Español" }}</button>
+  </form>
+  <form method="post" action="/auth/logout" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="btn btn--ghost btn--small">{{ _("Cerrar sesión") }}</button>
+  </form>
+  <p class="muted">{% trans email=config.support_email %}Para borrar tu cuenta y tus datos, escríbenos a {{ email }}.{% endtrans %}</p>
+</section>
+{% endblock %}

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{# Core loop v0 navigation (plan ruling 11): the five v0 pages; no plan chip, meter or admin link. #}
+{% set nav = [
+  ("home", "/app/", _("Inicio"), "home"),
+  ("profile", "/app/profile", _("Perfil"), "account"),
+  ("sessions", "/app/sessions", _("Sesiones"), "sessions"),
+  ("glossary", "/app/glossary", _("Glosario"), "glossary"),
+  ("connect", "/app/connect", _("Conectar"), "connect"),
+] %}
+{% block body %}
+<div class="shell">
+  <aside class="sidebar">
+    <a class="brand brand--light" href="/app/">English Tutor</a>
+    <nav class="sidebar__nav" aria-label="{{ _('Secciones') }}">
+      {% for key, href, label, icon in nav %}
+      <a class="nav-link{% if active_nav == key %} nav-link--active{% endif %}" href="{{ href }}"{% if active_nav == key %} aria-current="page"{% endif %}>
+        <svg class="icon" aria-hidden="true"><use href="{{ asset('icons/sprite.svg') }}#{{ icon }}"></use></svg>{{ label }}
+      </a>
+      {% endfor %}
+    </nav>
+    <div class="sidebar__foot">
+      <form method="post" action="/app/lang" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="back" value="{{ path }}">
+        <button class="btn btn--ghost btn--small" name="lang" value="{{ 'en' if lang == 'es_MX' else 'es_MX' }}">{{ "English" if lang == "es_MX" else "Español" }}</button>
+      </form>
+      <form method="post" action="/auth/logout" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="btn btn--ghost btn--small">{{ _("Cerrar sesión") }}</button>
+      </form>
+    </div>
+  </aside>
+  <main id="main" class="main">
+    {% include "partials/banners.html" %}
+    {% block content %}{% endblock %}
+  </main>
+  <nav class="tabbar" aria-label="{{ _('Secciones') }}">
+    {% for key, href, label, icon in nav %}
+    <a class="tabbar__link{% if active_nav == key %} tabbar__link--active{% endif %}" href="{{ href }}"{% if active_nav == key %} aria-current="page"{% endif %}>
+      <svg class="icon" aria-hidden="true"><use href="{{ asset('icons/sprite.svg') }}#{{ icon }}"></use></svg><span>{{ label }}</span>
+    </a>
+    {% endfor %}
+  </nav>
+</div>
+{% endblock %}

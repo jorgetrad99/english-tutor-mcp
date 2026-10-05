@@ -1,0 +1,76 @@
+# Local Docker stack for the REAL app (website + MCP) on your own machine; docs/v0/local.md.
+# Run from the repo root:  uv run just up-local   (or: docker compose -f deploy/compose.local.yml ...)
+# Same image and three-role design as production (compose.prod.yml), minus cloudflared: the host
+# tunnel (`tutor-spike`, config.yml) forwards tutor.develancoders.com to http://127.0.0.1:8000.
+# Own project name and volumes, so it cannot collide with the dev compose (db 5432, db-test 5433)
+# or with production.
+#   db.env/migrate.env -> deploy/local-db.env, deploy/local-migrate.env (owner; migrate only)
+#   tutor.env          -> deploy/local-docker.env (app login role; no owner credentials)
+name: tutor-local
+
+services:
+  db:
+    image: postgres:16@sha256:1a6ab3f5345eb6dbe04a1349529caabdb0ab09293a09590fad07b2246bfa4b54
+    env_file: local-db.env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Not published: use `docker compose -f deploy/compose.local.yml exec db psql -U tutor_owner tutor`.
+    networks: [backend]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: tutor:local
+    pull_policy: build
+    entrypoint: ["tutor-migrate"] # alembic upgrade head, then provision_roles
+    restart: "no"
+    env_file: local-migrate.env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [backend]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    read_only: true
+
+  app:
+    image: tutor:local
+    pull_policy: never # built by `migrate`
+    restart: unless-stopped
+    env_file: local-docker.env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - oauth:/data/oauth
+    ports:
+      - "127.0.0.1:8000:8000" # loopback only: the host tunnel is the sole way in
+    networks: [backend, edge] # edge: published port and egress to Google
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: ["/tmp"]
+
+networks:
+  backend:
+    internal: true
+  edge:
+    ipam:
+      config:
+        # Fixed so the gateway (the address uvicorn sees for published-port traffic) is stable:
+        # FORWARDED_ALLOW_IPS in local-docker.env. Pick another /24 if it collides.
+        - subnet: 172.31.90.0/24
+          gateway: 172.31.90.1
+
+volumes:
+  pgdata:
+  oauth:

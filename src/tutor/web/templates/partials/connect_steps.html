@@ -1,0 +1,31 @@
+<section class="card card--wide connect" aria-labelledby="connect-title">
+  <h2 id="connect-title" class="card__title">{{ _("Conecta tu tutor") }}</h2>
+  <p>{{ _("Tu tutor vive dentro de Claude. Conéctalo una vez; después solo di la frase de inicio.") }}</p>
+  <ol class="steps">
+    <li>
+      <h3>{{ _("Copia la dirección de tu tutor") }}</h3>
+      <div class="code-copy">
+        <code>{{ mcp_url }}</code>
+        <button type="button" class="btn btn--ghost btn--small copy" data-copy="{{ mcp_url }}">{{ _("Copiar") }}</button>
+      </div>
+    </li>
+    <li>
+      <h3>{{ _("Agrégalo a Claude") }}</h3>
+      <p>{{ _("En Claude web, escritorio o celular: Configuración → Conectores → Agregar conector personalizado. Pega la dirección y entra con tu cuenta de Google.") }}</p>
+      <p>{{ _("En Claude Code, ejecuta:") }}</p>
+      <div class="code-copy">
+        <code>claude mcp add --transport http tutor {{ mcp_url }}</code>
+        <button type="button" class="btn btn--ghost btn--small copy" data-copy="claude mcp add --transport http tutor {{ mcp_url }}">{{ _("Copiar") }}</button>
+      </div>
+    </li>
+    <li>
+      <h3>{{ _("Empieza tu primera lección") }}</h3>
+      <p>{{ _("En un chat nuevo, di:") }}</p>
+      <div class="code-copy">
+        <code lang="en">start my lesson</code>
+        <button type="button" class="btn btn--ghost btn--small copy" data-copy="start my lesson">{{ _("Copiar") }}</button>
+      </div>
+    </li>
+  </ol>
+  <a class="btn btn--primary" href="https://claude.ai" target="_blank" rel="noopener noreferrer">{{ _("Abrir Claude") }}</a>
+</section>

@@ -20,6 +20,7 @@ htmlcov/
 .env
 .env.*
 !.env.example
+deploy/*.env
 secrets/
 
 # Editors / OS
@@ -30,3 +31,12 @@ Thumbs.db
 
 # Claude Code local-only settings
 .claude/settings.local.json
+
+# Local runtime data (OAuth store)
+/data/
+
+# Raw eval material (real learner text) never leaves the machine; commit only redacted fixtures
+evals/raw/
+
+# Labels map user hashes to names: they re-identify users
+labels*.json

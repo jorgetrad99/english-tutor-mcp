@@ -1,0 +1,10 @@
+{% import "macros/labels.html" as labels %}
+<tr id="g-{{ row.id }}">
+  <th scope="row" data-label="{{ _('Frase') }}" lang="en">{{ row.text }}</th>
+  <td data-label="{{ _('Tipo') }}">{{ labels.kind_label(row.kind) }}</td>
+  <td data-label="{{ _('Significado') }}">{{ row.meaning or "—" }}</td>
+  <td data-label="{{ _('Contexto') }}" lang="en">{{ row.context_sentence }}</td>
+  <td data-label="{{ _('Tema') }}">{{ labels.domain_label(row.domain) }}</td>
+  <td data-label="{{ _('Estado') }}">{{ labels.glossary_chips(row, today) }}</td>
+  <td><a class="btn btn--ghost btn--small" href="/app/glossary/{{ row.id }}/edit" hx-get="/app/glossary/{{ row.id }}/edit" hx-target="#g-{{ row.id }}" hx-swap="outerHTML">{{ _("Editar") }}<span class="sr-only"> {{ row.text }}</span></a></td>
+</tr>

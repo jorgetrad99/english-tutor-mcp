@@ -1,0 +1,30 @@
+{# Labels and chips shared by the pages. Import with: import "macros/labels.html" as labels #}
+{% macro mode_label(mode) %}{% if mode == "voice" %}{{ _("Voz") }}{% else %}{{ _("Texto") }}{% endif %}{% endmacro %}
+
+{% macro client_label(client) %}{% if client == "chatgpt" %}ChatGPT{% elif client == "code" %}Claude Code{% else %}Claude{% endif %}{% endmacro %}
+
+{% macro result_label(result) %}{% if result == "achieved" %}{{ _("Logrado") }}{% elif result == "partial" %}{{ _("Parcial") }}{% elif result == "not_achieved" %}{{ _("No logrado") }}{% else %}—{% endif %}{% endmacro %}
+
+{% macro status_chip(s) %}{% if s.status == "incomplete" %}<span class="chip chip--muted">{{ _("Incompleta") }}</span>{% elif s.status == "open" %}<span class="chip chip--muted">{{ _("En curso") }}</span>{% elif s.low_trust %}<span class="chip chip--warn">{{ _("Baja confianza") }}</span>{% else %}<span class="chip chip--ok">{{ _("Completa") }}</span>{% endif %}{% endmacro %}
+
+{% macro trail_state(state) %}{% if state == "done" %}{{ _("Hecho") }}{% elif state == "today" %}{{ _("Hoy") }}{% elif state == "upcoming" %}{{ _("Próximo") }}{% elif state == "missed" %}{{ _("Sin sesión") }}{% else %}{{ _("Descanso") }}{% endif %}{% endmacro %}
+
+{% macro kpi(value, label, decimals=0) %}
+<div class="kpi">
+  <p class="kpi__value"><span aria-hidden="true" data-count-to="{{ value }}" data-count-decimals="{{ decimals }}">{{ value|decimal(decimals) }}</span><span class="sr-only">{{ value|decimal(decimals) }}</span></p>
+  <p class="kpi__label">{{ label }}</p>
+</div>
+{% endmacro %}
+
+{% macro category_label(category) %}{% if category == "grammar" %}{{ _("Gramática") }}{% elif category == "lexis" %}{{ _("Vocabulario") }}{% elif category == "word_order" %}{{ _("Orden de palabras") }}{% elif category == "register" %}{{ _("Registro") }}{% else %}{{ _("Otro") }}{% endif %}{% endmacro %}
+
+{% macro confidence_label(confidence) %}{% if confidence == "high" %}{{ _("confianza alta") }}{% elif confidence == "medium" %}{{ _("confianza media") }}{% else %}{{ _("confianza baja") }}{% endif %}{% endmacro %}
+
+
+{% macro kind_label(kind) %}{% if kind == "correction" %}{{ _("Corrección") }}{% elif kind == "chunk" %}{{ _("Frase") }}{% else %}{{ _("Término") }}{% endif %}{% endmacro %}
+
+{% macro domain_label(domain) %}{% if domain == "it" %}{{ _("TI") }}{% elif domain == "daily" %}{{ _("Día a día") }}{% elif domain == "business" %}{{ _("Negocios") }}{% else %}{{ domain }}{% endif %}{% endmacro %}
+
+{% macro glossary_status_label(status) %}{% if status == "provisional" %}{{ _("Por confirmar") }}{% elif status == "archived" %}{{ _("En pausa") }}{% else %}{{ _("Confirmada") }}{% endif %}{% endmacro %}
+
+{% macro glossary_chips(row, today) %}{% if row.status == "provisional" %}<span class="chip chip--warn">{% if row.expires_on %}{{ _("Por confirmar hasta el %(when)s", when=row.expires_on|day("short")) }}{% else %}{{ _("Por confirmar") }}{% endif %}</span>{% elif row.status == "archived" %}<span class="chip chip--muted">{{ _("En pausa") }}</span>{% else %}{% set due = row.due_on and row.due_on <= today %}{% if due %}<span class="chip chip--ok">{{ _("Toca repasar") }}</span>{% endif %}{% if row.leech %} <span class="chip chip--warn">{{ _("Te cuesta") }}</span>{% endif %}{% if not due and not row.leech %}<span class="chip chip--muted">{{ _("Confirmada") }}</span>{% endif %}{% endif %}{% endmacro %}

@@ -1,0 +1,9 @@
+{% extends "layouts/public.html" %}
+{% block title %}{{ _("Cuenta en eliminación") }} · English Tutor{% endblock %}
+{% block content %}
+<section class="card card--narrow">
+  <h1>{{ _("Tu cuenta se está eliminando") }}</h1>
+  <p>{{ _("Recibimos tu solicitud. Borraremos todos tus datos en un máximo de 24 horas.") }}</p>
+  <p>{% trans email=config.support_email %}Si fue un error, escríbenos hoy a {{ email }}.{% endtrans %}</p>
+</section>
+{% endblock %}

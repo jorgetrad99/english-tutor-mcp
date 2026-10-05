@@ -1,0 +1,30 @@
+{% if not install_dismissed %}
+<section class="card install-card" data-install-card hidden aria-labelledby="install-title">
+  <h2 class="card__title" id="install-title">
+    <svg class="icon" aria-hidden="true"><use href="{{ asset('icons/sprite.svg') }}#install"></use></svg>{{ _("Instala English Tutor") }}
+  </h2>
+  <p>{{ _("Ábrelo desde tu pantalla de inicio, como una app. No necesitas tienda de apps.") }}</p>
+  <button type="button" class="btn btn--primary" data-install hidden>
+    <svg class="icon" aria-hidden="true"><use href="{{ asset('icons/sprite.svg') }}#install"></use></svg><span>{{ _("Instalar") }}</span>
+  </button>
+  <ol class="steps" data-ios-install hidden>
+    <li>
+      <svg class="ios-step" viewBox="0 0 48 48" aria-hidden="true"><rect x="4" y="30" width="40" height="14" rx="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M24 33v7M21 36l3-3 3 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="24" cy="37" r="9" fill="none" stroke="#ff6f4f" stroke-width="2"/></svg>
+      <span>{{ _("Toca Compartir en la barra de Safari.") }}</span>
+    </li>
+    <li>
+      <svg class="ios-step" viewBox="0 0 48 48" aria-hidden="true"><rect x="4" y="10" width="40" height="28" rx="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M10 24h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><rect x="30" y="18" width="10" height="12" rx="2" fill="none" stroke="#ff6f4f" stroke-width="2"/><path d="M35 21v6M32 24h6" stroke="#ff6f4f" stroke-width="2" stroke-linecap="round"/></svg>
+      <span>{{ _("Elige «Agregar a pantalla de inicio».") }}</span>
+    </li>
+    <li>
+      <svg class="ios-step" viewBox="0 0 48 48" aria-hidden="true"><rect x="6" y="6" width="14" height="14" rx="4" fill="none" stroke="currentColor" stroke-width="2"/><rect x="28" y="6" width="14" height="14" rx="4" fill="none" stroke="currentColor" stroke-width="2"/><rect x="6" y="28" width="14" height="14" rx="4" fill="none" stroke="currentColor" stroke-width="2"/><rect x="28" y="28" width="14" height="14" rx="4" fill="#11402c" stroke="#ff6f4f" stroke-width="2"/></svg>
+      <span>{{ _("Toca «Agregar». English Tutor aparecerá junto a tus apps.") }}</span>
+    </li>
+  </ol>
+  <form method="post" action="/app/install/dismiss" hx-post="/app/install/dismiss" hx-target="closest [data-install-card]" hx-swap="outerHTML" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="back" value="{{ path }}">
+    <button class="btn btn--ghost btn--small">{{ _("Ahora no") }}</button>
+  </form>
+</section>
+{% endif %}
