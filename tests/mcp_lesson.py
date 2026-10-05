@@ -150,3 +150,68 @@ async def run_scripted_lesson(mcp: FastMCP, clock: Clock) -> None:
         assert date.fromisoformat(recorded["next_due"]) > date(2026, 10, 15)
         [repeat] = (await call(c, "record_review", review))["results"]
         assert repeat["outcome"] == "already_recorded"
+
+
+PROVISIONAL_ITEMS: list[dict[str, Any]] = [
+    {
+        "kind": "chunk",
+        "text": "keep you posted",
+        "meaning": "mantenerte al tanto",
+        "context_sentence": "I will keep you posted about the deploy.",
+        "domain": "it",
+    },
+    {
+        "kind": "term",
+        "text": "synergy",
+        "meaning": "sinergia",
+        "context_sentence": "We need more synergy between the teams.",
+        "domain": "it",
+    },
+]
+
+
+async def run_provisional_round_trip(mcp: FastMCP, clock: Clock) -> None:
+    """Lesson N saves provisional items; lesson N+1 returns them with everything save_glossary
+    needs, and sending them back unchanged confirms one and declines the other."""
+    async with Client(mcp) as c:
+        await call(c, "save_profile", PROFILE_ARGS)
+        first = await call(c, "start_lesson", {"mode": "text"})
+        saved = await call(
+            c,
+            "save_glossary",
+            {
+                "session_id": first["session_id"],
+                "status": "provisional",
+                "items": PROVISIONAL_ITEMS,
+            },
+        )
+        assert (saved["new"], saved["rejected"]) == (2, [])
+
+        clock.advance(days=1)
+        lesson = await call(c, "start_lesson", {"mode": "voice"})
+        assert "provisional_items" in lesson["response_rules"]
+        returned = {p["text"]: p for p in lesson["provisional_items"]}
+        assert set(returned) == {item["text"] for item in PROVISIONAL_ITEMS}
+        for item in PROVISIONAL_ITEMS:
+            assert {k: v for k, v in returned[item["text"]].items() if k != "item_id"} == item
+
+        def back(text: str) -> dict[str, Any]:
+            return {k: v for k, v in returned[text].items() if k != "item_id"}
+
+        session_id = lesson["session_id"]
+        kept = await call(
+            c,
+            "save_glossary",
+            {"session_id": session_id, "status": "confirmed", "items": [back("keep you posted")]},
+        )
+        assert (kept["new"], kept["promoted"], kept["rejected"]) == (0, 1, [])
+        dropped = await call(
+            c,
+            "save_glossary",
+            {"session_id": session_id, "status": "declined", "items": [back("synergy")]},
+        )
+        assert (dropped["new"], dropped["promoted"], dropped["rejected"]) == (0, 0, [])
+
+        clock.advance(days=1)
+        after = await call(c, "get_profile", {})
+        assert (after["provisional_count"], after["due_reviews_count"]) == (0, 1)

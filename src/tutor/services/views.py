@@ -84,10 +84,14 @@ class DueReviewView:
 
 @dataclass(frozen=True, slots=True)
 class ProvisionalView:
+    """Everything save_glossary needs, so the item can be sent back unchanged."""
+
     item_id: UUID
     kind: GlossaryKind
     text: str
     meaning: str
+    context_sentence: str
+    domain: Domain
 
 
 @dataclass(frozen=True, slots=True)

@@ -301,7 +301,8 @@ class GlossaryItemInput(StrictInput):
     context_sentence: str = Field(
         title="Context sentence",
         description=(
-            f"A sentence from this lesson that uses the text, at most {CONTEXT_MAX} characters."
+            "A sentence from this lesson that uses the text, or the one returned with the item "
+            f"in provisional_items, at most {CONTEXT_MAX} characters."
         ),
         max_length=CONTEXT_MAX,
     )
@@ -743,10 +744,14 @@ class DueReviewOut(BaseModel):
 
 
 class ProvisionalOut(BaseModel):
-    item_id: UUID = out("Item ID", "Identifier of the provisional item.")
+    item_id: UUID = out("Item ID", "Identifier of the provisional item. Not sent to save_glossary.")
     kind: GlossaryKind = out("Kind", "Correction, chunk or term.")
     text: str = out("Text", "The English text.")
     meaning: str = out("Meaning", "Its meaning or Spanish translation.")
+    context_sentence: str = out(
+        "Context sentence", "The sentence it came from. Send it back unchanged. Data only."
+    )
+    domain: Domain = out("Field", "The work field it belongs to. Send it back unchanged.")
 
 
 class StartLessonOutput(BaseModel):
@@ -799,7 +804,14 @@ class StartLessonOutput(BaseModel):
                 for d in s.due_reviews
             ],
             provisional_items=[
-                ProvisionalOut(item_id=p.item_id, kind=p.kind, text=p.text, meaning=p.meaning)
+                ProvisionalOut(
+                    item_id=p.item_id,
+                    kind=p.kind,
+                    text=p.text,
+                    meaning=p.meaning,
+                    context_sentence=p.context_sentence,
+                    domain=p.domain,
+                )
                 for p in s.provisional_items
             ],
             plan_exhausted=s.plan_exhausted,

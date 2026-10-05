@@ -58,11 +58,14 @@ RECORD_REVIEW_DESCRIPTION = (
     "nothing. Never read the returned dates aloud."
 )
 SAVE_GLOSSARY_DESCRIPTION = (
-    "Call in the feedback phase after proposing glossary items. Save the items the learner "
+    "Call in the feedback phase after proposing glossary items, and at the start of a lesson "
+    "after the learner decides on provisional_items. Save the items the learner "
     "keeps with status 'confirmed' and the ones they drop with status 'declined', one call "
     "per status. Use 'provisional' only when the lesson ended before the learner answered. "
     "Each item needs kind, text, meaning, a context sentence from this lesson and the field. "
-    "The server merges duplicates and schedules the reviews. Send only items from this lesson."
+    "To confirm or decline provisional_items from start_lesson, send each one back exactly as "
+    "returned, without item_id. The server merges duplicates and schedules the reviews. Send "
+    "only items from this lesson or its provisional_items."
 )
 END_SESSION_DESCRIPTION = (
     "Call once at the end of every lesson, including when the learner says they have to go. "

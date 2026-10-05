@@ -179,3 +179,13 @@ def test_payload_too_large_never_shortens_user_turns() -> None:
     text = rules.error_rules("payload_too_large", "end_session")
     assert "never shorten or paraphrase user_turns" in text
     assert "cefr evidence" in text
+
+
+def test_provisional_items_go_back_exactly_as_returned() -> None:
+    text = rules.start_lesson_rules(
+        "text", has_provisional=True, has_due_reviews=False, plan_exhausted=False
+    )
+    assert "sending each item back exactly as returned, without item_id" in text
+    description = TOOL_DESCRIPTIONS["save_glossary"]
+    assert "send each one back exactly as returned, without item_id" in description
+    assert "Send only items from this lesson or its provisional_items." in description

@@ -154,7 +154,14 @@ def _start_once(
             now=now,
         )
         provisional = tuple(
-            ProvisionalView(item_id=row.id, kind=row.kind, text=row.text, meaning=row.meaning)
+            ProvisionalView(
+                item_id=row.id,
+                kind=row.kind,
+                text=row.text,
+                meaning=row.meaning,
+                context_sentence=row.context_sentence,
+                domain=row.domain,
+            )
             for row in uow.glossary.provisional(MAX_PROVISIONAL)
         )
         return LessonStart(

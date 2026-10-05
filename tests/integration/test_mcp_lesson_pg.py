@@ -17,7 +17,7 @@ from fastmcp.server.auth.auth import AccessToken
 from mcp.server.auth.middleware.auth_context import auth_context_var
 from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
 from mcp.shared.exceptions import MCPError
-from mcp_lesson import Clock, call, random_sub, run_scripted_lesson
+from mcp_lesson import Clock, call, random_sub, run_provisional_round_trip, run_scripted_lesson
 from sqlalchemy import Engine, text
 from sqlalchemy.engine import make_url
 
@@ -62,6 +62,13 @@ async def test_scripted_lesson_on_postgres_with_the_login_role(login_engine: Eng
     clock = Clock()
     with signed_in(random_sub()):
         await run_scripted_lesson(server(login_engine, clock), clock)
+
+
+@pytest.mark.asyncio
+async def test_provisional_items_round_trip_on_postgres(login_engine: Engine) -> None:
+    clock = Clock()
+    with signed_in(random_sub()):
+        await run_provisional_round_trip(server(login_engine, clock), clock)
 
 
 @pytest.mark.asyncio

@@ -552,3 +552,8 @@ Decided while planning and building v0 (plans `docs/superpowers/plans/2026-10-04
     - an optional Skip rule for Anthropic's egress range `160.79.104.0/21`, so all learners' Claude calls do not count against one IP;
     - Bot Fight Mode off on Free (it would challenge Claude's connector calls).
 46. **Backups include roles and the OAuth store** (sections 3.1, 4). The nightly `backup.sh` (umask 077) writes a custom-format `pg_dump` checked with `pg_restore --list`, `pg_dumpall --roles-only` (roles are cluster-level and not in the dump) and a tarball of the OAuth volume, each written as `.partial` and renamed, with 30-day retention. `check_backup.sh` alerts when the newest dump is older than 26 hours. Off-site copies are encrypted (age or gpg). The restore drill runs monthly and once before inviting testers.
+
+### Final review fixes
+
+47. **Provisional items come back ready to send** (sections 8.1, 8.4, 10.2). `start_lesson`'s `provisional_items` carry `item_id`, `kind`, `text`, `meaning`, `context_sentence` and `domain`. The `start_lesson` rule asks the model to send each one back to `save_glossary` exactly as returned (without `item_id`) with status `confirmed` or `declined`, and the `save_glossary` description allows items from `provisional_items` as well as from the current lesson. Without the context sentence the save was rejected as `missing_context`, so no provisional item could be decided in the next lesson.
+48. **The 30-day declined purge counts from `created_at`** (sections 9.4, 10.2). In v0 a declined item is deleted 30 days after it was first saved, not 30 days after it was declined; a provisional item declined late is therefore kept for less than 30 days after the decision.

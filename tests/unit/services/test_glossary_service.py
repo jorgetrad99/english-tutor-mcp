@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 import pytest
 from repo_contract import CONTEXT, MEANING, incoming, present
 
+from tutor.domain.glossary import IncomingItem
 from tutor.domain.text import normalize
 from tutor.services.context import Services
 from tutor.services.errors import ServiceError
@@ -206,3 +207,48 @@ def test_each_save_is_audited_with_ids_and_enums_only(
     dumped = json.dumps(saved)
     for text in ("keep you posted", "ship it", "!!", MEANING, CONTEXT):
         assert text not in dumped
+
+
+def test_provisional_items_from_one_lesson_are_decided_in_the_next(
+    svc: Services, clock: FixedClock, user_id: UUID
+) -> None:
+    # Final review I1: start_lesson returns each provisional item with everything save_glossary
+    # needs, so sending it back unchanged in the next lesson confirms or declines it.
+    first = lesson_session(svc, user_id)
+    keep = IncomingItem(
+        kind="chunk",
+        text="keep you posted",
+        meaning="mantenerte al tanto",
+        context_sentence="I will keep you posted about the deploy.",
+        domain="it",
+    )
+    drop = IncomingItem(
+        kind="term",
+        text="synergy",
+        meaning="sinergia",
+        context_sentence="We need more synergy between teams.",
+        domain="it",
+    )
+    assert save_glossary(svc, user_id, first, "provisional", [keep, drop]).new == 2
+    clock.advance(timedelta(days=1))
+    lesson = start_lesson(svc, user_id, StartLessonRequest(mode="text"))
+    returned = {
+        p.text: IncomingItem(
+            kind=p.kind,
+            text=p.text,
+            meaning=p.meaning,
+            context_sentence=p.context_sentence,
+            domain=p.domain,
+        )
+        for p in lesson.provisional_items
+    }
+    assert returned == {keep.text: keep, drop.text: drop}
+    kept = save_glossary(svc, user_id, lesson.session_id, "confirmed", [returned[keep.text]])
+    dropped = save_glossary(svc, user_id, lesson.session_id, "declined", [returned[drop.text]])
+    assert kept == GlossarySaveResult(new=0, reinforced=0, promoted=1, rejected=())
+    assert dropped == GlossarySaveResult(new=0, reinforced=0, promoted=0, rejected=())
+    with svc.uow(user_id) as uow:
+        rows = uow.glossary.by_norms(["keep you posted", "synergy"])
+        assert rows["keep you posted"].status == "confirmed"
+        assert rows["synergy"].status == "declined"
+        assert uow.glossary.count_provisional() == 0

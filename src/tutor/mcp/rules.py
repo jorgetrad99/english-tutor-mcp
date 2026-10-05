@@ -29,8 +29,9 @@ SAVE_PROFILE = (
 )
 
 _PROVISIONAL = (
-    "First ask one yes/no question about keeping the provisional_items and call save_glossary "
-    "with confirmed or declined."
+    "First ask one yes/no question about keeping the provisional_items, then call save_glossary "
+    "with status confirmed or declined, sending each item back exactly as returned, without "
+    "item_id."
 )
 _GOAL = "State today's goal in one sentence from item.can_do_en."
 _WARMUP = "Warm-up: say each of the 5 chunks once and let the learner repeat it."

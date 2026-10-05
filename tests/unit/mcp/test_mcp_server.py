@@ -18,6 +18,7 @@ from mcp_lesson import (
     Clock,
     call,
     end_args,
+    run_provisional_round_trip,
     run_scripted_lesson,
     text_of,
 )
@@ -487,3 +488,9 @@ async def test_scripted_text_lesson() -> None:
     get_profile, end_session metrics included) and passes the client's output-schema check."""
     world = World()
     await run_scripted_lesson(world.mcp, world.clock)
+
+
+@pytest.mark.asyncio
+async def test_provisional_items_are_confirmed_or_declined_in_the_next_lesson() -> None:
+    world = World()
+    await run_provisional_round_trip(world.mcp, world.clock)
