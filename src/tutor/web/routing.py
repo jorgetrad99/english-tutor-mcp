@@ -25,9 +25,16 @@ def iter_api_routes(app: FastAPI) -> list[APIRoute]:
     a mount other than `/static`), on low-priority routes, and on an include that adds a
     prefix or dependencies, because a guard must not trust a route list that may be wrong.
     """
-    if app.router._low_priority_routes:
-        raise RuntimeError("low-priority routes are not supported by iter_api_routes")
+    _refuse_low_priority(app.router)
     return _walk(app.routes)
+
+
+def _refuse_low_priority(router: Any) -> None:
+    low = getattr(router, "_low_priority_routes", None)  # no public accessor
+    if low is None:
+        raise RuntimeError("FastAPI internals changed; update iter_api_routes")
+    if low:
+        raise RuntimeError("low-priority routes are not supported by iter_api_routes")
 
 
 def _is_static_mount(route: Any) -> bool:
@@ -53,8 +60,7 @@ def _walk(routes: Iterable[Any]) -> list[APIRoute]:
                 f"{getattr(route, 'path', '?')!r}: iter_api_routes only walks APIRoutes, "
                 "included routers and the /static mount"
             )
-        if router._low_priority_routes:
-            raise RuntimeError("low-priority routes are not supported by iter_api_routes")
+        _refuse_low_priority(router)
         context = route.include_context
         if context.prefix or context.dependencies:
             raise RuntimeError(

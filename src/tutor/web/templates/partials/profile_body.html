@@ -15,6 +15,7 @@
   "timezone": _("No reconocimos la zona horaria de tu navegador. Recarga la página e intenta de nuevo."),
 } %}
 <div id="profile-body" class="grid">
+  {% if view.onboarding_needed %}<p class="muted card--wide">{{ _("Responde estas preguntas y armamos tu plan de práctica. También puedes hacerlo en el chat con tu tutor.") }}</p>{% endif %}
   {% if saved %}<p class="banner banner--info card--wide" role="status">{{ _("Guardamos tu perfil.") }}</p>{% endif %}
   <section class="card card--wide" aria-labelledby="answers-title">
     <h2 id="answers-title" class="card__title">{{ _("Tus respuestas") }}</h2>

@@ -44,6 +44,6 @@ self.addEventListener("fetch", (event) => {
   }
   if (NEVER_CACHE.some((prefix) => url.pathname.startsWith(prefix))) return;
   if (url.pathname.startsWith("/static/")) {
-    event.respondWith(caches.match(request, { ignoreSearch: true }).then((hit) => hit || fetch(request)));
+    event.respondWith(caches.match(request, { ignoreSearch: !url.searchParams.has("v") }).then((hit) => hit || fetch(request)));
   }
 });

@@ -7,6 +7,7 @@ from typing import Any
 from uuid import UUID
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from markupsafe import escape
 
@@ -16,7 +17,7 @@ from tutor.domain.plan_lite import feasibility_text
 from tutor.domain.profile import ONBOARDING_QUESTIONS, ProfileInput
 from tutor.web.demo import DemoUsers
 from tutor.web.memory import MemoryBackend
-from tutor.web.profile import MemoryProfiles
+from tutor.web.profile import MemoryProfiles, install_profiles
 
 from .conftest import csrf_of
 
@@ -218,3 +219,79 @@ def test_invalid_post_echoes_no_unbounded_text(login: Login, demo: DemoUsers) ->
     assert response.status_code == 422
     assert "Z" * 100 not in response.text and "2" * 100 not in response.text
     assert "Q" * 100 not in response.text
+
+
+def test_dates_and_zones_reach_the_service_whole(
+    login: Login, demo: DemoUsers, profiles: MemoryProfiles
+) -> None:
+    c = login(demo.nuevo)
+    token = csrf_of(c)
+    # Valid prefixes followed by junk must be refused, not truncated into a valid value.
+    junk_date = c.post("/app/profile", data=answers(token, target_date="2027-03-01xyz"), headers=HX)
+    assert junk_date.status_code == 422
+    junk_zone = c.post(
+        "/app/profile", data=answers(token, timezone="America/Mexico_City" + "x" * 80), headers=HX
+    )
+    assert junk_zone.status_code == 422
+    assert "x" * 70 not in junk_zone.text
+    assert profiles.view(demo.nuevo).onboarding_needed
+
+
+def test_onboarding_prompt_is_inside_the_swap_target(login: Login, demo: DemoUsers) -> None:
+    c = login(demo.nuevo)
+    prompt = "Responde estas preguntas y armamos tu plan de práctica."
+    assert prompt in c.get("/app/profile", headers=HX).text
+    saved = c.post("/app/profile", data=answers(csrf_of(c)), headers=HX)
+    assert saved.status_code == 200 and prompt not in saved.text
+
+
+class CountingProfiles(MemoryProfiles):
+    saves = 0
+
+    def save(self, user_id: UUID, raw: ProfileInput) -> Any:
+        self.saves += 1
+        return super().save(user_id, raw)
+
+
+def test_profile_saves_are_limited_per_user(
+    login: Login, demo: DemoUsers, app: FastAPI, clock: Any
+) -> None:
+    counting = CountingProfiles(clock)
+    install_profiles(app, counting)
+    c = login(demo.nuevo)
+    token = csrf_of(c)
+    for _ in range(10):
+        assert c.post("/app/profile", data=answers(token)).status_code == 303
+    limited = c.post("/app/profile", data=answers(token, goal_text="SECRET-GOAL"), headers=HX)
+    assert limited.status_code == 429 and limited.headers["retry-after"] == "60"
+    assert "SECRET-GOAL" not in limited.text and "Demasiadas solicitudes" in limited.text
+    assert "<html" not in limited.text
+    plain = c.post("/app/profile", data=answers(token))
+    assert plain.status_code == 429 and "<html" in plain.text
+    assert counting.saves == 10  # the 11th never reached the service
+    # Reads are not limited and other learners are unaffected.
+    assert c.get("/app/profile").status_code == 200
+    other = login(demo.ana)
+    assert other.post("/app/profile", data=answers(csrf_of(other))).status_code == 303
+
+
+def test_all_web_writes_share_a_per_user_cap(login: Login, demo: DemoUsers) -> None:
+    c = login(demo.ana)
+    token = csrf_of(c)
+    codes = [
+        c.post("/app/lang", data={"csrf_token": token, "lang": "es_MX"}).status_code
+        for _ in range(31)
+    ]
+    assert codes[:30] == [303] * 30 and codes[30] == 429
+    assert login(demo.beto).post("/app/lang", data={"lang": "en"}).status_code == 403  # no token
+    assert all(c.get("/app/profile").status_code == 200 for _ in range(35))
+
+
+def test_anonymous_and_forged_writes_do_not_spend_the_allowance(
+    login: Login, demo: DemoUsers
+) -> None:
+    c = login(demo.ana)
+    token = csrf_of(c)
+    for _ in range(40):
+        assert c.post("/app/lang", data={"lang": "en"}).status_code == 403  # no CSRF token
+    assert c.post("/app/lang", data={"csrf_token": token, "lang": "en"}).status_code == 303

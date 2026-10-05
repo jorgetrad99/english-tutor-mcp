@@ -37,7 +37,6 @@ def sessions_page(request: Request, user: Annotated[User, Depends(current_user)]
     ctx = {
         "result": result,
         "f": f,
-        "page": page,
         "first_url": page_url(f, 1),
         "prev_url": page_url(f, page - 1) if page > 1 else None,
         "next_url": page_url(f, page + 1) if result.has_next else None,

@@ -101,9 +101,9 @@ def _form_values(
         "minutes_per_day": minutes_per_day.strip(),
         "days_per_week": days_per_week.strip(),
         "target_level": target_level.strip(),
-        "target_date": target_date.strip()[:_DATE_ECHO_MAX],
+        "target_date": target_date.strip(),
         "goal_text": goal_text.strip(),
-        "timezone": timezone.strip()[:_TZ_ECHO_MAX],
+        "timezone": timezone.strip(),
     }
 
 
@@ -176,7 +176,12 @@ def _context(
     today = today_for(request)
     plan = view.plan
     lang: Literal["en", "es"] = "en" if request_lang(request) is Lang.EN else "es"
-    shown = {**values, "goal_text": values["goal_text"][:GOAL_TEXT_MAX]}
+    shown = {
+        **values,
+        "goal_text": values["goal_text"][:GOAL_TEXT_MAX],
+        "target_date": values["target_date"][:_DATE_ECHO_MAX],
+        "timezone": values["timezone"][:_TZ_ECHO_MAX],
+    }
     return {
         "view": view,
         "plan": plan,

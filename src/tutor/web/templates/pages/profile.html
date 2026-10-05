@@ -4,9 +4,6 @@
 {% block content %}
 <header class="page-head">
   <h1>{{ _("Perfil") }}</h1>
-  {% if view.onboarding_needed %}
-  <p class="muted">{{ _("Responde estas preguntas y armamos tu plan de práctica. También puedes hacerlo en el chat con tu tutor.") }}</p>
-  {% endif %}
 </header>
 {% include "partials/profile_body.html" %}
 <section class="card" aria-labelledby="account-title">

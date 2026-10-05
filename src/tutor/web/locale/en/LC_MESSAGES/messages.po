@@ -759,3 +759,9 @@ msgstr "Price"
 
 msgid "Esta versión de prueba no tiene cobros."
 msgstr "This trial version has no charges."
+
+msgid "Demasiadas solicitudes"
+msgstr "Too many requests"
+
+msgid "Espera un minuto e intenta de nuevo."
+msgstr "Wait a minute and try again."

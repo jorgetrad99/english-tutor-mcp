@@ -289,3 +289,26 @@ def test_route_walker_refuses_low_priority_routes() -> None:
 def test_app_prefix_is_exact() -> None:
     assert under_app("/app") and under_app("/app/") and under_app("/app/profile")
     assert not under_app("/application") and not under_app("/apple")
+
+
+def test_csrf_prefix_is_exact_so_application_is_not_an_app_page(config: WebConfig) -> None:
+    from tutor.web.deps import APP_ROUTER_DEPS
+
+    app = bare_app()
+
+    @app.post("/application", dependencies=APP_ROUTER_DEPS)
+    async def probe() -> None:  # pragma: no cover - never reached
+        return None
+
+    # create_app's deps are not installed; require_csrf must reject on CSRF, not on login.
+    from fastapi.testclient import TestClient as _Client
+
+    assert _Client(app).post("/application").status_code == 403
+
+
+def test_walker_notices_missing_fastapi_internals(monkeypatch: pytest.MonkeyPatch) -> None:
+    app = bare_app()
+    monkeypatch.delattr(type(app.router), "_low_priority_routes", raising=False)
+    monkeypatch.delattr(app.router, "_low_priority_routes", raising=False)
+    with pytest.raises(RuntimeError, match="internals changed"):
+        iter_api_routes(app)

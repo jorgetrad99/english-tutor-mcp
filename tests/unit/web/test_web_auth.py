@@ -41,7 +41,7 @@ def test_google_round_trip_creates_user_and_lands_on_profile(
     google.next_identity = GoogleIdentity("g-123", "carla@example.com", "Carla", True)
     start = client.get("/auth/google?next=/app/glossary")
     assert start.status_code == 302
-    callback = client.get(start.headers["location"].replace("https://testserver", ""))
+    callback = client.get(_callback(start.headers["location"]))
     # Core loop v0 (spec 6.3): a login without a profile goes to Perfil, whatever `next` says.
     assert callback.status_code == 303 and callback.headers["location"] == "/app/profile"
     assert any(u.display_name == "Carla" for u in backend.users.values())
@@ -54,7 +54,7 @@ def test_onboarded_learner_lands_on_next(
     profiles.save(demo.ana, ANA_ANSWERS)
     google.next_identity = GoogleIdentity("demo-ana", "ana@example.com", "Ana", True)
     start = client.get("/auth/google?next=/app/glossary")
-    callback = client.get(start.headers["location"].replace("https://testserver", ""))
+    callback = client.get(_callback(start.headers["location"]))
     assert callback.headers["location"] == "/app/glossary"
 
 
@@ -64,7 +64,7 @@ def test_open_redirect_in_next_is_ignored(
     profiles.save(demo.ana, ANA_ANSWERS)
     google.next_identity = GoogleIdentity("demo-ana", "ana@example.com", "Ana", True)
     start = client.get("/auth/google?next=https://evil.example")
-    callback = client.get(start.headers["location"].replace("https://testserver", ""))
+    callback = client.get(_callback(start.headers["location"]))
     assert callback.headers["location"] == "/app/"
 
 
@@ -92,16 +92,31 @@ def test_failed_google_login_shows_error(
 
 @pytest.mark.parametrize("hostile", HOSTILE)
 def test_hostile_next_is_replaced_on_start_and_again_on_callback(
-    client: TestClient, google: FakeGoogle, backend: MemoryBackend, hostile: str
+    client: TestClient,
+    google: FakeGoogle,
+    backend: MemoryBackend,
+    demo: DemoUsers,
+    profiles: MemoryProfiles,
+    hostile: str,
 ) -> None:
-    google.next_identity = GoogleIdentity("g-9", "x@example.com", "X", True)
+    # Ana already has a profile, so the redirect target is decided by `next` alone.
+    profiles.save(demo.ana, ANA_ANSWERS)
+    google.next_identity = GoogleIdentity("demo-ana", "ana@example.com", "Ana", True)
     start = client.get("/auth/google", params={"next": hostile})
     stored = next(iter(backend.web_sessions.values())).data
     assert stored["login_next"] == "/app/"
     # Defence in depth: even a poisoned stored value is validated before redirecting.
     stored["login_next"] = hostile
     callback = client.get(_callback(start.headers["location"]))
-    # A brand-new user has no profile, so the first login lands on Perfil (spec 6.3), not on `next`.
+    assert callback.status_code == 303 and callback.headers["location"] == "/app/"
+
+
+def test_a_brand_new_user_lands_on_profile_whatever_next_says(
+    client: TestClient, google: FakeGoogle
+) -> None:
+    google.next_identity = GoogleIdentity("g-new", "new@example.com", "New", True)
+    start = client.get("/auth/google", params={"next": "/app/glossary"})
+    callback = client.get(_callback(start.headers["location"]))
     assert callback.status_code == 303 and callback.headers["location"] == "/app/profile"
 
 

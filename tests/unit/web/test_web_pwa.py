@@ -208,7 +208,9 @@ def test_offline_response_sets_no_cookie_and_is_not_personalised(
 
 def test_service_worker_matches_static_files_ignoring_the_query(client: TestClient) -> None:
     body = client.get("/sw.js").text
-    assert "caches.match(request, { ignoreSearch: true })" in body  # fonts named in CSS have no ?v
+    # Fonts named in CSS carry no ?v and match without the query; versioned assets match exactly.
+    assert 'caches.match(request, { ignoreSearch: !url.searchParams.has("v") })' in body
+    assert "ignoreSearch: true" not in body
 
 
 def test_install_handler_survives_a_refused_prompt() -> None:

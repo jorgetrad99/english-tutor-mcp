@@ -18,7 +18,12 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from tutor.web.assets import AssetManifest
 from tutor.web.config import WebConfig
-from tutor.web.deps import NotAuthenticated, assert_csrf_everywhere, login_redirect_target
+from tutor.web.deps import (
+    NotAuthenticated,
+    WriteLimits,
+    assert_csrf_everywhere,
+    login_redirect_target,
+)
 from tutor.web.ports import WebDeps
 from tutor.web.routes import all_routers
 from tutor.web.security import SecurityHeadersMiddleware
@@ -33,6 +38,7 @@ def create_app(deps: WebDeps, config: WebConfig) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.state.deps = deps
     app.state.config = config
+    app.state.write_limits = WriteLimits()
     app.state.assets = AssetManifest(STATIC_DIR)
     app.state.views = Views(app.state.assets)
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

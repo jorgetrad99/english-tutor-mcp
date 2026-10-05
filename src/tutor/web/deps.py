@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import secrets
+import time
+from collections.abc import Callable
 from typing import Annotated
 from urllib.parse import quote
 
@@ -11,6 +13,7 @@ from fastapi.dependencies.models import Dependant
 from starlette.concurrency import run_in_threadpool
 
 from tutor.domain.dashboard.types import Role, User
+from tutor.mcp.ratelimit import SlidingWindowLimiter
 from tutor.web.config import WebConfig
 from tutor.web.ports import WebDeps
 from tutor.web.routing import iter_api_routes
@@ -103,7 +106,41 @@ async def require_csrf_if_session(request: Request) -> None:
     await require_csrf(request)
 
 
-APP_ROUTER_DEPS = [Depends(require_csrf)]
+WRITES_PER_MINUTE = 30
+PROFILE_SAVES_PER_MINUTE = 10
+PROFILE_SAVE_PATH = "/app/profile"
+
+
+class WriteLimits:
+    """Per-user, in-process caps on web writes (single-process deploy; per-IP limits live at the
+    edge). The MCP tools have their own 60/min limiter; these keep the website from being a way
+    around it, e.g. `POST /app/profile` creating a plan version per call."""
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+        self.writes = SlidingWindowLimiter(WRITES_PER_MINUTE, 60.0, clock)
+        self.profile_saves = SlidingWindowLimiter(PROFILE_SAVES_PER_MINUTE, 60.0, clock)
+
+
+def limit_writes(request: Request) -> None:
+    """Unsafe methods on /app: 429 over the per-user caps. Runs after `require_csrf`, so forged
+    or anonymous requests never spend a learner's allowance. Blocking-free but sync (it loads
+    the user through a port), so FastAPI runs it in a worker thread."""
+    path = request.url.path
+    if request.method in _SAFE_METHODS or not (path == "/app" or path.startswith("/app/")):
+        return
+    user = optional_user(request)
+    limits: WriteLimits | None = getattr(request.app.state, "write_limits", None)
+    if user is None or limits is None:
+        return
+    key = str(user.id)
+    allowed = limits.writes.allow(key)
+    if allowed and path == PROFILE_SAVE_PATH:
+        allowed = limits.profile_saves.allow(key)
+    if not allowed:
+        raise HTTPException(status_code=429, headers={"Retry-After": "60"})
+
+
+APP_ROUTER_DEPS = [Depends(require_csrf), Depends(limit_writes)]
 LOGOUT_PATH = "/auth/logout"
 
 
