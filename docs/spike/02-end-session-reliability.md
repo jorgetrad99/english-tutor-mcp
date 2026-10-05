@@ -21,7 +21,7 @@ Decision rules: design doc §9.2 (including the 10-run `/end` extension if valid
 
 ## Setup
 - Design: `docs/superpowers/specs/2026-10-03-spike-design.md`
-- Server commit: recorded at setup acceptance (2026-10-05); tools exposed: `get_profile`, `end_session`
+- Server commit: `07a4a1d` (tag `spike-instructions-v1`, setup acceptance 2026-10-04); tools exposed: `get_profile`, `end_session`
 - Auth: real OAuth via FastMCP 4 `GoogleProvider`; hosting: Cloudflare named tunnel
 - Clients and plans: claude.ai web / desktop for text, Claude mobile app for voice; one Free and one Pro account
 - Model version(s): `model_shown` recorded per run in `runs.csv`
