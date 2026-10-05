@@ -24,7 +24,8 @@ Two options:
 
 A, in a separate file, `deploy/compose.coolify.yml`; `compose.prod.yml` is unchanged for the homelab.
 
-- Each service gets an `environment:` mapping with exactly the keys of its `*.env.example`. Secrets are `${NAME:?}` and fixed settings are literals. The owner and app database URLs are built from the same values.
+- Each service gets an `environment:` mapping with exactly the keys of its `*.env.example`. Secrets are plain `${NAME}` and fixed settings are literals. The owner and app database URLs are built from the same values.
+- Coolify variables are runtime-only. Its build step interpolates the whole file with only the "Available at Buildtime" variables (seen on the first deploy, 2026-10-05), so `${NAME:?}` stopped every build, and build-time secrets would go through the build as build arguments ("Inject Build Args to Dockerfile" writes them into the Dockerfile). Instead of the compose guard, each service refuses an empty value at startup: `app` (Settings; WebConfig now treats a blank `TUTOR_SUPPORT_EMAIL` as missing), `migrate` (`check_inputs`, the owner URL), Postgres (no password, no cluster), `cloudflared` (no token). The dependency chain keeps the stack unreachable until all are right.
 - The edge network moves to `10.213.10.0/24`, outside Docker's default pools. cloudflared is fixed at `10.213.10.3`, the only `FORWARDED_ALLOW_IPS` entry.
 - The tunnel targets `tutor-edge-app`, an alias on the edge network only. If Coolify attaches its own network to the services, the app could resolve on two networks; the alias keeps cloudflared's requests on edge, so they come from the trusted address.
 - `app` and `migrate` each build the image; there is no shared `image:` name.
@@ -32,7 +33,7 @@ A, in a separate file, `deploy/compose.coolify.yml`; `compose.prod.yml` is uncha
   - give every service `env_file: .env` holding all 13 variables, so cloudflared would hold the database passwords and the app the owner password;
   - attach every service to its own internet-facing network, undoing `backend`'s `internal: true`;
   - drop `app`'s null `backend:` entry (now written `backend: {}`);
-  - write whole-value variables into the file, so `${NAME:?}` no longer stopped a deploy.
+  - write whole-value variables into the file.
 
   It also strips `exclude_from_hc`, which raw mode would pass to Docker Compose as an error; the key is gone.
 - `backup.sh` accepts `COMPOSE_PROJECT` (the application uuid). It finds the db container by its compose labels, because Coolify's container names change between deploys, and uses `<uuid>_oauth`. Without it the script behaves as before.

@@ -42,10 +42,13 @@ class WebConfig:
         base_url = parse_base_url(environ["TUTOR_BASE_URL"])
         if base_url is None:
             raise ValueError("TUTOR_BASE_URL must be an https origin (http only on loopback)")
+        support_email = environ["TUTOR_SUPPORT_EMAIL"].strip()
+        if not support_email:  # blank is missing: compose turns an unset variable into ""
+            raise ValueError("Missing settings: TUTOR_SUPPORT_EMAIL")
         return cls(
             env=cast(Literal["dev", "test", "prod"], env),
             base_url=base_url,
             mcp_url=environ.get("TUTOR_MCP_URL", "").strip() or base_url + MCP_PATH,
-            support_email=environ["TUTOR_SUPPORT_EMAIL"],
+            support_email=support_email,
             test_login=environ.get("TUTOR_TEST_LOGIN") == "1",
         )
