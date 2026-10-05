@@ -1,7 +1,12 @@
 # The production stack (compose.prod.yml) as a Coolify "Docker Compose" application.
 # Runbook: docs/v0/coolify.md. ADR: docs/adr/0003-coolify-deployment-keeps-the-tunnel.md.
 # Coolify settings: Base Directory /deploy, Docker Compose Location /compose.coolify.yml,
-# no Domains on any service, Connect To Predefined Network off.
+# no Domains on any service, Connect To Predefined Network off, Raw Compose Deployment ON.
+#
+# Raw mode is required. Without it Coolify (checked 2026-10-05) adds `env_file: .env` with every
+# variable to every service, adds its own internet-facing network to every service (undoing
+# backend's internal: true), and writes whole-value variables into the file, dropping ${NAME:?}.
+# Raw mode deploys this file as written, so it must stay plain Compose: no Coolify-only keys.
 #
 # Differences from compose.prod.yml, and why:
 #   - No env_file: Coolify's checkout has no git-ignored deploy/*.env. Each service lists exactly
@@ -11,8 +16,7 @@
 #   - app and migrate each build the image (cached); no shared `image:` name to depend on.
 #   - edge uses a /24 outside Docker's default pools, where Coolify allocates its own networks.
 #   - The tunnel targets http://tutor-edge-app:8000, an alias that exists on edge only, so
-#     requests always arrive from cloudflared's fixed address even if Coolify adds its network.
-#   - exclude_from_hc on migrate: an exited one-shot must not mark the stack unhealthy.
+#     requests always arrive from cloudflared's fixed address even if a network is ever added.
 # Third-party images and hardening are identical to compose.prod.yml (tests enforce both).
 
 services:
@@ -44,7 +48,6 @@ services:
     # alembic upgrade head, then create/update the app login role and tutor_report.
     entrypoint: ["tutor-migrate"]
     restart: "no"
-    exclude_from_hc: true
     environment:
       MIGRATION_DATABASE_URL: postgresql://${POSTGRES_USER:?}:${POSTGRES_PASSWORD:?}@db:5432/${POSTGRES_DB:?}
       APP_DB_USER: ${APP_DB_USER:?}
@@ -86,7 +89,7 @@ services:
     volumes:
       - oauth:/data/oauth
     networks:
-      backend:
+      backend: {} # a mapping, not null: Coolify's parser drops a null network entry
       edge: # egress to Google and the tunnel path in
         aliases: [tutor-edge-app] # the tunnel's target; resolves on edge only
     security_opt: ["no-new-privileges:true"]

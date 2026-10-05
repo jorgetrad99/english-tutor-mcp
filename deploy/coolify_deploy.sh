@@ -8,6 +8,10 @@
 # Exit 0 only when the deployment finished; failed, cancelled or timed out exit 1.
 set -eu
 : "${COOLIFY_URL:?}" "${COOLIFY_TOKEN:?}" "${COOLIFY_APP_UUID:?}"
+case "$COOLIFY_URL" in
+  https://*) ;;
+  *) echo "COOLIFY_URL must be https (the token is sent with every call)" >&2; exit 1 ;;
+esac
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-1500}"
 
 api() {

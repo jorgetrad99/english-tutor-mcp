@@ -57,6 +57,30 @@ def _cloudflared_address() -> str:
     return nets["edge"]["ipv4_address"]
 
 
+def test_plain_compose_keys_only() -> None:
+    # Coolify deploys this file raw (no parsing), and plain Docker Compose rejects Coolify-only
+    # keys such as exclude_from_hc.
+    allowed = {
+        "image",
+        "build",
+        "entrypoint",
+        "command",
+        "restart",
+        "environment",
+        "depends_on",
+        "volumes",
+        "networks",
+        "healthcheck",
+        "security_opt",
+        "cap_drop",
+        "cap_add",
+        "read_only",
+        "tmpfs",
+    }
+    for name, svc in _services().items():
+        assert set(svc) <= allowed, f"{name}: {set(svc) - allowed}"
+
+
 def test_no_env_files_and_nothing_published() -> None:
     # Coolify's checkout has no git-ignored deploy/*.env; values come from its UI.
     for name, svc in _services().items():
@@ -131,7 +155,7 @@ def test_tunnel_reaches_the_app_only_through_an_edge_alias() -> None:
     nets: dict[str, dict[str, list[str]] | None] = _services()["app"]["networks"]  # type: ignore[assignment]
     assert set(nets) == {"backend", "edge"}
     assert nets["edge"] == {"aliases": ["tutor-edge-app"]}
-    assert not (nets["backend"] or {}).get("aliases")
+    assert nets["backend"] == {}  # null was dropped by Coolify's parser
     assert "tutor-edge-app" not in _services()
 
 
@@ -149,7 +173,6 @@ def test_startup_order_and_one_shot_migrate() -> None:
     migrate = services["migrate"]
     assert migrate["entrypoint"] == ["tutor-migrate"]
     assert migrate["restart"] == "no"
-    assert migrate["exclude_from_hc"] is True  # an exited one-shot is not an unhealthy stack
     assert migrate["depends_on"] == {"db": {"condition": "service_healthy"}}
     assert services["app"]["depends_on"] == {
         "migrate": {"condition": "service_completed_successfully"}

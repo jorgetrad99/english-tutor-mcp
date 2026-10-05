@@ -28,8 +28,14 @@ A, in a separate file, `deploy/compose.coolify.yml`; `compose.prod.yml` is uncha
 - The edge network moves to `10.213.10.0/24`, outside Docker's default pools. cloudflared is fixed at `10.213.10.3`, the only `FORWARDED_ALLOW_IPS` entry.
 - The tunnel targets `tutor-edge-app`, an alias on the edge network only. If Coolify attaches its own network to the services, the app could resolve on two networks; the alias keeps cloudflared's requests on edge, so they come from the trusted address.
 - `app` and `migrate` each build the image; there is no shared `image:` name.
-- `migrate` carries Coolify's `exclude_from_hc: true`.
-- `backup.sh` accepts `DB_CONTAINER` and `OAUTH_VOLUME`. Without them it behaves as before.
+- The application runs with **Raw Compose Deployment** on, so Coolify deploys the file as written; the file is plain Compose with no Coolify-only keys. On 2026-10-05, Coolify's normal mode was seen to:
+  - give every service `env_file: .env` holding all 13 variables, so cloudflared would hold the database passwords and the app the owner password;
+  - attach every service to its own internet-facing network, undoing `backend`'s `internal: true`;
+  - drop `app`'s null `backend:` entry (now written `backend: {}`);
+  - write whole-value variables into the file, so `${NAME:?}` no longer stopped a deploy.
+
+  It also strips `exclude_from_hc`, which raw mode would pass to Docker Compose as an error; the key is gone.
+- `backup.sh` accepts `COMPOSE_PROJECT` (the application uuid). It finds the db container by its compose labels, because Coolify's container names change between deploys, and uses `<uuid>_oauth`. Without it the script behaves as before.
 
 Releases follow the requirements' CI/CD row ("deploy on tag"). A `v*` tag on `main`:
 - passes `just check` in CI;
@@ -55,7 +61,8 @@ Option B was rejected for three reasons:
 
 - Same security posture and Cloudflare configuration as the homelab, and no inbound port on the VPS.
 - Secrets live in Coolify's database instead of files with mode 600; access to the Coolify dashboard is now access to every secret. Protect it with a strong password and 2FA, and keep the dashboard off the public internet where possible.
-- **Unverified:** whether Coolify adds its resource network to `db` and `migrate`. If it does, they gain egress (nothing is published). The runbook asks to check the Deployable Compose on the first deploy; record the result here.
-- **Unverified:** whether this Coolify version strips `exclude_from_hc` before calling Docker Compose. Plain `docker compose config` rejects the key. The runbook's troubleshooting section covers removing it.
+- Raw mode makes Coolify track the containers less closely: its status view may show the application as degraded or exited (`migrate` exits by design). The deploy log, the runbook's step 7 host checks and the CI smoke checks are the source of truth.
+- **Unverified until the first raw deploy:** that raw mode still passes Coolify's variables to Compose interpolation, and names the project after the application uuid (`<uuid>_backend`, `<uuid>_oauth`). The runbook's step 7 checks both; record the result here.
+- Coolify's dashboard also answers on plain HTTP at the server's IP and port 8000. CI uses only the https origin (`deploy/coolify_deploy.sh` refuses anything else); close port 8000 to the internet once the https origin works.
 - Backups stay host cron jobs: Coolify's scheduled backups cover only databases Coolify manages.
 - The runbook's `docker compose` commands need Coolify's names; `docs/v0/coolify.md` maps them.
