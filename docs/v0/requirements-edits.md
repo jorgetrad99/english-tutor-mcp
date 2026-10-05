@@ -518,7 +518,7 @@ Find:
 Replace with:
 
 ```text
-4 = produced correctly and used spontaneously later in the session (set by the server at `end_session` when a reviewed item rated 3 appears in at least two distinct `user_turns`, the drill and a later turn; FSRS is recomputed from the state stored before the review). An item is graded at most once per local day.
+4 = produced correctly and used spontaneously later in the session (set by the server at `end_session` when a reviewed item rated 3 appears in at least two distinct `user_turns`, the drill and a later turn; FSRS is recomputed from the state stored before the review; only when the lesson closes as complete, and never for an item the same lesson saved to the glossary again). An item is graded at most once per local day.
 ```
 
 `chunks_used` holds the ids of today's five chunks, not glossary items, so the requirement could not be implemented as written. Spec 10.3 replaced it with the `user_turns` heuristic.
