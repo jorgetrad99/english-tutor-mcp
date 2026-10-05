@@ -40,6 +40,10 @@ migrate:
 serve:
     uv run python -m tutor
 
+# Same server with settings from deploy/local.env (copy of deploy/local.env.example; docs/v0/local.md)
+serve-local:
+    uv run --env-file deploy/local.env python -m tutor
+
 # Gate report (spec 14), read only, as the tutor_report role: GATE_REPORT_DATABASE_URL (needs BYPASSRLS)
 gate-report from:
     uv run python -m tutor.ops.gate_report --from {{from}}
