@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -62,6 +63,6 @@ def meter_fraction(used: int, cap: int) -> float:
 
 def cefr_label(value: float) -> str:
     """Numeric level (1.0 = A1 … 6.0 = C2) to a half-step label such as "B1+"."""
-    halves = min(max(round(value * 2), 2), 12)
+    halves = min(max(math.floor(value * 2 + 0.5), 2), 12)
     base, plus = divmod(halves, 2)
     return _LEVELS[base - 1] + ("+" if plus else "")

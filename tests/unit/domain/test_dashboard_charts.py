@@ -47,7 +47,17 @@ def test_meter_fraction_is_clamped(used: int, cap: int, expected: float) -> None
 
 @pytest.mark.parametrize(
     ("value", "label"),
-    [(3.0, "B1"), (3.2, "B1"), (3.4, "B1+"), (4.5, "B2+"), (5.0, "C1"), (0.2, "A1"), (9, "C2")],
+    [
+        (3.0, "B1"),
+        (3.2, "B1"),
+        (3.25, "B1+"),  # tie: rounds up with floor(value * 2 + 0.5)
+        (3.4, "B1+"),
+        (3.75, "B2"),  # tie: rounds up with floor(value * 2 + 0.5)
+        (4.5, "B2+"),
+        (5.0, "C1"),
+        (0.2, "A1"),
+        (9, "C2"),
+    ],
 )
 def test_cefr_label_rounds_to_half_steps(value: float, label: str) -> None:
     assert cefr_label(value) == label
