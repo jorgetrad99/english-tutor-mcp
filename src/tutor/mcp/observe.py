@@ -1,7 +1,11 @@
 """Per-call state, the call log and the library log guards (spec section 13).
 
-The call log is one JSON line per tool call: hashed user id, tool name, outcome code and
-latency. Never arguments, tokens, emails, exception text or learner text. FastMCP and the MCP
+The call log is one JSON line per tool call: `event`, `user_hash` (first 12 hex characters of
+SHA-256 of the user id, null before the user is known), `tool` (a tool name or "unknown"),
+`outcome` ("ok", an error code, "unauthenticated", "protocol_error", "cancelled" or
+"internal_error") and `latency_ms`. Only when the outcome is internal_error it adds
+`error_class`, the class name of the unexpected exception (null if unknown). Never arguments,
+tokens, emails, exception text or learner text. FastMCP and the MCP
 SDK log tool failures with tracebacks, call arguments at DEBUG and, in the OAuth proxy, a
 whole authorization code; `guard_library_logs` keeps all of that out of the logs.
 """
@@ -21,10 +25,11 @@ from uuid import UUID
 from fastmcp.exceptions import ToolError
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from mcp.shared.exceptions import MCPError
+from mcp.types import INVALID_REQUEST
 
-TOOL_NAMES = frozenset(
-    {"get_profile", "save_profile", "start_lesson", "record_review", "save_glossary", "end_session"}
-)
+from tutor.mcp.instructions import TOOL_DESCRIPTIONS
+
+TOOL_NAMES = frozenset(TOOL_DESCRIPTIONS)
 REDACTED = "[redacted]"
 # Library loggers whose records keep their fixed template but lose their arguments and
 # tracebacks (a logger's filter applies to the records created on that exact logger).
@@ -44,14 +49,24 @@ SCRUBBED_LOGGERS = (
 SILENCED_LOGGERS = ("fastmcp.server.auth",)
 
 _calls = logging.getLogger("tutor.mcp.calls")
-_failures = logging.getLogger("tutor.mcp.failures")
+
+
+class Unauthenticated(MCPError):
+    """No usable access token: a fixed protocol error, logged as outcome unauthenticated."""
+
+    def __init__(self) -> None:
+        super().__init__(code=INVALID_REQUEST, message="Not authorized")
 
 
 @dataclass
 class CallState:
-    """Mutable on purpose: the identity middleware fills it, the tool thread reads it."""
+    """Mutable on purpose: the identity middleware fills it, the tool thread reads it.
+
+    `error_class` is the class name of an unexpected exception, never its text.
+    """
 
     user_id: UUID | None = None
+    error_class: str | None = None
 
 
 CALL_STATE: ContextVar[CallState | None] = ContextVar("tutor_mcp_call", default=None)
@@ -67,7 +82,7 @@ def user_hash(user_id: UUID) -> str:
 
 def outcome_of(exc: BaseException) -> str:
     """The error code of a ToolError built by tutor.mcp.errors, else a fixed label."""
-    if isinstance(exc, PermissionError):
+    if isinstance(exc, PermissionError | Unauthenticated):
         return "unauthenticated"
     if isinstance(exc, MCPError):
         return "protocol_error"
@@ -80,17 +95,11 @@ def outcome_of(exc: BaseException) -> str:
     return code if isinstance(code, str) else "tool_error"
 
 
-def log_failure(tool: str, exc: BaseException) -> None:
-    """An unexpected failure: the tool and the exception class only, never its text."""
-    _failures.error(
-        json.dumps(
-            {
-                "event": "mcp_tool_failure",
-                "tool": tool if tool in TOOL_NAMES else "unknown",
-                "exc_type": type(exc).__name__,
-            }
-        )
-    )
+def note_failure(exc: BaseException) -> None:
+    """Records an unexpected exception's class name (never its text) for the call log."""
+    state = current_call()
+    if state is not None:
+        state.error_class = type(exc).__name__
 
 
 class ScrubFilter(logging.Filter):
@@ -142,16 +151,22 @@ class CallLogMiddleware(Middleware):
             return await call_next(context)
         except Exception as exc:
             outcome = outcome_of(exc)
+            if outcome == "internal_error" and state.error_class is None:
+                state.error_class = type(exc).__name__
+            raise
+        except BaseException:  # cancellation (the client went away) and interpreter exits
+            outcome = "cancelled"
             raise
         finally:
             CALL_STATE.reset(token)
             name = getattr(context.message, "name", None)
-            self._emit(
-                {
-                    "event": "mcp_tool_call",
-                    "tool": name if name in TOOL_NAMES else "unknown",
-                    "user_hash": user_hash(state.user_id) if state.user_id else None,
-                    "outcome": outcome,
-                    "latency_ms": round((self._clock() - started) * 1000, 1),
-                }
-            )
+            line: dict[str, Any] = {
+                "event": "mcp_tool_call",
+                "tool": name if name in TOOL_NAMES else "unknown",
+                "user_hash": user_hash(state.user_id) if state.user_id else None,
+                "outcome": outcome,
+                "latency_ms": round((self._clock() - started) * 1000, 1),
+            }
+            if outcome == "internal_error":
+                line["error_class"] = state.error_class
+            self._emit(line)

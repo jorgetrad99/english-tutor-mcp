@@ -22,7 +22,13 @@ from tutor.mcp import instructions as text
 from tutor.mcp import rules
 from tutor.mcp import schemas as s
 from tutor.mcp.errors import TutorToolError, ValidationErrorMiddleware, error_text, tool_error
-from tutor.mcp.observe import CallLogMiddleware, current_call, guard_library_logs, log_failure
+from tutor.mcp.observe import (
+    CallLogMiddleware,
+    Unauthenticated,
+    current_call,
+    guard_library_logs,
+    note_failure,
+)
 from tutor.mcp.ratelimit import SlidingWindowLimiter
 from tutor.services import glossary as glossary_svc
 from tutor.services import lesson as lesson_svc
@@ -54,9 +60,9 @@ class IdentityMiddleware(Middleware):
         try:
             state.user_id = await anyio.to_thread.run_sync(self._resolve)
         except PermissionError:
-            raise PermissionError("no MCP access token") from None
+            raise Unauthenticated from None
         except Exception as exc:  # a database error's text may hold the sub or the email
-            log_failure(str(tool), exc)
+            note_failure(exc)
             raise _internal_error(tool) from None
         if not self._limiter.allow(str(state.user_id)):
             raise TutorToolError(error_text("rate_limited", (), tool))
@@ -78,7 +84,7 @@ def _guard[T](tool: str, run: Callable[[], T]) -> T:
     except ServiceError as exc:
         raise tool_error(exc, tool) from None
     except Exception as exc:
-        log_failure(tool, exc)
+        note_failure(exc)
         raise _internal_error(tool) from None
 
 
@@ -284,19 +290,29 @@ def build_mcp(
         mcp,
         record_review,
         s.RecordReviewInput,
-        ToolAnnotations(title="Record review", idempotent_hint=True, open_world_hint=False),
+        ToolAnnotations(
+            title="Record review",
+            idempotent_hint=True,
+            destructive_hint=False,
+            open_world_hint=False,
+        ),
     )
     _register(
         mcp,
         save_glossary,
         s.SaveGlossaryInput,
-        ToolAnnotations(title="Save glossary", open_world_hint=False),
+        ToolAnnotations(title="Save glossary", destructive_hint=False, open_world_hint=False),
     )
     _register(
         mcp,
         end_session,
         s.EndSessionInput,
-        ToolAnnotations(title="End session", idempotent_hint=True, open_world_hint=False),
+        ToolAnnotations(
+            title="End session",
+            idempotent_hint=True,
+            destructive_hint=False,
+            open_world_hint=False,
+        ),
     )
 
     @mcp.prompt(

@@ -7,6 +7,7 @@ mapped by its code or class only, and field paths are reduced to a safe alphabet
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections.abc import Sequence
 from typing import Any
@@ -79,7 +80,8 @@ def error_text(code: McpErrorCode, fields: Sequence[str] = (), tool: str | None 
 
 
 def tool_error(exc: ServiceError, tool: str | None = None) -> ToolError:
-    return TutorToolError(error_text(exc.code, exc.fields, tool))
+    """An expected use-case error: FastMCP logs its fixed "Error calling tool" line at INFO."""
+    return TutorToolError(error_text(exc.code, exc.fields, tool), log_level=logging.INFO)
 
 
 def validation_fields(exc: BaseException) -> tuple[str, ...]:

@@ -158,10 +158,14 @@ def test_save_glossary_rules_name_the_next_action() -> None:
     assert "warm-up" in rules.SAVE_GLOSSARY
 
 
-def test_turn_length_and_spanish_limits_apply_to_the_conversation_only() -> None:
-    assert "In the conversation phase" in INSTRUCTIONS
-    assert "Feedback and onboarding are exempt" in INSTRUCTIONS
-    assert "a warm-up drill cue may use Spanish" in INSTRUCTIONS
+def test_only_the_word_limit_is_conversation_only_and_spanish_is_limited_everywhere() -> None:
+    conversation, rest = INSTRUCTIONS.split("In the conversation phase", 1)[1].split(". ", 1)
+    assert "at most 60 words per turn in text sessions" in conversation
+    assert "Spanish" not in conversation
+    assert "In every phase, feedback included, use Spanish only for a meaning check" in rest
+    assert "The only exceptions: a warm-up production cue" in rest
+    assert "onboarding questions and options are asked in the learner's language" in rest
+    assert "exempt" not in INSTRUCTIONS
 
 
 def test_payload_too_large_rule_names_evidence_only_for_end_session() -> None:

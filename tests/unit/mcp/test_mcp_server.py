@@ -110,6 +110,8 @@ async def test_list_tools_follows_the_mcp_contract() -> None:
     assert tools["get_profile"].annotations.read_only_hint is True
     for name in ("save_profile", "record_review", "end_session"):
         assert tools[name].annotations.idempotent_hint is True
+    for name in ("record_review", "save_glossary", "end_session"):
+        assert tools[name].annotations.destructive_hint is False
     assert tools["end_session"].input_schema["properties"]["user_turns"]["title"] == "User turns"
 
 
@@ -326,7 +328,8 @@ def every_log() -> Iterator[Capture]:
         logger = logging.getLogger(name)
         saved.append((logger, logger.level))
         logger.setLevel(logging.DEBUG)
-        logger.addHandler(handler)
+        if name in ("", "fastmcp"):  # mcp and tutor propagate to the root
+            logger.addHandler(handler)
     try:
         yield handler
     finally:
@@ -360,7 +363,16 @@ async def test_failures_never_log_exception_or_learner_text(
 
     assert body["code"] == resolver_body["code"] == "internal_error"
     assert any(name.startswith("fastmcp.") for name in every_log.names)  # capture works
-    assert any(name == "tutor.mcp.calls" for name in every_log.names)
+    calls = [
+        json.loads(line.split(" ", 2)[2]) for line in every_log.lines if "mcp_tool_call" in line
+    ]
+    assert [(c["tool"], c["outcome"], c.get("error_class")) for c in calls] == [
+        ("save_profile", "internal_error", "RuntimeError"),
+        ("start_lesson", "validation_failed", None),
+        ("get_profile", "internal_error", "RuntimeError"),
+    ]
+    assert "fastmcp.server.server INFO Error calling tool 'start_lesson'" in every_log.lines
+    assert "fastmcp.server.server ERROR Error calling tool 'save_profile'" in every_log.lines
     for line in every_log.lines:
         for probe in (PROBE, "ZQX", EXC_PROBE, "QXZ", "hunter2", CODE_PROBE):
             assert probe not in line, line
@@ -385,6 +397,42 @@ async def test_onboarding_option_values_are_accepted_by_save_profile() -> None:
             saved = await call(client, "save_profile", args)
             assert saved["profile"]["minutes_per_day"] == minutes
     assert options["time"] == [15, 20, 30]
+
+
+@pytest.mark.asyncio
+async def test_rejected_glossary_items_come_back_with_reasons() -> None:
+    async with Client(World().mcp) as client:
+        lesson = await onboarded(client)
+        items = [
+            GLOSSARY_ITEM,
+            GLOSSARY_ITEM,
+            {**GLOSSARY_ITEM, "text": "  "},
+            {**GLOSSARY_ITEM, "text": "circle back", "context_sentence": " "},
+        ]
+        args = {"session_id": lesson["session_id"], "status": "confirmed", "items": items}
+        saved = await call(client, "save_glossary", args)
+    assert saved["new"] == 1
+    assert saved["rejected"] == [
+        {"index": 1, "reason": "duplicate_in_call"},
+        {"index": 2, "reason": "empty"},
+        {"index": 3, "reason": "missing_context"},
+    ]
+    assert saved["response_rules"] == rules.SAVE_GLOSSARY
+
+
+@pytest.mark.asyncio
+async def test_a_too_short_lesson_ends_incomplete() -> None:
+    world = World()
+    async with Client(world.mcp) as client:
+        lesson = await onboarded(client)
+        world.clock.advance(minutes=3)
+        args = end_args(
+            lesson["session_id"], [], user_turns=["Hi, sorry, I have to go."], errors=[]
+        )
+        end = await call(client, "end_session", args)
+    assert (end["status"], end["already_closed"]) == ("incomplete", False)
+    assert end["response_rules"] == rules.end_session_rules("incomplete", already_closed=False)
+    assert end["metrics"]["turns"] == 1
 
 
 @pytest.mark.asyncio
@@ -426,8 +474,9 @@ async def test_calls_without_a_token_are_refused(
     mcp = build_mcp(world.svc, world.identity, auth=None)
     monkeypatch.setattr(identity_module, "token_identity", lambda: None)
     async with Client(mcp) as client:
-        with pytest.raises(MCPError, match="Internal server error"):
+        with pytest.raises(MCPError) as caught:
             await client.call_tool("get_profile", {}, raise_on_error=False)
+    assert (caught.value.error.code, caught.value.error.message) == (-32600, "Not authorized")
     [record] = [json.loads(r.getMessage()) for r in caplog.records if r.name == "tutor.mcp.calls"]
     assert (record["outcome"], record["user_hash"]) == ("unauthenticated", None)
 
