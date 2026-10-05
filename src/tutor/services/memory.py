@@ -27,6 +27,7 @@ from tutor.domain.glossary import (
     InsertItem,
     Promote,
     Reinforce,
+    Reject,
     SetStatus,
 )
 from tutor.domain.lesson import BriefVariant, DueCandidate, RecentResult
@@ -402,6 +403,10 @@ class MemorySessionRepo(_Repo):
         hook = self._store.before_session_create
         if hook is not None:
             hook()
+        if plan_item_id is not None:
+            plan_item = self._t.plan_items.get(plan_item_id)
+            if plan_item is None or plan_item.user_id != self._uid:
+                raise LookupError("plan item not found")
         if any(s.status == "open" for s in self._mine()):
             raise OpenSessionExists()
         rec = SessionRecord(
@@ -549,6 +554,8 @@ class MemoryGlossaryRepo(_Repo):
         session_id: UUID,
         now: datetime,
     ) -> None:
+        if any(not isinstance(a, Reject) for a in actions) and not self._owns_session(session_id):
+            raise LookupError("session not found")
         for action in actions:
             match action:
                 case InsertItem():

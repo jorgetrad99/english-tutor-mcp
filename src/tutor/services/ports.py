@@ -1,9 +1,9 @@
 """Repository ports and row types for the use cases.
 
 Every method acts on the unit of work's user only; another user's rows are invisible. Writes to
-them are no-ops (close, mark_incomplete, mark_done, set_log_rating), except save_metrics,
-save_errors, save_state, log and apply, which raise LookupError when the referenced session or
-glossary item is not visible to the user.
+them are no-ops (close, mark_incomplete, set_log_rating), except save_metrics, save_errors,
+save_state, log and apply, which raise LookupError when the referenced session or glossary item
+is not visible to the user; mark_done and create raise it for a foreign session or plan item.
 Implementations: tutor.services.memory (tests) and tutor.db (Postgres, RLS).
 These docstrings are the semantics; tests/repo_contract.py pins them on both backends.
 """
@@ -142,8 +142,9 @@ class PlanRepo(Protocol):
         `rationale` must be JSON-serializable (TypeError otherwise)."""
 
     def mark_done(self, plan_item_id: UUID, session_id: UUID) -> bool:
-        """Mark one of the user's plan items done in any plan version. False when it is not
-        the user's, does not exist or is already done."""
+        """Mark one of the user's plan items done in any plan version. False for another
+        user's, a missing or an already-done plan item; LookupError when session_id is not a
+        session of the current user."""
 
     def done_base_track_ids(self) -> frozenset[str]:
         """Track ids of done plan items with variant base, across every version."""
@@ -169,7 +170,8 @@ class SessionRepo(Protocol):
         now: datetime,
     ) -> SessionRow:
         """Insert an open session started at `now`. Raises OpenSessionExists if the user
-        already has one (unique index); the caller's unit of work then rolls back."""
+        already has one (unique index); the caller's unit of work then rolls back.
+        LookupError when plan_item_id is not a plan item of the current user."""
 
     def mark_incomplete(self, session_id: UUID, now: datetime) -> None:
         """Open session -> incomplete with ended_at = now and no result; no-op otherwise."""

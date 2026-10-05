@@ -13,7 +13,7 @@ from sqlalchemy import Engine, text
 
 from tutor.db.uow import PgUnitOfWork
 from tutor.domain.fsrs import FsrsState, new_state, review, state_to_json
-from tutor.domain.glossary import IncomingItem, InsertItem
+from tutor.domain.glossary import IncomingItem, InsertItem, Reinforce
 from tutor.domain.metrics import SessionMetrics
 from tutor.domain.profile import Profile
 from tutor.domain.text import normalize
@@ -32,7 +32,11 @@ from tutor.services.views import EndSessionResult
 pytestmark = pytest.mark.integration
 
 EVIDENCE = Evidence(
-    user_turns=("Yesterday I goed to the standup and explained the rollback.",),
+    user_turns=(
+        "Yesterday I goed to the standup and explained the rollback to the whole team, "
+        "and then we talked about the release plan, the monitoring alerts and who would "
+        "be on call during the weekend after the deploy.",
+    ),
     errors=(ReportedError(said="I goed", correct="I went", category="grammar"),),
     chunks_used=(),
     task_result="achieved",
@@ -378,5 +382,65 @@ def test_two_concurrent_end_sessions_close_once(
             text("SELECT status, result FROM sessions WHERE id = :s"), {"s": session.id}
         ).one()
     assert (metrics, audits) == (1, 1)
-    assert status in ("closed", "incomplete")
+    assert status == "closed"
     assert result is not None
+
+
+def test_one_users_concurrent_units_of_work_on_different_sessions_do_not_deadlock(
+    uow_factory: UowFactory, user_id: UUID, now: datetime
+) -> None:
+    # The per-user advisory lock serializes units of work, so opposite lock orders never deadlock.
+    with uow_factory(user_id) as uow:
+        old = _open(uow, now)
+        first = _add_confirmed(uow, old.id, "roll back", now, now)
+        second = _add_confirmed(uow, old.id, "hotfix", now, now)
+        uow.sessions.mark_incomplete(old.id, now)
+        current = _open(uow, now)
+    errors: list[BaseException] = []
+
+    def review_in_order() -> None:
+        try:
+            with uow_factory(user_id) as uow:
+                state = uow.reviews.state(first)
+                assert state is not None
+                uow.reviews.save_state(first, state)
+                time.sleep(0.5)
+                uow.reviews.log(current.id, second, 3, now, state)
+                uow.reviews.save_state(second, state)
+        except BaseException as exc:
+            errors.append(exc)
+
+    def reinforce_in_opposite_order() -> None:
+        try:
+            time.sleep(0.15)
+            with uow_factory(user_id) as uow:
+                for item_id in (second, first):
+                    uow.glossary.apply(
+                        [
+                            Reinforce(
+                                index=0,
+                                item_id=item_id,
+                                kind="chunk",
+                                seen_count=2,
+                                leech=False,
+                                due=now,
+                            )
+                        ],
+                        [],
+                        session_id=old.id,
+                        now=now,
+                    )
+                    time.sleep(0.4)
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = [
+        threading.Thread(target=review_in_order),
+        threading.Thread(target=reinforce_in_opposite_order),
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=20)
+    assert not any(t.is_alive() for t in threads)
+    assert errors == []

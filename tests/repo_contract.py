@@ -18,6 +18,7 @@ import pytest
 from tutor.content import load_track
 from tutor.domain.fsrs import FsrsState, new_state
 from tutor.domain.glossary import (
+    GlossaryAction,
     GlossaryKind,
     IncomingItem,
     InsertItem,
@@ -1143,6 +1144,48 @@ class RepoContract:
             uow.reviews.set_log_rating(session.id, row.id, 1)
         with uow_factory(user_id) as uow:
             assert uow.reviews.session_logs(session.id)[0].rating == 3
+
+    def test_create_with_a_plan_item_the_user_does_not_own_raises_lookup_error(
+        self, uow_factory: UowFactory, user_id: UUID, other_user_id: UUID, now: datetime
+    ) -> None:
+        with uow_factory(user_id) as uow:
+            plan = uow.plans.create(planned_items(uow.track.items("it")), RATIONALE, now)
+        for foreign in (plan.items[0].id, uuid4()):
+            with pytest.raises(LookupError), uow_factory(other_user_id) as uow:
+                start_session(uow, first_item(uow), now, plan_item_id=foreign)
+        with uow_factory(other_user_id) as uow:
+            assert uow.sessions.open_session() is None
+            assert uow.sessions.count_started_since(now - timedelta(days=1)) == 0
+
+    def test_glossary_apply_with_another_users_session_raises_lookup_error(
+        self, uow_factory: UowFactory, user_id: UUID, other_user_id: UUID, now: datetime
+    ) -> None:
+        with uow_factory(user_id) as uow:
+            foreign = start_session(uow, first_item(uow), now)
+        with uow_factory(other_user_id) as uow:
+            own = start_session(uow, first_item(uow), now)
+            maybe = insert_glossary(uow, own.id, "maybe", now, status="provisional")
+            before = uow.glossary.get_many([maybe.id])[maybe.id]
+        insert = InsertItem(
+            index=0,
+            item=incoming("ship it"),
+            text_norm=normalize("ship it"),
+            status="confirmed",
+            provisional_expires_at=None,
+            first_due=now,
+        )
+        attempts: list[GlossaryAction] = [
+            insert,
+            Promote(index=0, item_id=maybe.id, first_due=now),
+            SetStatus(index=0, item_id=maybe.id, status="declined", provisional_expires_at=None),
+        ]
+        for action in attempts:
+            with pytest.raises(LookupError), uow_factory(other_user_id) as uow:
+                uow.glossary.apply([action], [incoming("ship it")], session_id=foreign.id, now=now)
+        with uow_factory(other_user_id) as uow:
+            assert uow.glossary.by_norms([normalize("ship it")]) == {}
+            assert uow.glossary.get_many([maybe.id])[maybe.id] == before
+            assert uow.reviews.state(maybe.id) is None
 
     def test_writes_against_another_users_rows_raise_lookup_error(
         self, uow_factory: UowFactory, user_id: UUID, other_user_id: UUID, now: datetime

@@ -10,6 +10,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import IntegrityError
 
+from tutor.db.repos._guards import require_session
 from tutor.db.tables import plan_items, session_errors, session_metrics, sessions
 from tutor.domain.lesson import BriefVariant, RecentResult
 from tutor.domain.levels import CefrLevel
@@ -76,16 +77,6 @@ class PgSessionRepo:
             query = query.with_for_update()
         m = self._conn.execute(query).mappings().one_or_none()
         return None if m is None else _row(m)
-
-    def _require_session(self, session_id: UUID) -> None:
-        """Foreign keys bypass RLS, so a write must first see its session as this user."""
-        found = self._conn.execute(
-            select(sessions.c.id).where(
-                sessions.c.id == session_id, sessions.c.user_id == self._user_id
-            )
-        ).scalar_one_or_none()
-        if found is None:
-            raise LookupError("session not found")
 
     def get(self, session_id: UUID) -> SessionRow | None:
         # FOR UPDATE: a concurrent end_session waits for the first to commit, then sees `result`.
@@ -242,7 +233,7 @@ class PgSessionRepo:
         return {r.track_item_id: r.last for r in rows if r.last is not None}
 
     def save_metrics(self, session_id: UUID, metrics: SessionMetrics) -> None:
-        self._require_session(session_id)
+        require_session(self._conn, self._user_id, session_id)
         values = _metric_values(metrics)
         self._conn.execute(
             pg_insert(session_metrics)
@@ -251,7 +242,7 @@ class PgSessionRepo:
         )
 
     def save_errors(self, session_id: UUID, errors: Sequence[ValidError]) -> None:
-        self._require_session(session_id)
+        require_session(self._conn, self._user_id, session_id)
         # Replace, so a repeated end_session write never duplicates rows.
         self._conn.execute(
             delete(session_errors).where(

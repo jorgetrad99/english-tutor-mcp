@@ -41,6 +41,7 @@ _SET_SCOPE = text(
     " set_config('app.google_sub', :google_sub, true),"
     " set_config('app.web_session', :web_session, true)"
 )
+_LOCK_USER = text("SELECT pg_advisory_xact_lock(hashtextextended(:uid, 0))")
 
 
 @contextmanager
@@ -65,6 +66,10 @@ def scoped_connection(
                 "web_session": web_session or "",
             },
         )
+        if user_id is not None:
+            # Serialize one user's units of work, so concurrent calls on different sessions
+            # cannot take row locks in opposite orders and deadlock (40P01).
+            conn.execute(_LOCK_USER, {"uid": str(user_id)})
         yield conn
 
 

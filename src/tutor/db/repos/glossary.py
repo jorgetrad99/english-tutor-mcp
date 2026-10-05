@@ -8,7 +8,8 @@ from sqlalchemy import Connection, delete, func, insert, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import RowMapping
 
-from tutor.db.tables import glossary_items, review_logs, review_states, sessions
+from tutor.db.repos._guards import require_item, require_session
+from tutor.db.tables import glossary_items, review_logs, review_states
 from tutor.domain.fsrs import FsrsState, new_state, state_from_json, state_to_json
 from tutor.domain.glossary import (
     DECLINED_RETENTION_DAYS,
@@ -39,25 +40,6 @@ def _row(m: RowMapping) -> GlossaryRowData:
         created_at=m["created_at"],
         provisional_expires_at=m["provisional_expires_at"],
     )
-
-
-def require_session(conn: Connection, user_id: UUID, session_id: UUID) -> None:
-    """Foreign keys bypass RLS, so a write must first see its session as this user."""
-    found = conn.execute(
-        select(sessions.c.id).where(sessions.c.id == session_id, sessions.c.user_id == user_id)
-    ).scalar_one_or_none()
-    if found is None:
-        raise LookupError("session not found")
-
-
-def require_item(conn: Connection, user_id: UUID, item_id: UUID) -> None:
-    found = conn.execute(
-        select(glossary_items.c.id).where(
-            glossary_items.c.id == item_id, glossary_items.c.user_id == user_id
-        )
-    ).scalar_one_or_none()
-    if found is None:
-        raise LookupError("glossary item not found")
 
 
 def upsert_state(conn: Connection, user_id: UUID, item_id: UUID, state: FsrsState) -> None:
