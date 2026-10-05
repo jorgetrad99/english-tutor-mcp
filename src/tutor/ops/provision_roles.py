@@ -78,7 +78,8 @@ def _set_login_role(conn: psycopg.Connection, user: str, password: str) -> None:
 
 
 def _assert_unprivileged(conn: psycopg.Connection, user: str) -> None:
-    """The login is a member of tutor_app only and owns no object at all."""
+    """The login is a member of tutor_app only, reaches no superuser or BYPASSRLS role, and owns
+    nothing, the database included."""
     memberships = {
         row[0]
         for row in conn.execute(
@@ -91,10 +92,15 @@ def _assert_unprivileged(conn: psycopg.Connection, user: str) -> None:
         "SELECT (SELECT count(*) FROM pg_class c JOIN pg_roles r ON r.oid = c.relowner "
         "WHERE r.rolname = %(u)s) + (SELECT count(*) FROM pg_proc p JOIN pg_roles r "
         "ON r.oid = p.proowner WHERE r.rolname = %(u)s) + (SELECT count(*) FROM pg_namespace n "
-        "JOIN pg_roles r ON r.oid = n.nspowner WHERE r.rolname = %(u)s)",
+        "JOIN pg_roles r ON r.oid = n.nspowner WHERE r.rolname = %(u)s) "
+        "+ (SELECT count(*) FROM pg_database d JOIN pg_roles r ON r.oid = d.datdba "
+        "WHERE r.rolname = %(u)s AND d.datname = current_database()), "
+        "pg_has_role(%(u)s, 'pg_database_owner', 'MEMBER'), "
+        "EXISTS (SELECT 1 FROM pg_roles p WHERE (p.rolsuper OR p.rolbypassrls) "
+        "AND pg_has_role(%(u)s, p.oid, 'MEMBER'))",
         {"u": user},
     ).fetchone()
-    if memberships != {APP_ROLE} or owned is None or owned[0]:
+    if memberships != {APP_ROLE} or owned is None or owned[0] or owned[1] or owned[2]:
         raise SystemExit(
             "APP_DB_USER must be a member of tutor_app only and own nothing; "
             "use a dedicated role name"

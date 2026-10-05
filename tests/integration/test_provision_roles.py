@@ -110,3 +110,28 @@ def test_the_app_check_refuses_a_login_that_owns_an_object_or_joins_another_role
         login.dispose()
         with engine.begin() as conn:
             conn.execute(text("DROP SCHEMA owned_by_login"))
+
+
+def test_owning_the_database_is_refused_by_both_checks(engine: Engine, owner_url: str) -> None:
+    pw = secrets.token_hex(24)
+    assert main(_env(owner_url, pw, secrets.token_hex(24))) == 0
+    login_url = make_url(owner_url).set(username=LOGIN, password=pw).render_as_string(False)
+    with engine.connect() as conn:
+        db_name, previous = conn.execute(
+            text(
+                "SELECT d.datname, r.rolname FROM pg_database d "
+                "JOIN pg_roles r ON r.oid = d.datdba WHERE d.datname = current_database()"
+            )
+        ).one()
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+        conn.execute(text(f'ALTER DATABASE "{db_name}" OWNER TO {LOGIN}'))
+    login = make_engine(login_url)
+    try:
+        with pytest.raises(SystemExit, match="owns database objects"):
+            check_app_role(login)
+        with pytest.raises(SystemExit, match="own nothing"):
+            main(_env(owner_url, pw, secrets.token_hex(24)))
+    finally:
+        login.dispose()
+        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+            conn.execute(text(f'ALTER DATABASE "{db_name}" OWNER TO "{previous}"'))

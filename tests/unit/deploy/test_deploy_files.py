@@ -119,3 +119,18 @@ def test_wheel_contains_locale_templates_static_and_track(tmp_path: Path) -> Non
     assert "tutor/web/templates/pages/login.html" in names
     assert any(n.startswith("tutor/web/static/") for n in names)
     assert "tutor/content/track_it_v0.yaml" in names
+
+
+@pytest.mark.parametrize("script", ["backup.sh", "check_backup.sh"])
+def test_host_scripts_are_executable_in_git(script: str) -> None:
+    # core.filemode is off on Windows, so the index mode is the only reliable record.
+    git = shutil.which("git")
+    assert git, "git must be on PATH"
+    out = subprocess.run(  # noqa: S603 - fixed arguments
+        [git, "ls-files", "-s", f"deploy/{script}"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert out.startswith("100755 "), out

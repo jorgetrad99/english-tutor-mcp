@@ -108,6 +108,8 @@ def check_app_role(engine: Engine) -> None:
                     "WHERE r.rolname = session_user "
                     "UNION ALL SELECT 'schema' FROM pg_namespace n JOIN pg_roles r "
                     "ON r.oid = n.nspowner WHERE r.rolname = session_user"
+                    " UNION ALL SELECT 'database' "
+                    "WHERE pg_has_role(session_user, 'pg_database_owner', 'MEMBER')"
                 )
             )
             .scalars()

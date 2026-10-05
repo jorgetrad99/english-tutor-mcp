@@ -37,15 +37,16 @@ Git Bash on Windows rewrites arguments that start with `/` (for example `/app/..
 2. Cache Rule for `<host>`: bypass cache. No Cloudflare Access application on this hostname (Claude's servers must reach it).
 3. SSL/TLS, Edge Certificates: **Always Use HTTPS** on, **Minimum TLS Version 1.2**, and **HSTS** enabled for the zone (start with max-age 6 months, no preload until you are sure every subdomain is HTTPS).
 4. **Per-IP rate limit** for the unauthenticated endpoints (the app has no limiter before sign-in; web writes are limited per user inside the app, Task 25). What the expression can match depends on the plan: Free matches URI Path only, Pro adds Host, URI and Query, and `ip.src` or the request method need Business. The counting characteristic is the client IP on every plan.
-   - **Free** (one path-only rule; period 10 s, action Block, about 50 requests per 10 s per IP; Anthropic's range cannot be exempted on this plan, so keep the number generous):
+   - **Free** (one path-only rule; period 10 s, action Block, about 50 requests per 10 s per IP; the rule itself cannot name an IP range on this plan, but a WAF *Skip* rule can exempt Anthropic's range from it, see the next step):
 
      ```
      (http.request.uri.path in {"/register" "/authorize" "/token" "/consent" "/oauth/callback" "/auth/google" "/auth/callback"})
      ```
 
    - **Pro**: the same rule with `http.host eq "<host>" and` in front. **Business** can also add `not ip.src in {160.79.104.0/21}` (Anthropic's egress range, shared by all Claude clients) and `or (http.request.method eq "POST" and starts_with(http.request.uri.path, "/app/"))`.
-5. **Bot protection.** On Free, Bot Fight Mode cannot be skipped for any source, and it will challenge Claude's connector calls: turn it **off** for the zone (Security, Bots) and rely on the rate limit. On Pro or higher use Super Bot Fight Mode and add a WAF custom rule with action *Skip* (remaining custom rules and Super Bot Fight Mode) for `ip.src in {160.79.104.0/21}`, the same range the spike runbook (`spike/README.md`) skips.
-6. The application trusts `X-Forwarded-*` only from the cloudflared container (`FORWARDED_ALLOW_IPS=172.30.10.3`, its fixed address on the `edge` network; dynamic addresses come from `172.30.10.128/25`, so they can never take it). If `172.30.10.0/24` collides with your LAN or another Docker network, pick another /24 in `compose.prod.yml` and set the same address in `tutor.env`.
+5. **Exempt Anthropic's egress range from rate limiting (optional, every plan).** Custom rules, and their *Skip* action, exist on all plans. Create a custom rule with expression `ip.src in {160.79.104.0/21}`, action *Skip*, and tick *All rate limiting rules* (API: `action_parameters.phases: ["http_ratelimit"]`). Claude's servers share that range, so without the skip all learners' connector calls count against one IP. Order it first.
+6. **Bot protection.** On Free, Bot Fight Mode cannot be skipped for any source, and it will challenge Claude's connector calls: turn it **off** for the zone (Security, Bots) and rely on the rate limit. On Pro or higher use Super Bot Fight Mode and extend the skip rule above with Super Bot Fight Mode and the remaining custom rules for `ip.src in {160.79.104.0/21}`, the same range the spike runbook (`spike/README.md`) skips.
+7. The application trusts `X-Forwarded-*` only from the cloudflared container (`FORWARDED_ALLOW_IPS=172.30.10.3`, its fixed address on the `edge` network; dynamic addresses come from `172.30.10.128/25`, so they can never take it). If `172.30.10.0/24` collides with your LAN or another Docker network, pick another /24 in `compose.prod.yml` and set the same address in `tutor.env`.
 
 ## First deploy
 
@@ -147,7 +148,8 @@ Disaster restore (new or wiped cluster):
 1. `docker compose -f compose.prod.yml up -d db`. A fresh cluster already has an empty database named `POSTGRES_DB`, created by the Postgres image for the owner in `db.env`. Do **not** run `createdb` for it (it fails with "already exists"). If the cluster holds data you are replacing, stop `app` and run `dropdb --if-exists` then `createdb` instead.
 2. Roles first: `docker compose -f compose.prod.yml exec -T db sh -c 'psql -U "$POSTGRES_USER" -d postgres' < /var/backups/tutor/tutor-roles-<stamp>.sql`. On a fresh cluster expect "role ... already exists" errors for the owner and similar noise; they are harmless. Anything else is not.
 3. `docker compose -f compose.prod.yml exec -T db sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --exit-on-error' < /var/backups/tutor/tutor-<stamp>.dump`, without `--no-owner --no-acl` (owners and grants must come back).
-4. `docker compose -f compose.prod.yml run --rm migrate` (a no-op for the schema; resets both passwords from `migrate.env`), then `up -d`.
+4. The roles file carries the owner's *old* password verifier. Reset it to the current `POSTGRES_PASSWORD` before anything connects as the owner: `docker compose -f compose.prod.yml exec -e PSQL_HISTORY=/dev/null db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'`, then `\password <owner>` (or restore `db.env` and `MIGRATION_DATABASE_URL` to the password in the file).
+5. `docker compose -f compose.prod.yml run --rm migrate` (a no-op for the schema; resets both passwords from `migrate.env`), then `up -d`.
 
 ## Gate report
 
@@ -169,7 +171,7 @@ Omit the `-v` and `--labels/--author` options if you have no labels file. On Git
 
 On a learner's written request, from the address their Google account uses:
 
-1. Ask them to remove the "English Tutor" connector in Claude first; otherwise their next tool call recreates an empty account from the same Google `sub`.
+1. Ask them to remove the "English Tutor" connector in Claude, **and** to remove the app's access at myaccount.google.com/connections (Sign in with Google). The server's Google provider re-checks access tokens and refreshes against Google, so revoking there cuts their access immediately; removing only the connector can leave a live refresh token. Without both, the next tool call could recreate an empty account from the same Google `sub`.
 2. As the owner, keeping the session out of psql history: `docker compose -f compose.prod.yml exec -e PSQL_HISTORY=/dev/null db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'`. Find the id: `SELECT id FROM users WHERE email = '<their email>';`
 3. Run (the owner is a superuser, so RLS does not block it):
 
@@ -190,7 +192,7 @@ DELETE FROM users WHERE id = :'uid';
 COMMIT;
 ```
 
-4. Check `SELECT count(*) FROM users WHERE id = :'uid';` returns 0, then reply to the learner. **The OAuth store cannot be filtered by user:** its entries are Fernet-encrypted under hashed file names, so this procedure cannot revoke the learner's client registration or tokens one by one. Their refresh token stays valid for up to 30 days; with the user row gone it reaches no data, and a new empty account appears only if the connector is still installed (step 1). To cut every token at once, rotate `TUTOR_OAUTH_STORAGE_KEY` (below), which disconnects everyone. Old backups still hold the data until they age out (30 days); say so in the reply.
+4. Check `SELECT count(*) FROM users WHERE id = :'uid';` returns 0, then reply to the learner. The OAuth store keeps no per-user index to delete from (entries are Fernet-encrypted), so the Google revocation in step 1 is what ends their tokens. If they did not revoke it, the refresh token stays valid for up to 30 days; with the user row gone it reaches no data. To cut every token at once, rotate `TUTOR_OAUTH_STORAGE_KEY` (below), which disconnects everyone. Old backups still hold the data until they age out (30 days); say so in the reply.
 
 ## Rotating keys
 
