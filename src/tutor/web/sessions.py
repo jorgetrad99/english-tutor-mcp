@@ -10,6 +10,7 @@ new CSRF token), which also defeats session fixation.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import secrets
 from datetime import datetime, timedelta
@@ -26,6 +27,10 @@ from tutor.web.ports import WebDeps, WebSession
 COOKIE = "__Host-tutor_session"
 _TOUCH_EVERY = timedelta(minutes=5)
 ANONYMOUS_LIFETIME = timedelta(minutes=10)
+# Keys an anonymous session may hand to the session created by login. Nothing needs carrying:
+# the OAuth callback reads what it needs (e.g. the return path) before it calls login().
+CARRY_OVER_KEYS: frozenset[str] = frozenset()
+_UNSESSIONED_PREFIXES = ("/static/", "/sw.js")
 
 
 def hash_token(token: str) -> str:
@@ -69,16 +74,16 @@ class ServerSessionMiddleware:
         return session
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http":
+        if scope["type"] != "http" or scope["path"].startswith(_UNSESSIONED_PREFIXES):
             await self.app(scope, receive, send)
             return
         now = self.deps.clock()
         session = self._load(HTTPConnection(scope).cookies.get(COOKIE), now)
         holder = SessionHolder(session)
         scope.setdefault("state", {})["web"] = holder
-        data: dict[str, Any] = dict(session.data) if session else {}
+        data: dict[str, Any] = copy.deepcopy(session.data) if session else {}
         scope["session"] = data
-        original = dict(data)
+        original = copy.deepcopy(data)
 
         async def send_wrapper(message: Message) -> None:
             if message["type"] == "http.response.start":
@@ -94,7 +99,7 @@ class ServerSessionMiddleware:
 
     def _new(self, user_id: UUID | None, data: dict[str, Any], now: datetime) -> str:
         token = secrets.token_urlsafe(32)
-        self.deps.sessions.save_session(
+        self.deps.sessions.create_session(
             WebSession(hash_token(token), user_id, secrets.token_urlsafe(32), now, now, data)
         )
         lifetime = ANONYMOUS_LIFETIME if user_id is None else self.absolute
@@ -115,13 +120,13 @@ class ServerSessionMiddleware:
         if holder.login_as is not None:
             if session is not None:
                 self.deps.sessions.delete_session(session.token_hash)
-            kept = {k: v for k, v in data.items() if not k.startswith("_state_")}
+            was_anonymous = session is None or session.user_id is None
+            kept = {k: v for k, v in data.items() if k in CARRY_OVER_KEYS} if was_anonymous else {}
             return self._new(holder.login_as, kept, now)
         if session is not None:
             if data != original or now - session.last_seen_at > _TOUCH_EVERY:
-                session.data = data
-                session.last_seen_at = now
-                self.deps.sessions.save_session(session)
+                # Update only: a row deleted meanwhile (logout) stays deleted, no cookie refresh.
+                self.deps.sessions.touch_session(session.token_hash, now, data)
             return None
         if data:
             return self._new(None, data, now)

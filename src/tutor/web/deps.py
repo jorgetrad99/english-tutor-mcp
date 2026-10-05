@@ -6,7 +6,9 @@ import secrets
 from typing import Annotated
 from urllib.parse import quote
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.dependencies.models import Dependant
+from fastapi.routing import APIRoute
 
 from tutor.domain.dashboard.types import Role, User
 from tutor.web.config import WebConfig
@@ -63,6 +65,8 @@ def require_admin(user: Annotated[User, Depends(current_user)]) -> User:
 async def require_csrf(request: Request) -> None:
     if request.method in _SAFE_METHODS:
         return
+    if request.url.path.startswith("/app") and optional_user(request) is None:
+        raise NotAuthenticated(request.url.path)  # nothing to forge without a session
     holder = getattr(request.state, "web", None)
     session = getattr(holder, "session", None)
     expected = session.csrf_token if session is not None else None
@@ -72,11 +76,28 @@ async def require_csrf(request: Request) -> None:
     ):
         field = (await request.form()).get(CSRF_FIELD)
         sent = field if isinstance(field, str) else None
-    if not expected or not sent or not secrets.compare_digest(sent, expected):
+    if not expected or not sent or not secrets.compare_digest(sent.encode(), expected.encode()):
         raise HTTPException(status_code=403)
 
 
 APP_ROUTER_DEPS = [Depends(require_csrf)]
+# Unsafe-method routes allowed to skip require_csrf (no session cookie to forge against).
+CSRF_EXEMPT_PATHS = frozenset({"/auth/test-login", "/webhooks/stripe"})
+
+
+def _depends_on(dependant: Dependant, call: object) -> bool:
+    return dependant.call is call or any(_depends_on(d, call) for d in dependant.dependencies)
+
+
+def assert_csrf_everywhere(app: FastAPI) -> None:
+    """Fail at startup if an unsafe-method route forgot `require_csrf`."""
+    for route in app.routes:
+        if not isinstance(route, APIRoute) or route.path in CSRF_EXEMPT_PATHS:
+            continue
+        if ((route.methods or set()) - _SAFE_METHODS) and not _depends_on(
+            route.dependant, require_csrf
+        ):
+            raise RuntimeError(f"route {route.path} accepts unsafe methods without require_csrf")
 
 
 def login_redirect_target(next_path: str) -> str:

@@ -1,13 +1,21 @@
+from dataclasses import replace
 from datetime import timedelta
 from typing import Annotated
 from uuid import UUID
 
+import pytest
 from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.responses import PlainTextResponse
 from fastapi.testclient import TestClient
 
-from tutor.domain.dashboard.types import User
-from tutor.web.deps import APP_ROUTER_DEPS, current_user, login_redirect_target
+from tutor.domain.dashboard.types import Role, User
+from tutor.web.deps import (
+    APP_ROUTER_DEPS,
+    assert_csrf_everywhere,
+    current_user,
+    login_redirect_target,
+    require_admin,
+)
 from tutor.web.memory import FixedClock, MemoryBackend
 from tutor.web.ports import WebSession
 from tutor.web.sessions import COOKIE, hash_token
@@ -82,7 +90,7 @@ def test_session_expires_after_idle_limit(
     c = _client(app)
     token = "t" * 43
     ana = next(u for u in backend.users.values() if u.display_name == "Ana")
-    backend.save_session(WebSession(hash_token(token), ana.id, "csrf", clock(), clock()))
+    backend.create_session(WebSession(hash_token(token), ana.id, "csrf", clock(), clock()))
     c.cookies.set(COOKIE, token)
     assert c.get("/app/probe").text == "Ana"
     clock.advance(timedelta(days=15))
@@ -96,7 +104,7 @@ def test_absolute_lifetime_even_when_active(
     c = _client(app)
     token = "u" * 43
     ana = next(u for u in backend.users.values() if u.display_name == "Ana")
-    backend.save_session(WebSession(hash_token(token), ana.id, "csrf", clock(), clock()))
+    backend.create_session(WebSession(hash_token(token), ana.id, "csrf", clock(), clock()))
     c.cookies.set(COOKIE, token)
     for _ in range(4):
         clock.advance(timedelta(days=8))
@@ -110,7 +118,7 @@ def test_post_without_or_with_wrong_csrf_is_403(
     c = _client(app)
     token = "v" * 43
     ana = next(u for u in backend.users.values() if u.display_name == "Ana")
-    backend.save_session(WebSession(hash_token(token), ana.id, "right", clock(), clock()))
+    backend.create_session(WebSession(hash_token(token), ana.id, "right", clock(), clock()))
     c.cookies.set(COOKIE, token)
     assert c.post("/app/probe").status_code == 403
     assert c.post("/app/probe", headers={"x-csrf-token": "wrong"}).status_code == 403
@@ -155,3 +163,204 @@ def test_anonymous_session_dies_after_ten_minutes_and_is_never_extended(
     assert backend.load_session(hash_token(old)) is None
     fresh = c.cookies.get(COOKIE)
     assert fresh and fresh != old
+
+
+def _ana(backend: MemoryBackend) -> User:
+    return next(u for u in backend.users.values() if u.display_name == "Ana")
+
+
+def _seed(
+    backend: MemoryBackend, clock: FixedClock, user: User, token: str, csrf: str = "csrf"
+) -> None:
+    backend.create_session(WebSession(hash_token(token), user.id, csrf, clock(), clock()))
+
+
+def test_session_deleted_in_flight_is_not_revived(
+    app: FastAPI, backend: MemoryBackend, clock: FixedClock, demo: object
+) -> None:
+    router = APIRouter()
+
+    @router.get("/probe/slow-logout")
+    async def slow_logout(request: Request) -> PlainTextResponse:
+        request.session["n"] = 1  # a write forces a touch at response time
+        backend.delete_session(request.state.web.session.token_hash)  # logout elsewhere
+        return PlainTextResponse("done")
+
+    app.include_router(router)
+    c = TestClient(app, base_url=BASE, follow_redirects=False)
+    token = "w" * 43
+    _seed(backend, clock, _ana(backend), token)
+    c.cookies.set(COOKIE, token)
+    response = c.get("/probe/slow-logout")
+    assert response.status_code == 200
+    assert backend.load_session(hash_token(token)) is None
+    assert "set-cookie" not in response.headers
+
+
+def test_create_never_replaces_and_touch_never_inserts(
+    backend: MemoryBackend, clock: FixedClock, demo: object
+) -> None:
+    ana = _ana(backend)
+    _seed(backend, clock, ana, "x" * 43)
+    with pytest.raises(ValueError):
+        _seed(backend, clock, ana, "x" * 43)
+    assert backend.touch_session("missing", clock(), {}) is False
+    assert backend.load_session("missing") is None
+
+
+def test_non_ascii_csrf_is_403_not_500(
+    app: FastAPI, backend: MemoryBackend, clock: FixedClock, demo: object
+) -> None:
+    c = _client(app)
+    token = "y" * 43
+    _seed(backend, clock, _ana(backend), token, "right")
+    c.cookies.set(COOKIE, token)
+    accented = {b"x-csrf-token": "r\N{LATIN SMALL LETTER I WITH ACUTE}ght".encode()}
+    assert c.post("/app/probe", headers=accented).status_code == 403
+    assert c.post("/app/probe", data={"csrf_token": "\N{SNOWMAN}"}).status_code == 403
+
+
+def test_login_never_carries_another_users_data(
+    app: FastAPI, backend: MemoryBackend, clock: FixedClock, demo: object
+) -> None:
+    c = _client(app)
+    ana = _ana(backend)
+    beto = next(u for u in backend.users.values() if u.display_name == "Beto")
+    token = "z" * 43
+    backend.create_session(
+        WebSession(hash_token(token), ana.id, "a-csrf", clock(), clock(), {"login_next": "/x"})
+    )
+    c.cookies.set(COOKIE, token)
+    response = c.post(f"/probe/login/{beto.id}", headers={"x-csrf-token": "a-csrf"})
+    assert response.status_code == 200
+    new_token = response.headers["set-cookie"].split("=", 1)[1].split(";", 1)[0]
+    new = backend.load_session(hash_token(new_token))
+    assert new is not None and new.user_id == beto.id and new.data == {}
+    assert backend.load_session(hash_token(token)) is None
+
+
+def test_logout_deletes_the_row_and_expires_the_cookie(
+    app: FastAPI, backend: MemoryBackend, clock: FixedClock, demo: object
+) -> None:
+    router = APIRouter()
+
+    @router.get("/probe/logout")
+    async def logout(request: Request) -> PlainTextResponse:
+        request.state.web.logout()
+        return PlainTextResponse("bye")
+
+    app.include_router(router)
+    c = TestClient(app, base_url=BASE, follow_redirects=False)
+    token = "l" * 43
+    _seed(backend, clock, _ana(backend), token)
+    c.cookies.set(COOKIE, token)
+    header = c.get("/probe/logout").headers["set-cookie"]
+    assert backend.load_session(hash_token(token)) is None
+    for attr in ("Max-Age=0", "Path=/", "Secure", "HttpOnly", "SameSite=lax"):
+        assert attr.lower() in header.lower()
+
+
+def test_require_admin_hides_the_page_from_learners(
+    app: FastAPI, backend: MemoryBackend, clock: FixedClock, demo: object
+) -> None:
+    router = APIRouter()
+
+    @router.get("/probe/admin")
+    async def admin(user: Annotated[User, Depends(require_admin)]) -> PlainTextResponse:
+        return PlainTextResponse("admin")
+
+    app.include_router(router)
+    c = TestClient(app, base_url=BASE, follow_redirects=False)
+    boss = next(u for u in backend.users.values() if u.role is Role.ADMIN)
+    _seed(backend, clock, _ana(backend), "1" * 43)
+    _seed(backend, clock, boss, "2" * 43)
+    c.cookies.set(COOKIE, "1" * 43)
+    assert c.get("/probe/admin").status_code == 404
+    c.cookies.set(COOKIE, "2" * 43)
+    assert c.get("/probe/admin").text == "admin"
+
+
+def test_user_pending_deletion_is_anonymous(
+    app: FastAPI, backend: MemoryBackend, clock: FixedClock, demo: object
+) -> None:
+    c = _client(app)
+    ana = _ana(backend)
+    backend.users[ana.id] = replace(ana, deletion_requested_at=clock())
+    _seed(backend, clock, ana, "d" * 43)
+    c.cookies.set(COOKIE, "d" * 43)
+    assert c.get("/app/probe").status_code == 303
+
+
+def test_head_and_options_skip_csrf(app: FastAPI) -> None:
+    router = APIRouter(dependencies=APP_ROUTER_DEPS)
+
+    @router.api_route("/probe/any", methods=["GET", "HEAD", "OPTIONS"])
+    async def anything() -> PlainTextResponse:
+        return PlainTextResponse("ok")
+
+    app.include_router(router)
+    c = TestClient(app, base_url=BASE, follow_redirects=False)
+    assert c.head("/probe/any").status_code == 200
+    assert c.options("/probe/any").status_code == 200
+
+
+def test_htmx_post_with_expired_session_gets_login_redirect_not_403(
+    app: FastAPI, backend: MemoryBackend, clock: FixedClock, demo: object
+) -> None:
+    c = _client(app)
+    _seed(backend, clock, _ana(backend), "e" * 43)
+    c.cookies.set(COOKIE, "e" * 43)
+    clock.advance(timedelta(days=15))
+    response = c.post("/app/probe", headers={"hx-request": "true", "x-csrf-token": "csrf"})
+    assert response.status_code == 401
+    assert response.headers["hx-redirect"] == "/login?next=%2Fapp%2Fprobe"
+    assert c.post("/app/probe").status_code == 303
+
+
+def test_static_paths_never_touch_sessions(
+    app: FastAPI, backend: MemoryBackend, clock: FixedClock, demo: object
+) -> None:
+    c = _client(app)
+    _seed(backend, clock, _ana(backend), "s" * 43)
+    c.cookies.set(COOKIE, "s" * 43)
+    created = clock()
+    clock.advance(timedelta(hours=1))
+    c.get("/static/css/app.css")
+    row = backend.load_session(hash_token("s" * 43))
+    assert row is not None and row.last_seen_at == created
+
+
+def test_purge_expired_removes_idle_absolute_and_anonymous_rows(
+    backend: MemoryBackend, clock: FixedClock, demo: object
+) -> None:
+    ana = _ana(backend)
+    day = timedelta(days=1)
+    now = clock()
+    rows = [
+        WebSession("fresh", ana.id, "c", now, now),
+        WebSession("idle", ana.id, "c", now - 20 * day, now - 15 * day),
+        WebSession("old", ana.id, "c", now - 31 * day, now),
+        WebSession("anon-old", None, "c", now - timedelta(minutes=11), now),
+        WebSession("anon-new", None, "c", now - timedelta(minutes=5), now),
+    ]
+    for row in rows:
+        backend.create_session(row)
+    removed = backend.purge_expired(
+        now, idle=14 * day, absolute=30 * day, anonymous=timedelta(minutes=10)
+    )
+    assert removed == 3
+    assert set(backend.web_sessions) == {"fresh", "anon-new"}
+
+
+def test_unprotected_unsafe_route_is_rejected_at_startup() -> None:
+    bare = FastAPI()
+
+    @bare.post("/oops")
+    async def oops() -> PlainTextResponse:
+        return PlainTextResponse("x")
+
+    with pytest.raises(RuntimeError, match="/oops"):
+        assert_csrf_everywhere(bare)
+    guarded = FastAPI()
+    guarded.include_router(_probe_router())
+    assert_csrf_everywhere(guarded)  # protected routes pass

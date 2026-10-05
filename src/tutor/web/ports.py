@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -74,11 +74,23 @@ class UserDirectory(Protocol):
 class WebSessionStore(Protocol):
     def load_session(self, token_hash: str) -> WebSession | None: ...
 
-    def save_session(self, session: WebSession) -> None: ...
+    def create_session(self, session: WebSession) -> None:
+        """Insert only. Never replaces an existing row."""
+        ...
+
+    def touch_session(self, token_hash: str, last_seen_at: datetime, data: dict[str, Any]) -> bool:
+        """Update only. Returns False when the row is gone (it must not be recreated)."""
+        ...
 
     def delete_session(self, token_hash: str) -> None: ...
 
     def delete_user_sessions(self, user_id: UUID) -> None: ...
+
+    def purge_expired(
+        self, now: datetime, *, idle: timedelta, absolute: timedelta, anonymous: timedelta
+    ) -> int:
+        """Delete expired rows (idle and absolute for users, `anonymous` for pre-login)."""
+        ...
 
 
 class DashboardReader(Protocol):

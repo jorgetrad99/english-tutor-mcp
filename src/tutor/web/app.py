@@ -17,7 +17,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from tutor.web.assets import AssetManifest
 from tutor.web.config import WebConfig
-from tutor.web.deps import NotAuthenticated, login_redirect_target
+from tutor.web.deps import NotAuthenticated, assert_csrf_everywhere, login_redirect_target
 from tutor.web.ports import WebDeps
 from tutor.web.routes import all_routers
 from tutor.web.security import SecurityHeadersMiddleware
@@ -37,6 +37,7 @@ def create_app(deps: WebDeps, config: WebConfig) -> FastAPI:
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     for router in all_routers(config):
         app.include_router(router)
+    assert_csrf_everywhere(app)
     _install_error_handlers(app)
     # Added first = innermost. Security headers are outermost so even error pages get them.
     app.add_middleware(ServerSessionMiddleware, deps=deps, config=config)

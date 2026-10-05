@@ -162,8 +162,31 @@ class MemoryBackend:
     def load_session(self, token_hash: str) -> WebSession | None:
         return self.web_sessions.get(token_hash)
 
-    def save_session(self, session: WebSession) -> None:
+    def create_session(self, session: WebSession) -> None:
+        if session.token_hash in self.web_sessions:
+            raise ValueError("session exists")
         self.web_sessions[session.token_hash] = session
+
+    def touch_session(self, token_hash: str, last_seen_at: datetime, data: dict[str, Any]) -> bool:
+        session = self.web_sessions.get(token_hash)
+        if session is None:
+            return False
+        session.last_seen_at = last_seen_at
+        session.data = data
+        return True
+
+    def purge_expired(
+        self, now: datetime, *, idle: timedelta, absolute: timedelta, anonymous: timedelta
+    ) -> int:
+        def expired(s: WebSession) -> bool:
+            if s.user_id is None:
+                return now - s.created_at > anonymous
+            return now - s.last_seen_at > idle or now - s.created_at > absolute
+
+        dead = [k for k, s in self.web_sessions.items() if expired(s)]
+        for key in dead:
+            del self.web_sessions[key]
+        return len(dead)
 
     def delete_session(self, token_hash: str) -> None:
         self.web_sessions.pop(token_hash, None)
