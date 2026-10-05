@@ -209,3 +209,8 @@ class WebDeps:
     billing: BillingGateway
     google: GoogleLogin
     clock: Clock
+
+
+UNCAPPED = 2**31 - 1
+"""A FreeUsage cap at this value means "no cap" (core loop v0: caps are not enforced, spec 3.2).
+banners_for raises no limit banner for it, and render() hides the Free counters."""

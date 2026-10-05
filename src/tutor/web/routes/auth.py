@@ -1,4 +1,8 @@
-"""Login with Google, logout, language switch and the test-only login."""
+"""Login with Google, logout, language switch and the test-only login.
+
+Routes that call a data port are plain `def` (FastAPI runs them in a worker thread) or wrap the
+call in `run_in_threadpool`: the Postgres adapters block.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +12,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from starlette.concurrency import run_in_threadpool
 
 from tutor.domain.dashboard.types import Lang, User
 from tutor.web.config import WebConfig
@@ -41,11 +46,13 @@ async def google_callback(request: Request) -> Response:
     try:
         identity = await deps.google.identity(request)
     except LoginFailed:
-        return render(request, "pages/login.html", {"next": "", "error": True}, status_code=400)
-    user = deps.users.sign_in(identity, deps.clock())
+        ctx = {"next": "", "error": True}
+        return await run_in_threadpool(render, request, "pages/login.html", ctx, status_code=400)
+    # Ports block (Postgres): never call them on the event loop.
+    user = await run_in_threadpool(deps.users.sign_in, identity, deps.clock())
     if user.deletion_requested_at is not None:
         request.state.web.logout()  # drop the anonymous login session and its cookie
-        return render(request, "pages/deletion_pending.html")
+        return await run_in_threadpool(render, request, "pages/deletion_pending.html")
     target = safe_next(stored if isinstance(stored, str) else None)
     request.state.web.login(user.id)
     return RedirectResponse(target, status_code=303)
@@ -63,7 +70,7 @@ async def logout(request: Request) -> Response:
 
 
 @app_router.post("/app/lang")
-async def switch_lang(
+def switch_lang(
     request: Request,
     user: Annotated[User, Depends(current_user)],
     lang: Annotated[str, Form()],
@@ -78,9 +85,7 @@ async def switch_lang(
 
 
 @app_router.get("/app/account", response_class=HTMLResponse)
-async def account_stub(
-    request: Request, user: Annotated[User, Depends(current_user)]
-) -> HTMLResponse:
+def account_stub(request: Request, user: Annotated[User, Depends(current_user)]) -> HTMLResponse:
     # Temporary (V9): deleted by core Task 25; `csrf_of` loads it to read the CSRF meta tag.
     return render(request, "layouts/app.html", {"active_nav": "account"})
 
@@ -89,13 +94,13 @@ test_router = APIRouter()
 
 
 @test_router.get("/auth/test-login", response_class=HTMLResponse)
-async def test_login_page(request: Request) -> HTMLResponse:
+def test_login_page(request: Request) -> HTMLResponse:
     users = getattr(get_deps(request).users, "users", {})
     return render(request, "pages/test_login.html", {"demo_users": list(users.values())})
 
 
 @test_router.post("/auth/test-login")
-async def test_login(request: Request, user_id: Annotated[UUID, Form()]) -> Response:
+def test_login(request: Request, user_id: Annotated[UUID, Form()]) -> Response:
     if get_deps(request).users.find_user(user_id) is None:
         raise HTTPException(status_code=404)
     request.state.web.login(user_id)

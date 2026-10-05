@@ -15,17 +15,22 @@ from cryptography.fernet import Fernet
 from key_value.aio.stores.memory import MemoryStore
 from mcp_lesson import NOW
 
-from tutor.app import BodySizeGuard, McpRouteLog, Message, PathDispatch, build_app
+from tutor.app import BodySizeGuard, Message, PathDispatch, RequestLog, build_app
 from tutor.auth.mcp_auth import build_google_provider
 from tutor.mcp.server import build_mcp
 from tutor.services.context import Services
 from tutor.services.memory import MemoryIdentity, memory_uow
 from tutor.services.memory import MemoryStore as ServiceStore
 from tutor.settings import Settings
+from tutor.web.config import WebConfig
+from tutor.web.security import CSP
 
 pytestmark = pytest.mark.unit
 
 BASE_URL = "https://tutor.example.com"
+WEB_CONFIG = WebConfig(
+    env="test", base_url=BASE_URL, mcp_url=f"{BASE_URL}/mcp", support_email="soporte@example.test"
+)
 HEADERS = {"accept": "application/json, text/event-stream", "content-type": "application/json"}
 INIT = {
     "jsonrpc": "2.0",
@@ -64,7 +69,7 @@ def memory_app(tmp_path: Path) -> PathDispatch:
     )
     auth = build_google_provider(settings(tmp_path), client_storage=MemoryStore())
     mcp = build_mcp(svc, MemoryIdentity(store), auth=auth)
-    return PathDispatch(McpRouteLog(BodySizeGuard(mcp.http_app(path="/mcp"))), web_app=None)
+    return PathDispatch(RequestLog(BodySizeGuard(mcp.http_app(path="/mcp"))), web_app=None)
 
 
 @asynccontextmanager
@@ -136,14 +141,44 @@ async def test_oversized_mcp_post_is_413(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_build_app_wires_auth_and_dispatch(tmp_path: Path) -> None:
-    app = build_app(settings(tmp_path), engine=sqlalchemy.create_engine("sqlite://"))
+async def test_build_app_serves_mcp_and_the_website_with_separate_headers(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO, logger="tutor.http")
+    app = build_app(
+        settings(tmp_path), engine=sqlalchemy.create_engine("sqlite://"), web_config=WEB_CONFIG
+    )
     async with serving(app) as client:
         denied = await client.post("/mcp", json=INIT, headers=HEADERS)
-        missing = await client.get("/app/")
+        metadata = await client.get("/.well-known/oauth-authorization-server")
+        home = await client.get("/app/account")
+        login = await client.get("/login?next=%2Fapp%2Fsecret-next")
+        await client.get("/oauth/callback?code=secret-code&state=s")
+        big = await client.post(
+            "/app/lang",
+            content=b"x" * 70_000,
+            headers={"content-type": "application/x-www-form-urlencoded"},
+        )
     assert denied.status_code == 401
-    assert missing.status_code == 404
+    assert "content-security-policy" not in denied.headers
+    assert "content-security-policy" not in metadata.headers
+    assert (home.status_code, home.headers["location"]) == (303, "/login?next=%2Fapp%2Faccount")
+    assert login.status_code == 200
+    assert login.headers["content-security-policy"] == CSP
+    assert login.headers["cache-control"] == "no-store"
+    assert big.status_code == 413
     assert (tmp_path / "oauth").is_dir()
+    lines = [json.loads(r.getMessage()) for r in caplog.records if r.name == "tutor.http"]
+    routes = [(line["route"], line["status"]) for line in lines]
+    assert routes == [
+        ("/.well-known/oauth-authorization-server", 200),
+        ("/app/account", 303),
+        ("/login", 200),
+        ("/oauth/callback", 400),
+        ("unmatched", 413),
+    ]
+    for secret in ("secret-code", "secret-next", "code="):
+        assert secret not in caplog.text
 
 
 @pytest.mark.asyncio
@@ -156,9 +191,9 @@ async def test_oauth_routes_log_one_line_without_the_query(
             await client.post("/mcp", json=INIT, headers=HEADERS)
     [record] = [r for r in caplog.records if r.name == "tutor.http"]
     line = json.loads(record.getMessage())
-    assert set(line) == {"event", "route", "method", "status", "latency_ms"}
+    assert set(line) == {"event", "route", "method", "status", "latency_ms", "user_hash"}
     assert (line["event"], line["route"], line["method"], line["status"]) == (
-        "mcp_http_route",
+        "http_request",
         "/oauth/callback",
         "GET",
         400,
@@ -177,7 +212,7 @@ async def test_a_failing_route_is_logged_as_500_and_re_raised(
 
     scope = {"type": "http", "method": "GET", "path": "/token", "query_string": b"code=SECRET"}
     with caplog.at_level(logging.INFO, logger="tutor.http"), pytest.raises(RuntimeError):
-        await McpRouteLog(broken)(scope, None, None)  # type: ignore[arg-type]
+        await RequestLog(broken)(scope, None, None)  # type: ignore[arg-type]
     assert json.loads(caplog.records[0].getMessage())["status"] == 500
     assert "SECRET" not in caplog.text
     assert "boom" not in caplog.text

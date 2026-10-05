@@ -87,7 +87,7 @@ async def offline(request: Request) -> HTMLResponse:
 
 
 @app_router.post("/app/install/dismiss")
-async def dismiss_install(
+def dismiss_install(
     request: Request,
     user: Annotated[User, Depends(current_user)],
     back: Annotated[str, Form()] = "/app/",

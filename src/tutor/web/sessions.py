@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
+from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import MutableHeaders
 from starlette.requests import HTTPConnection
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -78,7 +79,9 @@ class ServerSessionMiddleware:
             await self.app(scope, receive, send)
             return
         now = self.deps.clock()
-        session = self._load(HTTPConnection(scope).cookies.get(COOKIE), now)
+        # The store blocks (Postgres): every call runs in a worker thread, never on the loop.
+        token = HTTPConnection(scope).cookies.get(COOKIE)
+        session = await run_in_threadpool(self._load, token, now)
         holder = SessionHolder(session)
         scope.setdefault("state", {})["web"] = holder
         data: dict[str, Any] = copy.deepcopy(session.data) if session else {}
@@ -87,7 +90,7 @@ class ServerSessionMiddleware:
 
         async def send_wrapper(message: Message) -> None:
             if message["type"] == "http.response.start":
-                cookie = self._commit(holder, data, original, now)
+                cookie = await run_in_threadpool(self._commit, holder, data, original, now)
                 if cookie is not None:
                     MutableHeaders(scope=message).append("set-cookie", cookie)
             await send(message)

@@ -1,4 +1,4 @@
-"""Product ASGI app: MCP + OAuth proxy and (from Task 23) the website in one process.
+"""Product ASGI app: MCP + OAuth proxy and the website in one process.
 
 Both apps own root paths, so a path dispatcher picks one per request (plan ruling 2). Each
 keeps its own middleware: the web CSP and no-store headers never touch MCP responses.
@@ -6,22 +6,32 @@ keeps its own middleware: the web CSP and no-store headers never touch MCP respo
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import logging
+import os
 import time
 import zoneinfo
-from collections.abc import Awaitable, Callable, MutableMapping
-from datetime import UTC, datetime
+from collections.abc import Awaitable, Callable, Mapping, MutableMapping
+from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import UUID
 
+import anyio.to_thread
 from sqlalchemy import Engine
 
 from tutor.auth.mcp_auth import MCP_CALLBACK_PATH, build_google_provider
 from tutor.db.engine import check_app_role, make_engine
 from tutor.db.uow import PgIdentity, pg_uow_factory
+from tutor.mcp.observe import user_hash
 from tutor.mcp.server import build_mcp
 from tutor.services.context import Services
 from tutor.settings import Settings
+from tutor.web.app import create_app
+from tutor.web.config import WebConfig
+from tutor.web.pg import PgWebBackend, pg_web_deps
+from tutor.web.sessions import ANONYMOUS_LIFETIME
 
 Scope = MutableMapping[str, Any]
 Message = MutableMapping[str, Any]
@@ -37,8 +47,10 @@ WELL_KNOWN_PREFIX = "/.well-known/"
 MAX_BODY_BYTES = 65_536
 BODY_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 MAX_LOGGED_PATH = 200
+PURGE_EVERY_S = 3600.0
 
 _routes = logging.getLogger("tutor.http")
+_web_log = logging.getLogger("tutor.web")
 
 
 async def send_json(send: Send, status: int, body: dict[str, Any]) -> None:
@@ -59,7 +71,7 @@ async def send_json(send: Send, status: int, body: dict[str, Any]) -> None:
 class BodySizeGuard:
     """Rejects bodies over 64 KB (POST, PUT, PATCH, DELETE) with 413 before the app reads them.
 
-    Spec section 5.
+    Spec section 5. It wraps both the MCP app and the website.
     """
 
     def __init__(self, app: ASGIApp, limit: int = MAX_BODY_BYTES) -> None:
@@ -103,12 +115,24 @@ class BodySizeGuard:
         await self.app(scope, replay, send)
 
 
-class McpRouteLog:
-    """One log line per OAuth and well-known request (uvicorn's access log is off).
+def route_label(scope: Scope) -> str:
+    """The matched route template, else the fixed MCP path, else "unmatched".
 
-    /mcp is skipped: the call log covers it. A line carries the route path WITHOUT the query
-    string (authorization codes travel in it), the method, the status and the latency; never
-    headers, query, body or exception text.
+    Never the raw path: it can carry ids and whatever a client types (/.well-known/...)."""
+    template = getattr(scope.get("route"), "path", None)
+    if isinstance(template, str) and template:
+        return template[:MAX_LOGGED_PATH]
+    path = scope.get("path", "")
+    return path if path in MCP_PATHS else "unmatched"
+
+
+class RequestLog:
+    """One JSON line on `tutor.http` per HTTP request of the website and of the OAuth and
+    well-known routes (uvicorn's access log is off; spec 13).
+
+    A line carries the route label, the method, the status, the latency and the learner's
+    hash when the web session knows the user; never the query string (authorization codes
+    travel in it), headers, body or exception text. /mcp is left to the MCP call log.
     """
 
     def __init__(self, app: ASGIApp, clock: Callable[[], float] = time.perf_counter) -> None:
@@ -125,23 +149,70 @@ class McpRouteLog:
         async def capture(message: Message) -> None:
             nonlocal status
             if message["type"] == "http.response.start":
-                status = message["status"]
+                status = int(message["status"])
             await send(message)
 
         try:
             await self.app(scope, receive, capture)
         finally:
+            uid = getattr(scope.get("state", {}).get("user"), "id", None)
             _routes.info(
                 json.dumps(
                     {
-                        "event": "mcp_http_route",
-                        "route": str(scope.get("path", ""))[:MAX_LOGGED_PATH],
-                        "method": scope.get("method"),
+                        "event": "http_request",
+                        "route": route_label(scope),
+                        "method": str(scope.get("method", ""))[:16],
                         "status": status,
                         "latency_ms": round((self._clock() - started) * 1000, 1),
+                        "user_hash": user_hash(uid) if isinstance(uid, UUID) else None,
                     }
                 )
             )
+
+
+class PeriodicPurge:
+    """Runs `job` (blocking) in a worker thread once the server has started, then every
+    `every_s` seconds until shutdown. It wraps the MCP app, which receives the lifespan
+    (PathDispatch). Used for the web-session purge; a failure logs its class only and the
+    loop goes on."""
+
+    def __init__(
+        self, app: ASGIApp, job: Callable[[], int], every_s: float = PURGE_EVERY_S
+    ) -> None:
+        self.app = app
+        self.job = job
+        self._every_s = every_s
+
+    async def _loop(self) -> None:
+        while True:
+            try:
+                deleted = await anyio.to_thread.run_sync(self.job)
+                _web_log.info(json.dumps({"event": "web_sessions_purged", "deleted": deleted}))
+            except Exception as exc:  # never the message: it can carry driver details
+                _web_log.error("web session purge failed exc=%s", type(exc).__name__)
+            await asyncio.sleep(self._every_s)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "lifespan":
+            await self.app(scope, receive, send)
+            return
+        task: asyncio.Task[None] | None = None
+
+        async def watch(message: Message) -> None:
+            nonlocal task
+            if message["type"] == "lifespan.startup.complete" and task is None:
+                task = asyncio.create_task(self._loop())
+            elif message["type"].startswith("lifespan.shutdown") and task is not None:
+                task.cancel()
+            await send(message)
+
+        try:
+            await self.app(scope, receive, watch)
+        finally:
+            if task is not None:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
 
 
 class PathDispatch:
@@ -173,15 +244,51 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-def build_app(settings: Settings, *, engine: Engine | None = None) -> PathDispatch:
-    """MCP only for now (web_app None); Task 23 passes the dashboard app as web_app."""
+def web_config_from_env(environ: Mapping[str, str]) -> WebConfig:
+    """WebConfig.from_env; a missing or invalid key exits naming the key (never a value)."""
+    try:
+        return WebConfig.from_env(environ)
+    except KeyError as missing:
+        raise SystemExit(f"Missing settings: {missing.args[0]}") from None
+    except ValueError as invalid:  # the messages name keys and allowed forms, not values
+        raise SystemExit(str(invalid)) from None
+
+
+def build_app(
+    settings: Settings, *, engine: Engine | None = None, web_config: WebConfig | None = None
+) -> PathDispatch:
+    """MCP + OAuth proxy and the website, both behind the 64 KB guard and the request log.
+
+    On Postgres the login role is checked first (RLS must bind it), and the server lifespan
+    purges expired web sessions at startup and then hourly."""
     engine = engine if engine is not None else make_engine(settings.database_url)
-    if engine.dialect.name == "postgresql":
+    on_postgres = engine.dialect.name == "postgresql"
+    if on_postgres:
         check_app_role(engine)  # RLS must bind this login role; SystemExit otherwise
+    config = web_config if web_config is not None else web_config_from_env(os.environ)
     svc = Services(
         uow=pg_uow_factory(engine),
         clock=_utc_now,
         valid_timezones=frozenset(zoneinfo.available_timezones()),
     )
     mcp = build_mcp(svc, PgIdentity(engine), auth=build_google_provider(settings))
-    return PathDispatch(McpRouteLog(BodySizeGuard(mcp.http_app(path=MCP_PATH))), web_app=None)
+    deps = pg_web_deps(engine, settings, config)
+    mcp_app: ASGIApp = RequestLog(BodySizeGuard(mcp.http_app(path=MCP_PATH)))
+    if on_postgres and isinstance(deps.sessions, PgWebBackend):
+        mcp_app = PeriodicPurge(mcp_app, _session_purge(deps.sessions, config, deps.clock))
+    web_app = RequestLog(BodySizeGuard(create_app(deps, config)))
+    return PathDispatch(mcp_app, web_app=web_app)
+
+
+def _session_purge(
+    store: PgWebBackend, config: WebConfig, clock: Callable[[], datetime]
+) -> Callable[[], int]:
+    idle = timedelta(days=config.session_idle_days)
+    absolute = timedelta(days=config.session_max_days)
+
+    def purge() -> int:
+        return store.purge_expired(
+            clock(), idle=idle, absolute=absolute, anonymous=ANONYMOUS_LIFETIME
+        )
+
+    return purge

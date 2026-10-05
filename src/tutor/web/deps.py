@@ -9,6 +9,7 @@ from urllib.parse import quote
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.dependencies.models import Dependant
 from fastapi.routing import APIRoute
+from starlette.concurrency import run_in_threadpool
 
 from tutor.domain.dashboard.types import Role, User
 from tutor.web.config import WebConfig
@@ -36,15 +37,27 @@ def get_config(request: Request) -> WebConfig:
     return config
 
 
+_LOADED = "user_loaded"
+
+
 def optional_user(request: Request) -> User | None:
+    """The session's user, loaded once per request (its timezone then serves every local date).
+
+    Blocking (a port call): run it in a worker thread, as FastAPI does for this sync
+    dependency; async callers use `run_in_threadpool`."""
+    if getattr(request.state, _LOADED, False):
+        cached: User | None = getattr(request.state, "user", None)
+        return cached
     holder = getattr(request.state, "web", None)
     session = getattr(holder, "session", None)
-    if session is None or session.user_id is None:
-        return None
-    user = get_deps(request).users.find_user(session.user_id)
-    if user is None or user.deletion_requested_at is not None:
-        return None
-    request.state.user = user
+    user = None
+    if session is not None and session.user_id is not None:
+        user = get_deps(request).users.find_user(session.user_id)
+        if user is not None and user.deletion_requested_at is not None:
+            user = None  # deletion requested: treated as signed out everywhere
+    if user is not None:
+        request.state.user = user
+    setattr(request.state, _LOADED, True)
     return user
 
 
@@ -65,7 +78,10 @@ def require_admin(user: Annotated[User, Depends(current_user)]) -> User:
 async def require_csrf(request: Request) -> None:
     if request.method in _SAFE_METHODS:
         return
-    if request.url.path.startswith("/app") and optional_user(request) is None:
+    if (
+        request.url.path.startswith("/app")
+        and await run_in_threadpool(optional_user, request) is None
+    ):
         raise NotAuthenticated(request.url.path)  # nothing to forge without a session
     holder = getattr(request.state, "web", None)
     session = getattr(holder, "session", None)

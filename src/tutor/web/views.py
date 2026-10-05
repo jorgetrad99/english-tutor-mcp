@@ -27,7 +27,7 @@ from tutor.web.i18n import (
     load_translations,
     negotiate,
 )
-from tutor.web.ports import WebDeps
+from tutor.web.ports import UNCAPPED, WebDeps
 from tutor.web.security import safe_next
 
 
@@ -138,7 +138,14 @@ def render(
         "path": request.url.path,
         "banners": banners_for(subscription, usage, today) if subscription else (),
         "subscription": subscription,
-        "usage": usage if subscription and subscription.tier is Tier.FREE else None,
+        "usage": (
+            usage
+            if subscription
+            and subscription.tier is Tier.FREE
+            and usage is not None
+            and usage.session_cap < UNCAPPED
+            else None
+        ),
         "today": today,
         "reduce_motion": bool(user and user.reduce_motion),
         "public_url": public_url,

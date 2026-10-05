@@ -36,7 +36,7 @@ test-int:
 migrate:
     uv run alembic upgrade head
 
-# Product server: MCP, OAuth and (later) the website; reads TUTOR_* settings from the environment
+# Product server: MCP, OAuth and the website; reads TUTOR_* settings from the environment
 serve:
     uv run python -m tutor
 

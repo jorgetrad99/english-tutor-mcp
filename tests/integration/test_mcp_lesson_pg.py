@@ -27,6 +27,7 @@ from tutor.db.uow import PgIdentity, pg_uow_factory
 from tutor.mcp.server import build_mcp
 from tutor.services.context import Services
 from tutor.settings import Settings
+from tutor.web.config import WebConfig
 
 pytestmark = pytest.mark.integration
 
@@ -88,6 +89,14 @@ async def test_a_call_without_a_token_is_refused(login_engine: Engine) -> None:
             await client.call_tool("get_profile", {})
 
 
+WEB_CONFIG = WebConfig(
+    env="test",
+    base_url="https://tutor.example.com",
+    mcp_url="https://tutor.example.com/mcp",
+    support_email="soporte@example.test",
+)
+
+
 def app_settings(tmp_path: Path) -> Settings:
     return Settings.from_env(
         {
@@ -119,9 +128,9 @@ def test_startup_check_refuses_the_owner(engine: Engine) -> None:
 def test_build_app_checks_the_role_before_serving(
     login_engine: Engine, engine: Engine, tmp_path: Path
 ) -> None:
-    build_app(app_settings(tmp_path), engine=login_engine)
+    build_app(app_settings(tmp_path), engine=login_engine, web_config=WEB_CONFIG)
     with pytest.raises(SystemExit, match="login role"):
-        build_app(app_settings(tmp_path), engine=engine)
+        build_app(app_settings(tmp_path), engine=engine, web_config=WEB_CONFIG)
 
 
 OWNER_MEMBER = "tutor_owner_member_test"

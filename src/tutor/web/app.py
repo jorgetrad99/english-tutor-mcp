@@ -11,6 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -100,8 +101,8 @@ class ErrorGuardMiddleware:
         request = Request(scope, receive)
         try:
             template = "partials/error.html" if is_htmx(request) else "pages/error.html"
-            response: Response = render(
-                request, template, {"status": 500, "ref": ref}, status_code=500
+            response: Response = await run_in_threadpool(
+                render, request, template, {"status": 500, "ref": ref}, status_code=500
             )
         except Exception:  # rendering itself failed; never leak details
             response = HTMLResponse(f"Error {ref}", status_code=500)
@@ -109,6 +110,7 @@ class ErrorGuardMiddleware:
 
 
 def _install_error_handlers(app: FastAPI) -> None:
+    # render() reads the learner's usage through a blocking port: never on the event loop.
     @app.exception_handler(NotAuthenticated)
     async def not_authenticated(request: Request, exc: NotAuthenticated) -> Response:
         target = login_redirect_target(exc.next_path)  # validated by safe_next
@@ -120,10 +122,14 @@ def _install_error_handlers(app: FastAPI) -> None:
     async def http_error(request: Request, exc: StarletteHTTPException) -> Response:
         template = "partials/error.html" if is_htmx(request) else "pages/error.html"
         ctx = {"status": exc.status_code, "ref": ""}
-        return render(request, template, ctx, status_code=exc.status_code, headers=exc.headers)
+        return await run_in_threadpool(
+            render, request, template, ctx, status_code=exc.status_code, headers=exc.headers
+        )
 
     @app.exception_handler(RequestValidationError)
     async def invalid_input(request: Request, exc: RequestValidationError) -> Response:
         # The detail echoes the offending input; the page deliberately shows none of it.
         template = "partials/error.html" if is_htmx(request) else "pages/error.html"
-        return render(request, template, {"status": 422, "ref": ""}, status_code=422)
+        return await run_in_threadpool(
+            render, request, template, {"status": 422, "ref": ""}, status_code=422
+        )
