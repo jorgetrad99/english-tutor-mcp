@@ -12,6 +12,8 @@ from tutor.domain.profile import ProfileInput
 from tutor.services.context import Services
 from tutor.services.memory import MemoryIdentity, MemoryStore, memory_uow
 from tutor.services.ports import IdentityResolver, UowFactory
+from tutor.services.profile import save_profile
+from tutor.services.views import SaveProfileResult
 
 NOW = datetime(2026, 10, 14, 15, 0, tzinfo=UTC)  # a Wednesday; 09:00 in Mexico City
 MEXICO_CITY = "America/Mexico_City"
@@ -45,6 +47,11 @@ def profile_input(**changes: Any) -> ProfileInput:
     }
     data.update(changes)
     return ProfileInput(**data)
+
+
+def onboard(svc: Services, user_id: UUID, **changes: Any) -> SaveProfileResult:
+    """Run save_profile with the default answers plus `changes`."""
+    return save_profile(svc, user_id, profile_input(**changes))
 
 
 @pytest.fixture
