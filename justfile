@@ -3,6 +3,7 @@
 set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
 
 export TEST_DATABASE_URL := env("TEST_DATABASE_URL", "postgresql://tutor:tutor@localhost:5433/tutor_test")
+dev_database_url := env("DATABASE_URL", "postgresql://tutor:tutor@localhost:5432/tutor")
 
 # In CI the db-test Postgres is a job service, so compose is skipped there.
 db_test_up := if env("CI", "") == "true" { "uv --version" } else { "docker compose up -d --wait db-test" }
@@ -29,6 +30,10 @@ test:
 test-int:
     {{db_test_up}}
     uv run pytest -m integration -q
+
+# Apply migrations to the dev database (compose `db`, or DATABASE_URL)
+migrate:
+    uv run alembic -x url={{dev_database_url}} upgrade head
 
 # Fast gate used by the Stop hook (< 30 s)
 check-fast:
