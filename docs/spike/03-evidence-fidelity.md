@@ -22,6 +22,7 @@ Operational definitions (design doc §8.4):
 ## Setup
 - Design: `docs/superpowers/specs/2026-10-03-spike-design.md`
 - Data source: the text runs of experiment 02 (same server commit, clients, model versions)
+- Server commit: `07a4a1d` (tag `spike-instructions-v1`)
 - Transcripts: copied from claude.ai web after each run (design doc §6.3)
 - Annotation: blind, by the author, on 2026-10-10
 - Number of runs planned: 20 for `user_turns`, 10 for `errors`

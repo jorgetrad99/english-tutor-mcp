@@ -17,6 +17,7 @@ Operational definition (design doc §8.5): `cefr_estimate.speaking` from every v
 ## Setup
 - Design: `docs/superpowers/specs/2026-10-03-spike-design.md`
 - Data source: all valid payloads of experiment 02 (up to 25: 20 text, 5 voice)
+- Server commit: `07a4a1d` (tag `spike-instructions-v1`)
 - Model version(s): `model_shown` per run in `runs.csv`
 - Number of runs planned: no extra runs
 - Known limitation: one speaker; "across clients" covers Claude web vs mobile voice and Free vs Pro only (ChatGPT deferred)
