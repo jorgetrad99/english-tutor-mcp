@@ -3,6 +3,7 @@
 import shutil
 import subprocess
 import zipfile
+from ipaddress import ip_address, ip_network
 from pathlib import Path
 
 import pytest
@@ -34,10 +35,57 @@ def test_app_waits_for_migrate_and_publishes_nothing() -> None:
     }
     assert all("ports" not in svc for svc in services.values())
     assert services["migrate"]["restart"] == "no"
+    assert services["app"]["pull_policy"] == "never"
+    assert services["migrate"]["pull_policy"] == "build"
+
+
+def _nets(name: str) -> set[str]:
+    nets = _compose()[name]["networks"]
+    return set(nets)  # list or mapping of names
+
+
+def test_network_split_isolates_the_database() -> None:
+    doc = yaml.safe_load((DEPLOY / "compose.prod.yml").read_text(encoding="utf-8"))
+    assert doc["networks"]["backend"]["internal"] is True
+    assert not doc["networks"]["edge"].get("internal")
+    assert _nets("db") == {"backend"}
+    assert _nets("migrate") == {"backend"}
+    assert _nets("app") == {"backend", "edge"}
+    assert _nets("cloudflared") == {"edge"}
+    assert not _nets("db") & _nets("cloudflared")
+
+
+def test_forwarded_allow_ips_is_cloudflareds_fixed_edge_address() -> None:
+    doc = yaml.safe_load((DEPLOY / "compose.prod.yml").read_text(encoding="utf-8"))
+    fixed = ip_address(doc["services"]["cloudflared"]["networks"]["edge"]["ipv4_address"])
+    ipam = doc["networks"]["edge"]["ipam"]["config"][0]
+    assert fixed in ip_network(ipam["subnet"])
+    assert fixed not in ip_network(ipam["ip_range"])  # dynamic addresses can never take it
+    assert ip_network(ipam["ip_range"]).subnet_of(ip_network(ipam["subnet"]))
+    allowed = dict(
+        line.split("=", 1)
+        for line in (DEPLOY / "tutor.env.example").read_text(encoding="utf-8").splitlines()
+        if line and not line.startswith("#")
+    )["FORWARDED_ALLOW_IPS"]
+    assert allowed == str(fixed)
+
+
+def test_images_are_pinned_by_digest() -> None:
+    for name in ("db", "cloudflared"):
+        assert "@sha256:" in str(_compose()[name]["image"])
+    docker = (DEPLOY / "Dockerfile").read_text(encoding="utf-8")
+    assert docker.count("@sha256:") >= 2
+    assert "@sha256:" in (DEPLOY / "backup.sh").read_text(encoding="utf-8")
+
+
+def test_db_drops_capabilities_to_what_postgres_needs() -> None:
+    db = _compose()["db"]
+    assert db["cap_drop"] == ["ALL"]
+    assert set(db["cap_add"]) == {"CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"}
 
 
 def test_hardening_flags() -> None:
-    for name in ("migrate", "app", "cloudflared"):
+    for name in ("migrate", "app", "cloudflared"):  # db needs a writable root, see its caps
         svc = _compose()[name]
         assert svc["cap_drop"] == ["ALL"]
         assert svc["read_only"] is True
@@ -53,6 +101,7 @@ def test_dockerfile_is_non_root_without_dev_dependencies() -> None:
     assert "/.well-known/oauth-authorization-server" in text  # healthcheck on the MCP side
 
 
+@pytest.mark.integration
 def test_wheel_contains_locale_templates_static_and_track(tmp_path: Path) -> None:
     uv = shutil.which("uv")
     assert uv, "uv must be on PATH (tests run through `uv run`)"

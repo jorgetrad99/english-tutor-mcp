@@ -4,9 +4,10 @@
 # One image, two jobs: the default entrypoint serves MCP, OAuth and the website on port 8000;
 # `tutor-migrate` (the compose `migrate` service) applies migrations and provisions the DB roles.
 
-ARG PYTHON_IMAGE=python:3.12-slim-bookworm
+# Tag plus digest: bump both together (docker pull, docker image inspect) when updating.
+ARG PYTHON_IMAGE=python:3.12-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3
 # Keep the uv minor version equal to `uv --version` on the dev machine (uv_build is pinned <0.13).
-ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.12
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.12@sha256:61d393e44e249f2e4b526b6c7ddcecce245946826e608e11c93ad4f5bba55b21
 
 FROM ${UV_IMAGE} AS uv
 

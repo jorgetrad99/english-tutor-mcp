@@ -20,3 +20,5 @@ media
 spike
 tests
 deploy/*.env
+secrets/
+labels*.json
