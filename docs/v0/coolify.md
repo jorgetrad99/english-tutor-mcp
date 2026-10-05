@@ -6,7 +6,7 @@ How it differs from `compose.prod.yml`:
 
 | Thing | Homelab (`compose.prod.yml`) | Coolify (`compose.coolify.yml`) |
 | --- | --- | --- |
-| Secrets | `deploy/*.env` files | Coolify environment variables, `${NAME:?}` in the compose file |
+| Secrets | `deploy/*.env` files | Coolify environment variables, runtime only, `${NAME}` in the compose file |
 | Database URLs | typed into two files | built from `POSTGRES_*` and `APP_DB_*`; each password is entered once |
 | Tunnel target | `app:8000` | `http://tutor-edge-app:8000` (an alias on `edge` only) |
 | `edge` network | `172.30.10.0/24`, cloudflared at `.3` | `10.213.10.0/24`, cloudflared at `10.213.10.3` (outside Docker's default pools) |
@@ -20,11 +20,11 @@ How it differs from `compose.prod.yml`:
 2. **Google OAuth client and Cloudflare edge rules** as in the runbook, with one change in "Cloudflare Tunnel, DNS and edge rules", step 1: the public hostname's service is `HTTP`, URL **`tutor-edge-app:8000`**, not `app:8000`. Copy the tunnel token.
 3. **Resource.** Create the `production` branch once (`git push origin main:production`); CI moves it from then on (see Releases). New Resource, Application, the repository (GitHub App or deploy key), branch **`production`**. Build Pack **Docker Compose**, Base Directory **`/deploy`**, Docker Compose Location **`/compose.coolify.yml`**, then Load Compose File. The build context `..` is the repository root only with that Base Directory.
 4. **Raw mode, no domains, no shared network, no auto deploy.**
-   - Turn **Raw Compose Deployment** on (Advanced, Build). Without it, Coolify (checked 2026-10-05) gives every container every variable through `env_file: .env`, attaches every service to its own internet-facing network (undoing `backend`'s `internal: true`), and writes values into the file so `${NAME:?}` no longer stops a deploy. Raw mode deploys the file as written; it needs no proxy labels because the tunnel is the only way in.
+   - Turn **Raw Compose Deployment** on (Advanced, Build). Without it, Coolify (checked 2026-10-05) gives every container every variable through `env_file: .env`, attaches every service to its own internet-facing network (undoing `backend`'s `internal: true`), and writes values into the file. Raw mode deploys the file as written; it needs no proxy labels because the tunnel is the only way in.
    - Leave Domains empty on every service.
    - Keep **Connect To Predefined Network** off; on the shared network `db` could resolve to another stack's database.
    - Turn **Auto Deploy** off (it starts on); CI deploys (see Releases).
-5. **Environment variables.** Coolify lists the variables the compose file references. Fill each one (values go in your password manager, never the repository), and leave them runtime-only: the Dockerfile reads none at build time.
+5. **Environment variables.** Coolify lists the variables the compose file references. Fill each one (values go in your password manager, never the repository) and untick **Available at Buildtime** on every one: click only the checkbox and wait for "Environment variable updated" (clicking Update in the same moment loses the click). Coolify passes build-time variables as build arguments, and with Advanced, **Inject Build Args to Dockerfile** on they are written into the Dockerfile and can land in the image history; turn that option off too. The build needs no values: the compose file uses plain `${NAME}` (no `:?`), because Coolify's build step interpolates the whole file with the build-time variables only.
 
    | Variable | Value |
    | --- | --- |
@@ -41,7 +41,7 @@ How it differs from `compose.prod.yml`:
    | `TUTOR_OAUTH_STORAGE_KEY` | on your machine: `uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
    | `TUNNEL_TOKEN` | the tunnel token |
 
-   Every password is different; hex keeps them free of URL-encoding. `TUTOR_ENV=prod`, `FORWARDED_ALLOW_IPS`, `TUTOR_MCP_URL` (`<TUTOR_BASE_URL>/mcp`) and the other fixed settings are literals in the compose file and do not appear in the UI. A missing value stops the deploy with "required variable ... is missing a value"; the server's own startup checks (runbook, "First deploy" step 4) still apply.
+   Every password is different; hex keeps them free of URL-encoding. `TUTOR_ENV=prod`, `FORWARDED_ALLOW_IPS`, `TUTOR_MCP_URL` (`<TUTOR_BASE_URL>/mcp`) and the other fixed settings are literals in the compose file and do not appear in the UI. The build logs "variable is not set" warnings for each of them; that is expected. An empty value is caught at startup, by the service that uses it: `app` exits naming the key (runbook, "First deploy" step 4; also `TUTOR_SUPPORT_EMAIL`), `migrate` refuses empty role inputs and cannot connect with an empty owner, Postgres will not initialise without a password, and `cloudflared` has no tunnel without a token. Since `app` waits for `migrate` and `cloudflared` for `app`, nothing is reachable until every value is right.
 6. **Deploy.** Expect both builds, `db` healthy, the `migrate` log ending in `roles ready: tutor_login, tutor_report`, `app` healthy, then `cloudflared` registering its connections. `migrate` stays exited (0); that is its job.
 7. **Check what Coolify deployed.** On the host, after the deploy (`<uuid>` is the application's):
 
@@ -126,7 +126,8 @@ In the runbook, `@db:5432` and the volume name `tutor_oauth` become `db` on `<uu
 
 ## Troubleshooting
 
-- **`required variable ... is missing a value` for a variable you did fill in.** Raw mode is not passing Coolify's variables to Docker Compose's interpolation. Do not turn raw mode off to work around it (that brings back every secret in every container); report it.
+- **`required variable ... is missing a value`.** The compose file has a `${NAME:?}` again; Coolify's build step has no runtime values. Use `${NAME}` (a test enforces it).
+- **Every service fails with empty values although Coolify lists them filled.** Raw mode is not passing runtime variables to Docker Compose's interpolation at start. Do not turn raw mode off to work around it (that brings back every secret in every container), and do not tick build time; report it.
 - **Coolify shows the application as degraded, exited or unknown** after a successful deploy. `migrate` exits by design, and in raw mode Coolify tracks the containers less closely. Trust the deploy log and step 7's checks, then the smoke checks.
 - **`Pool overlaps with other one on this address space`.** Another network already uses `10.213.10.0/24`. Pick another /24 outside `172.16.0.0/12` and `192.168.0.0/16`, and change `subnet`, `ip_range`, `ipv4_address` and `FORWARDED_ALLOW_IPS` together.
 - **Build cannot find `deploy/Dockerfile` or `pyproject.toml`.** Base Directory is not `/deploy`.
