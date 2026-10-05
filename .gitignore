@@ -33,3 +33,6 @@ Thumbs.db
 
 # Local runtime data (OAuth store)
 /data/
+
+# Raw eval material (real learner text) never leaves the machine; commit only redacted fixtures
+evals/raw/

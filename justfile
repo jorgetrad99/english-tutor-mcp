@@ -40,6 +40,19 @@ migrate:
 serve:
     uv run python -m tutor
 
+# Gate report (spec 14), read only, as the owner role: MIGRATION_DATABASE_URL (superuser or BYPASSRLS)
+gate-report from:
+    uv run python -m tutor.ops.gate_report --from {{from}}
+
+# Evidence fidelity over the annotated transcripts in evals/fixtures (requirements 11)
+[working-directory: 'evals']
+eval-fidelity:
+    uv run python -m fidelity.report --fixtures fixtures
+
+# LLM evaluations (marked eval); never part of check
+eval:
+    uv run pytest -m eval -q
+
 # Fast gate used by the Stop hook (< 30 s)
 check-fast:
     uv run ruff check .

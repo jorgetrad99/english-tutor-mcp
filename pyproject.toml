@@ -55,6 +55,7 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "S", "ASYNC"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101"]
+"evals/test_*.py" = ["S101"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -91,7 +92,7 @@ venvPath = "."
 venv = ".venv"
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "evals"]
 pythonpath = ["tests"]
 addopts = ["--strict-markers", "--strict-config"]
 markers = [
