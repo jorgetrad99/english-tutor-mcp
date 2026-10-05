@@ -5,12 +5,12 @@ The production stack for the core loop v0 (spec `docs/superpowers/specs/2026-10-
 | Thing | Value |
 | --- | --- |
 | Public hostname | `https://<host>` (its own Cloudflare Tunnel, separate from the spike) |
-| Compose project | `tutor` (`deploy/compose.prod.yml`): `db`, `migrate` (one-shot), `app`, `cloudflared` |
+| Compose project | `tutor` (`deploy/compose.prod.yml`): `db`, `migrate` (one-shot), `app`, `cloudflared`; networks `backend` (internal, no egress: db, migrate, app) and `edge` (app, cloudflared) |
 | Volumes | `tutor_pgdata` (Postgres), `tutor_oauth` (encrypted OAuth store, owned by uid 10001) |
 | Database | PostgreSQL 16 or later (see "PostgreSQL version") |
-| Backups | `/var/backups/tutor/tutor-<UTC stamp>.dump` and `tutor-roles-<UTC stamp>.sql`, nightly 03:30, 30 days |
+| Backups | `/var/backups/tutor/tutor-<UTC stamp>.dump` and `tutor-roles-<UTC stamp>.sql`, `tutor-oauth-<UTC stamp>.tgz`, nightly 03:30, 30 days |
 
-Git Bash on Windows rewrites arguments that start with `/` (for example `/app/...`). Prefix such commands with `MSYS_NO_PATHCONV=1`. The homelab itself is Linux and needs nothing.
+Git Bash on Windows rewrites arguments that start with `/` (for example `/app/...`). Prefix such commands (and `backup.sh`, whose `docker run` mounts `/data`) with `MSYS_NO_PATHCONV=1`. The homelab itself is Linux and needs nothing.
 
 ## The three database roles
 
@@ -20,7 +20,7 @@ Git Bash on Windows rewrites arguments that start with `/` (for example `/app/..
 | App login (`APP_DB_USER`, default `tutor_login`) | `migrate.env` (creation), `tutor.env` (`DATABASE_URL`) | the `app` service | `LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE`, member of `tutor_app` with `INHERIT FALSE, SET TRUE`; owns nothing |
 | `tutor_report` | `migrate.env` (password) | the gate report, run by hand | `LOGIN BYPASSRLS`, read only, `SELECT` on `sessions`, `session_metrics`, `audit_log` |
 
-`migrate` runs `alembic upgrade head` (head is `0005`) and then `tutor.ops.provision_roles`, which creates or updates the app login and `tutor_report` and sets their passwords from the secrets. It is idempotent: rerun it after editing a password. `app` starts only after `migrate` exits 0 and refuses to serve if its login is a superuser, has BYPASSRLS, owns user tables (directly or through a role), is a member of such a role, or is not a member of `tutor_app`, or if `DATABASE_URL` is not a PostgreSQL URL in prod.
+`migrate` runs `alembic upgrade head` and then `tutor.ops.provision_roles`, which creates or updates the app login and `tutor_report` and sets their passwords from the secrets. It is idempotent: rerun it after editing a password. `app` starts only after `migrate` exits 0 and refuses to serve if its login is a superuser, has BYPASSRLS, owns user tables (directly or through a role), is a member of such a role, or is not a member of `tutor_app`, or if `DATABASE_URL` is not a PostgreSQL URL in prod.
 
 ## Google OAuth client
 
@@ -34,24 +34,30 @@ Git Bash on Windows rewrites arguments that start with `/` (for example `/app/..
 ## Cloudflare Tunnel, DNS and edge rules
 
 1. Zero Trust, Networks, Tunnels, create a tunnel (Cloudflared) named `tutor-v0`; public hostname `<host>`, service type `HTTP`, URL `app:8000`. The DNS record is created and proxied by the tunnel. Copy the token into `tunnel.env`.
-2. After the first `docker compose pull`, pin cloudflared: replace `cloudflare/cloudflared:latest` in `compose.prod.yml` with the output of `docker image inspect cloudflare/cloudflared:latest --format '{{index .RepoDigests 0}}'` and commit it.
-3. Cache Rule for `<host>`: bypass cache. No Cloudflare Access application on this hostname (Claude's servers must reach it).
-4. WAF custom rule *Skip* (all remaining custom rules, Bot Fight Mode / Super Bot Fight Mode) for `ip.src in {160.79.104.0/21}`, Anthropic's egress range for Claude's connector calls (same as the spike, `spike/README.md`).
-5. **Per-IP rate-limit rule** (the app has no limiter before sign-in; this is the control for the unauthenticated endpoints). Expression, with action Block and, for example, 30 requests per 10 seconds per IP:
+2. Cache Rule for `<host>`: bypass cache. No Cloudflare Access application on this hostname (Claude's servers must reach it).
+3. SSL/TLS, Edge Certificates: **Always Use HTTPS** on, **Minimum TLS Version 1.2**, and **HSTS** enabled for the zone (start with max-age 6 months, no preload until you are sure every subdomain is HTTPS).
+4. **Per-IP rate limit** for the unauthenticated endpoints (the app has no limiter before sign-in; web writes are limited per user inside the app, Task 25). What the expression can match depends on the plan: Free matches URI Path only, Pro adds Host, URI and Query, and `ip.src` or the request method need Business. The counting characteristic is the client IP on every plan.
+   - **Free** (one path-only rule; period 10 s, action Block, about 50 requests per 10 s per IP; Anthropic's range cannot be exempted on this plan, so keep the number generous):
 
-   ```
-   (http.host eq "<host>" and not ip.src in {160.79.104.0/21}
-     and (http.request.uri.path in {"/register" "/authorize" "/token" "/auth/google"}
-          or (http.request.method eq "POST" and starts_with(http.request.uri.path, "/app/"))))
-   ```
+     ```
+     (http.request.uri.path in {"/register" "/authorize" "/token" "/consent" "/oauth/callback" "/auth/google" "/auth/callback"})
+     ```
 
-   It covers `/register`, `/authorize`, `/token`, `/auth/google` and every `POST /app/*`. The Anthropic range is exempt because all Claude clients share it.
-6. The application only trusts `X-Forwarded-*` from the cloudflared container (`FORWARDED_ALLOW_IPS=172.30.10.3`, a fixed address on the compose network), so client addresses in logs come from Cloudflare, not from a spoofable header.
+   - **Pro**: the same rule with `http.host eq "<host>" and` in front. **Business** can also add `not ip.src in {160.79.104.0/21}` (Anthropic's egress range, shared by all Claude clients) and `or (http.request.method eq "POST" and starts_with(http.request.uri.path, "/app/"))`.
+5. **Bot protection.** On Free, Bot Fight Mode cannot be skipped for any source, and it will challenge Claude's connector calls: turn it **off** for the zone (Security, Bots) and rely on the rate limit. On Pro or higher use Super Bot Fight Mode and add a WAF custom rule with action *Skip* (remaining custom rules and Super Bot Fight Mode) for `ip.src in {160.79.104.0/21}`, the same range the spike runbook (`spike/README.md`) skips.
+6. The application trusts `X-Forwarded-*` only from the cloudflared container (`FORWARDED_ALLOW_IPS=172.30.10.3`, its fixed address on the `edge` network; dynamic addresses come from `172.30.10.128/25`, so they can never take it). If `172.30.10.0/24` collides with your LAN or another Docker network, pick another /24 in `compose.prod.yml` and set the same address in `tutor.env`.
 
 ## First deploy
 
 1. Install Docker Engine with the Compose plugin. Create the deploy user and `/opt/tutor`. `git clone <repo> /opt/tutor && cd /opt/tutor && git checkout <release tag>`.
-2. Create the four env files. They hold secrets: `chmod 600`, never committed (`deploy/*.env` is in `.gitignore`).
+2. Create the backup directory and log file for the deploy user (cron runs as that user, not root):
+
+   ```sh
+   sudo install -d -m 700 -o <deploy-user> -g <deploy-user> /var/backups/tutor
+   sudo install -m 600 -o <deploy-user> -g <deploy-user> /dev/null /var/log/tutor-backup.log
+   ```
+
+3. Create the four env files. They hold secrets: `chmod 600`, never committed (`deploy/*.env` is in `.gitignore`).
 
    ```sh
    cd /opt/tutor/deploy
@@ -59,7 +65,7 @@ Git Bash on Windows rewrites arguments that start with `/` (for example `/app/..
    chmod 600 db.env migrate.env tutor.env tunnel.env
    ```
 
-3. Generate secrets (one value per line item; each one different):
+4. Generate secrets (each one different):
 
    | Secret | Where | Command |
    | --- | --- | --- |
@@ -68,20 +74,21 @@ Git Bash on Windows rewrites arguments that start with `/` (for example `/app/..
    | `REPORT_DB_PASSWORD` | `migrate.env` | `openssl rand -hex 24` |
    | `TUTOR_JWT_SIGNING_KEY` | `tutor.env` (at least 32 characters) | `openssl rand -base64 48` |
    | `TUTOR_WEB_SESSION_SECRET` | `tutor.env` (at least 32 characters, **distinct** from the JWT key) | `openssl rand -base64 48` |
-   | `TUTOR_OAUTH_STORAGE_KEY` | `tutor.env` (Fernet key, distinct from the other two) | after step 4: `docker run --rm --entrypoint python tutor:latest -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
+   | `TUTOR_OAUTH_STORAGE_KEY` | `tutor.env` (Fernet key, distinct from the other two) | after step 5: `docker run --rm --entrypoint python tutor:latest -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
 
-   Use hex passwords so they need no URL-encoding in the database URLs. The server refuses to start when the three app secrets are short, malformed or equal. Fill the rest of `tutor.env`: `TUTOR_BASE_URL=https://<host>`, `TUTOR_MCP_URL=https://<host>/mcp`, `TUTOR_SUPPORT_EMAIL`, the Google client id and secret, and `DATABASE_URL=postgresql://<APP_DB_USER>:<APP_DB_PASSWORD>@db:5432/<POSTGRES_DB>`. `TUTOR_ENV=prod`, `FORWARDED_ALLOW_IPS=172.30.10.3` (never `*`; the server refuses it in prod) and `TUTOR_OAUTH_STORAGE_DIR=/data/oauth` stay as shipped. Leave `TUTOR_TEST_LOGIN` empty. Do not put `MIGRATION_DATABASE_URL` in `tutor.env`.
-4. Build: `docker compose -f compose.prod.yml build migrate`. The build fails if the installed package lacks its locale `.po` files, templates, static files or the track YAML.
-5. Migrate: `docker compose -f compose.prod.yml up -d db`, then `docker compose -f compose.prod.yml run --rm migrate`. Expect `Running upgrade  -> 0001` through `0004 -> 0005`, then `roles ready: <APP_DB_USER>, tutor_report`.
-6. Start: `docker compose -f compose.prod.yml up -d`. (`app` waits for `migrate` to complete; `cloudflared` waits for `app` to be healthy.) Check with `docker compose -f compose.prod.yml ps` and `logs app`.
-7. Smoke checks from any machine:
-   - `curl -s https://<host>/.well-known/oauth-authorization-server` returns JSON whose `authorization_endpoint` is `https://<host>/authorize`.
-   - `curl -si -X POST https://<host>/mcp` returns `401` with a `WWW-Authenticate` header naming `https://<host>/.well-known/oauth-protected-resource/mcp`.
+   Use hex passwords so they need no URL-encoding in the database URLs. The server refuses to start when the three app secrets are short, malformed or equal, and in prod when `MIGRATION_DATABASE_URL` or `GATE_REPORT_DATABASE_URL` is present in its environment. Fill the rest of `tutor.env`: `TUTOR_BASE_URL=https://<host>`, `TUTOR_MCP_URL=https://<host>/mcp`, `TUTOR_SUPPORT_EMAIL`, the Google client id and secret, and `DATABASE_URL=postgresql://<APP_DB_USER>:<APP_DB_PASSWORD>@db:5432/<POSTGRES_DB>`. `TUTOR_ENV=prod`, `FORWARDED_ALLOW_IPS=172.30.10.3` (never `*`) and `TUTOR_OAUTH_STORAGE_DIR=/data/oauth` stay as shipped. Leave `TUTOR_TEST_LOGIN` empty.
+5. Fetch the pinned third-party images and build ours: `docker compose -f compose.prod.yml pull db cloudflared`, then `docker compose -f compose.prod.yml build migrate`. (`app` and `migrate` share the image `tutor:latest`, built locally and never pulled: `pull_policy: never` for `app`, `build` for `migrate`.) The build fails if the installed package lacks its locale `.po` files, templates, static files or the track YAML. All base images are pinned by `@sha256:` digest; see "Upgrades" for bumping them.
+6. Migrate: `docker compose -f compose.prod.yml up -d db`, then `docker compose -f compose.prod.yml run --rm migrate`. Expect Alembic `Running upgrade` lines up to the current head, then `roles ready: <APP_DB_USER>, tutor_report`.
+7. Start: `docker compose -f compose.prod.yml up -d`. (`app` waits for `migrate` to complete; `cloudflared` waits for `app` to be healthy.) Check with `docker compose -f compose.prod.yml ps` and `logs app`.
+8. Smoke checks from any machine:
+   - `curl -s https://<host>/.well-known/oauth-authorization-server` returns JSON whose `authorization_endpoint` is `https://<host>/authorize`; `curl -s https://<host>/.well-known/oauth-protected-resource/mcp` names `https://<host>/mcp` as the resource.
+   - `curl -si -X POST https://<host>/mcp` returns `401` with a `WWW-Authenticate` header naming that protected-resource URL.
+   - `curl -si -X POST https://<host>/register -H 'content-type: application/json' -d '{}'` returns a 4xx JSON error (not 5xx), and `curl -si https://<host>/consent` answers (4xx without a pending transaction): both routes are reachable through the tunnel.
    - `https://<host>/login` shows the sign-in page with the privacy note; "Entrar con Google" with a test user lands on Perfil. Add `https://<host>/mcp` as a custom connector in Claude and run one lesson.
-   - Rate limit: 40 quick `curl -s -o /dev/null -w '%{http_code}\n' https://<host>/token -X POST` calls end in `429` (or the Cloudflare block page).
-8. Install the backup cron and run `./backup.sh` once by hand (see Backups).
+   - Rate limit, once the rule from the edge section is on. The Free window is 10 s, so send the requests in parallel: `seq 1 200 | xargs -P 40 -I{} curl -s -o /dev/null -w '%{http_code}\n' -X POST https://<host>/token | sort | uniq -c` shows some `429` (or Cloudflare's block status) next to the app's own 4xx.
+9. Install the backup and stale-backup crons and run `./backup.sh` once by hand (see Backups).
 
-Existing `oauth` volume from an earlier deployment (created by a root-owned image): hand it to the runtime user once, `docker run --rm --user root --entrypoint chown -v tutor_oauth:/data/oauth tutor:latest -R 10001:10001 /data/oauth`. A fresh volume inherits the image's ownership and needs nothing.
+Existing `oauth` volume from an earlier deployment (created by a root-owned image): hand it to the runtime user once, `docker run --rm --user root --entrypoint sh -v tutor_oauth:/data/oauth tutor:latest -c 'chown -R 10001:10001 /data/oauth && chmod 700 /data/oauth'`. A fresh volume inherits the image's ownership and mode and needs nothing.
 
 The purge of expired web sessions runs inside the app lifespan (at startup, then hourly). There is no cron for it.
 
@@ -91,10 +98,11 @@ PostgreSQL 16 or later is required, and the compose file pins `postgres:16`. The
 
 ## Upgrades and migrations
 
-- Deploy a new release: `git fetch && git checkout <tag>`, `docker compose -f compose.prod.yml build migrate`, then run `docker compose -f compose.prod.yml run --rm migrate` (migrations and roles) and `docker compose -f compose.prod.yml up -d`.
+- Deploy a new release: `git fetch && git checkout <tag>`, `docker compose -f compose.prod.yml build migrate`, then `docker compose -f compose.prod.yml run --rm migrate` (migrations and roles) and `docker compose -f compose.prod.yml up -d`.
 - Take a backup (`./backup.sh`) before any release that adds a migration.
 - Current revision: `docker compose -f compose.prod.yml run --rm --entrypoint alembic migrate -c /app/alembic.ini current`.
 - Never edit an applied migration; a fix is a new revision. Downgrade only to recover, right after a backup.
+- Image pins: python, uv, postgres, cloudflared and alpine are referenced by `@sha256:` digest (`deploy/Dockerfile`, `compose.prod.yml`, `backup.sh`). To bump one: `docker pull <tag>`, `docker image inspect <tag> --format '{{index .RepoDigests 0}}'`, replace the digest, rebuild, run the smoke checks. A Postgres major version change is a dump and restore, never a new tag over the data volume.
 - Dependency bumps: before bumping `fastmcp` read its auth/OAuth changelog (the OAuth proxy, token storage and consent behaviour are security relevant) and re-run `uv run just check`, `test-int` and the smoke checks above. Rebuild `uv.lock` deliberately, and run `pip-audit` (part of `just check`).
 
 ## Backups and the restore drill
@@ -102,26 +110,44 @@ PostgreSQL 16 or later is required, and the compose file pins `postgres:16`. The
 `deploy/backup.sh` writes, with `umask 077` (directory 700, files 600):
 
 - `tutor-<stamp>.dump`: `pg_dump --format=custom` of the tutor database (checked with `pg_restore --list`);
-- `tutor-roles-<stamp>.sql`: `pg_dumpall --roles-only`. Roles are cluster-level and are **not** in the dump. The file holds password hashes, which is why it is mode 600.
+- `tutor-roles-<stamp>.sql`: `pg_dumpall --roles-only`. Roles are cluster-level and are **not** in the dump. The file holds password hashes, which is why it is mode 600;
+- `tutor-oauth-<stamp>.tgz`: the OAuth store volume (a pinned alpine container tars it read only). Entries are Fernet-encrypted, but treat the archive as sensitive as `TUTOR_OAUTH_STORAGE_KEY`.
 
-Files are written as `.partial` and renamed only when complete; files older than 30 days are deleted last (`RETENTION_DAYS`, `BACKUP_DIR` override the defaults). Cron, as the deploy user: `30 3 * * * /opt/tutor/deploy/backup.sh >> /var/log/tutor-backup.log 2>&1`. Copy the directory off the machine too; a backup on the same disk is not a backup.
+Files are written as `.partial` and renamed only when complete; all three kinds older than 30 days are deleted last (`RETENTION_DAYS`, `BACKUP_DIR` override the defaults). Cron, as the deploy user (the directory is created in "First deploy"):
 
-**Not in the backup:** the OAuth store (`tutor_oauth`, an encrypted file tree) is not in `pg_dump`. Losing it, or `TUTOR_OAUTH_STORAGE_KEY`, loses only the OAuth proxy's client registrations and issued tokens: Claude connections stop working and each learner removes and re-adds the connector (Claude registers again). No learner data is lost (it is all in Postgres). To protect against the volume loss itself, `docker run --rm -v tutor_oauth:/data/oauth:ro -v /var/backups/tutor:/out alpine tar czf /out/oauth-$(date -u +%Y%m%d).tgz -C /data oauth` is optional and the tarball is as sensitive as the key.
+```
+30 3 * * * /opt/tutor/deploy/backup.sh >> /var/log/tutor-backup.log 2>&1
+30 4 * * * /opt/tutor/deploy/check_backup.sh || echo "tutor backup stale" | mail -s tutor <you>
+```
+
+`check_backup.sh` fails when the newest dump is missing or older than 26 hours; wire it to mail, a webhook or your uptime monitor.
+
+**Off-site copy.** A backup on the same disk is not a backup. Copy the directory off the machine **encrypted**, for example with age (`age -r <public key> -o tutor-<stamp>.dump.age tutor-<stamp>.dump`, keep the private key elsewhere) or `gpg --encrypt`, and apply the same 30-day retention at the destination (a lifecycle rule, or `find ... -mtime +30 -delete` there). Every file above is sensitive (learner text, role hashes, tokens).
+
+**What losing the OAuth store means.** If `tutor_oauth` is lost (and not restored from the tarball) or `TUTOR_OAUTH_STORAGE_KEY` changes, the OAuth proxy forgets its client registrations and issued tokens: Claude connections stop working and each learner removes and re-adds the connector (Claude registers again). No learner data is lost; it is all in Postgres, and web sessions are in Postgres too. To restore the volume from the tarball, stop `app`, then run `docker run --rm -i --user root --entrypoint sh -v tutor_oauth:/restore tutor:latest -c 'tar xzf - --strip-components=1 -C /restore && chown -R 10001:10001 /restore && chmod 700 /restore' < tutor-oauth-<stamp>.tgz` and start `app`.
 
 Restore drill (monthly, and once before inviting testers):
 
 1. `latest=$(ls -1 /var/backups/tutor/tutor-2*.dump | tail -n 1)`
 2. `docker compose -f compose.prod.yml exec -T db sh -c 'createdb -U "$POSTGRES_USER" tutor_restore'`
 3. `docker compose -f compose.prod.yml exec -T db sh -c 'pg_restore -U "$POSTGRES_USER" -d tutor_restore --no-owner --no-acl' < "$latest"`
-4. Compare with live, using `psql -U "$POSTGRES_USER" -d tutor_restore` and `-d tutor` (`docker compose -f compose.prod.yml exec db psql ...`): `SELECT count(*) FROM users; SELECT count(*) FROM sessions; SELECT max(started_at) FROM sessions;`. Counts match up to sessions started after the dump.
+4. Compare with live: run the same query against both databases.
+
+   ```sh
+   Q='SELECT (SELECT count(*) FROM users) AS users, (SELECT count(*) FROM sessions) AS sessions, (SELECT max(started_at) FROM sessions) AS last_session'
+   docker compose -f compose.prod.yml exec -T db sh -c "psql -U \"\$POSTGRES_USER\" -d tutor_restore -Atc \"$Q\""
+   docker compose -f compose.prod.yml exec -T db sh -c "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -Atc \"$Q\""
+   ```
+
+   The rows match up to sessions started after the dump.
 5. `docker compose -f compose.prod.yml exec -T db sh -c 'dropdb -U "$POSTGRES_USER" tutor_restore'`
 
 Disaster restore (new or wiped cluster):
 
-1. `docker compose -f compose.prod.yml up -d db` (empty cluster with the same `db.env`).
-2. Roles first: `docker compose -f compose.prod.yml exec -T db sh -c 'psql -U "$POSTGRES_USER" -d postgres' < /var/backups/tutor/tutor-roles-<stamp>.sql`. "role already exists" for the owner is expected.
-3. `docker compose -f compose.prod.yml exec -T db sh -c 'createdb -U "$POSTGRES_USER" "$POSTGRES_DB"'`, then `pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --exit-on-error` with the dump on stdin, as in the drill but without `--no-owner --no-acl` (owners and grants must come back).
-4. `docker compose -f compose.prod.yml run --rm migrate` (no-op for the schema; resets both passwords from `migrate.env`), then `up -d`.
+1. `docker compose -f compose.prod.yml up -d db`. A fresh cluster already has an empty database named `POSTGRES_DB`, created by the Postgres image for the owner in `db.env`. Do **not** run `createdb` for it (it fails with "already exists"). If the cluster holds data you are replacing, stop `app` and run `dropdb --if-exists` then `createdb` instead.
+2. Roles first: `docker compose -f compose.prod.yml exec -T db sh -c 'psql -U "$POSTGRES_USER" -d postgres' < /var/backups/tutor/tutor-roles-<stamp>.sql`. On a fresh cluster expect "role ... already exists" errors for the owner and similar noise; they are harmless. Anything else is not.
+3. `docker compose -f compose.prod.yml exec -T db sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --exit-on-error' < /var/backups/tutor/tutor-<stamp>.dump`, without `--no-owner --no-acl` (owners and grants must come back).
+4. `docker compose -f compose.prod.yml run --rm migrate` (a no-op for the schema; resets both passwords from `migrate.env`), then `up -d`.
 
 ## Gate report
 
@@ -144,7 +170,7 @@ Omit the `-v` and `--labels/--author` options if you have no labels file. On Git
 On a learner's written request, from the address their Google account uses:
 
 1. Ask them to remove the "English Tutor" connector in Claude first; otherwise their next tool call recreates an empty account from the same Google `sub`.
-2. As the owner: `docker compose -f compose.prod.yml exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'`. Find the id: `SELECT id FROM users WHERE email = '<their email>';`
+2. As the owner, keeping the session out of psql history: `docker compose -f compose.prod.yml exec -e PSQL_HISTORY=/dev/null db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'`. Find the id: `SELECT id FROM users WHERE email = '<their email>';`
 3. Run (the owner is a superuser, so RLS does not block it):
 
 ```sql
@@ -164,7 +190,7 @@ DELETE FROM users WHERE id = :'uid';
 COMMIT;
 ```
 
-4. Check `SELECT count(*) FROM users WHERE id = :'uid';` returns 0, then reply to the learner. Their refresh tokens in the OAuth store expire on their own; to cut them at once, rotate `TUTOR_OAUTH_STORAGE_KEY` (below), which disconnects everyone. Old backups still hold the data until they age out (30 days); say so in the reply.
+4. Check `SELECT count(*) FROM users WHERE id = :'uid';` returns 0, then reply to the learner. **The OAuth store cannot be filtered by user:** its entries are Fernet-encrypted under hashed file names, so this procedure cannot revoke the learner's client registration or tokens one by one. Their refresh token stays valid for up to 30 days; with the user row gone it reaches no data, and a new empty account appears only if the connector is still installed (step 1). To cut every token at once, rotate `TUTOR_OAUTH_STORAGE_KEY` (below), which disconnects everyone. Old backups still hold the data until they age out (30 days); say so in the reply.
 
 ## Rotating keys
 
@@ -176,9 +202,9 @@ COMMIT;
 | `TUTOR_WEB_SESSION_SECRET` | New value (at least 32 characters, distinct), `up -d app` | Web sign-in secrets change; `DELETE FROM web_sessions;` ends all web sessions |
 | `APP_DB_PASSWORD` | Edit `migrate.env` and `DATABASE_URL` in `tutor.env`, `run --rm migrate`, `up -d app` | None |
 | `REPORT_DB_PASSWORD` | Edit `migrate.env`, `run --rm migrate` | None |
-| `POSTGRES_PASSWORD` | `ALTER USER <owner> PASSWORD '<new>'` in `psql`, edit `db.env` and `MIGRATION_DATABASE_URL` | None |
+| `POSTGRES_PASSWORD` | Open psql as in the deletion steps (`exec -e PSQL_HISTORY=/dev/null db ...`) and run `\password <owner>` (psql hashes it client side; never type `ALTER USER ... PASSWORD '...'`, which lands in history and server logs), then edit `db.env` and `MIGRATION_DATABASE_URL` | None |
 | `TUNNEL_TOKEN` | Rotate in Zero Trust, edit `tunnel.env`, `up -d cloudflared` | Seconds offline |
 
 ## Logs
 
-`docker compose -f compose.prod.yml logs app` prints one JSON line per tool call (`tutor.mcp.calls`) and per HTTP request (`tutor.http`) with `user_hash`, never tokens, codes, emails or learner text. The uvicorn access log is off because it would print `/oauth/callback?code=...`. Known cosmetic noise: at startup the scrub filter on `uvicorn.error` can make the "Uvicorn running on ..." line print a `--- Logging error ---` block; it does not affect serving.
+`docker compose -f compose.prod.yml logs app` prints one JSON line per tool call (`tutor.mcp.calls`) and per HTTP request (`tutor.http`) with `user_hash`, never tokens, codes, emails or learner text. The uvicorn access log is off because it would print `/oauth/callback?code=...`.
