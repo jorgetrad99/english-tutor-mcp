@@ -87,7 +87,7 @@ def end_session(
         if closed:
             uow.sessions.save_errors(session_id, checked.errors)
             _mark_plan_item_done(uow, session)
-        _upgrade_spontaneous_use(uow, session_id, evidence.user_turns)
+            _upgrade_spontaneous_use(uow, session_id, evidence.user_turns)
         uow.audit.record(
             "session_closed",
             {
@@ -121,9 +121,14 @@ def _mark_plan_item_done(uow: UnitOfWork, session: SessionRow) -> None:
 
 def _upgrade_spontaneous_use(uow: UnitOfWork, session_id: UUID, turns: Sequence[str]) -> None:
     """Rating 3 -> 4 for reviewed items reused in >= 2 turns (spec 10.3), replaying FSRS from
-    the state before the review (ruling 7)."""
+    the state before the review (ruling 7). Closed sessions only. An item whose state changed
+    after its review (save_glossary reinforced it in this session) is skipped: the replay would
+    overwrite that write."""
     rated_three = {
-        log.item_id: log for log in uow.reviews.session_logs(session_id) if log.rating == 3
+        log.item_id: log
+        for log in uow.reviews.session_logs(session_id)
+        if log.rating == 3
+        and uow.reviews.state(log.item_id) == review(log.state_before, 3, log.reviewed_at)
     }
     if not rated_three:
         return

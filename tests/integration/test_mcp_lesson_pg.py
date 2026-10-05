@@ -9,6 +9,7 @@ import zoneinfo
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 from cryptography.fernet import Fernet
@@ -17,13 +18,21 @@ from fastmcp.server.auth.auth import AccessToken
 from mcp.server.auth.middleware.auth_context import auth_context_var
 from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
 from mcp.shared.exceptions import MCPError
-from mcp_lesson import Clock, call, random_sub, run_provisional_round_trip, run_scripted_lesson
+from mcp_lesson import (
+    Clock,
+    call,
+    random_sub,
+    run_provisional_round_trip,
+    run_review_then_reuse,
+    run_scripted_lesson,
+)
 from sqlalchemy import Engine, text
 from sqlalchemy.engine import make_url
 
 from tutor.app import build_app
 from tutor.db.engine import check_app_role
 from tutor.db.uow import PgIdentity, pg_uow_factory
+from tutor.domain.fsrs import review
 from tutor.mcp.server import build_mcp
 from tutor.services.context import Services
 from tutor.settings import Settings
@@ -69,6 +78,25 @@ async def test_provisional_items_round_trip_on_postgres(login_engine: Engine) ->
     clock = Clock()
     with signed_in(random_sub()):
         await run_provisional_round_trip(server(login_engine, clock), clock)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("reinforce", "rating"), [(False, 4), (True, 3)])
+async def test_rating_four_upgrade_on_postgres(
+    login_engine: Engine, reinforce: bool, rating: int
+) -> None:
+    clock = Clock()
+    sub = random_sub()
+    with signed_in(sub):
+        session_id = await run_review_then_reuse(
+            server(login_engine, clock), clock, reinforce=reinforce
+        )
+    user_id = PgIdentity(login_engine).resolve(sub, None, None, clock.now).id
+    with pg_uow_factory(login_engine)(user_id) as uow:
+        (log,) = uow.reviews.session_logs(UUID(session_id))
+        assert log.rating == rating
+        upgraded = review(log.state_before, 4, log.reviewed_at)
+        assert (uow.reviews.state(log.item_id) == upgraded) is (rating == 4)
 
 
 @pytest.mark.asyncio

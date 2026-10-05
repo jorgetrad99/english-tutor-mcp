@@ -19,6 +19,7 @@ from mcp_lesson import (
     call,
     end_args,
     run_provisional_round_trip,
+    run_review_then_reuse,
     run_scripted_lesson,
     text_of,
 )
@@ -494,3 +495,15 @@ async def test_scripted_text_lesson() -> None:
 async def test_provisional_items_are_confirmed_or_declined_in_the_next_lesson() -> None:
     world = World()
     await run_provisional_round_trip(world.mcp, world.clock)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("reinforce", "rating"), [(False, 4), (True, 3)])
+async def test_rating_four_upgrade_skips_an_item_reinforced_in_the_same_lesson(
+    reinforce: bool, rating: int
+) -> None:
+    world = World()
+    session_id = UUID(await run_review_then_reuse(world.mcp, world.clock, reinforce=reinforce))
+    with world.svc.uow(world.user_id) as uow:
+        (log,) = uow.reviews.session_logs(session_id)
+        assert log.rating == rating

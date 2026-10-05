@@ -13,6 +13,7 @@ from repo_contract import (
     DEFAULT_TURNS,
     add_closed_session,
     first_item,
+    incoming,
     insert_glossary,
     present,
     sample_evidence,
@@ -23,6 +24,7 @@ from tutor.domain.text import normalize
 from tutor.domain.validation import Evidence, ReportedError
 from tutor.services.context import Services
 from tutor.services.errors import ServiceError
+from tutor.services.glossary import save_glossary
 from tutor.services.lesson import record_review, start_lesson
 from tutor.services.memory import MemoryPlanRepo, MemorySessionRepo, MemoryStore
 from tutor.services.profile import get_profile
@@ -348,3 +350,79 @@ def test_reviewed_item_used_once_keeps_rating_three(
     with svc.uow(user_id) as uow:
         assert [log.rating for log in uow.reviews.session_logs(lesson.session_id)] == [3]
         assert uow.reviews.state(row.id) == after_review
+
+
+REUSE_TURNS = (
+    "First I would roll back the deploy and then check the error rate on the dashboard.",
+    "The client asked why the checkout page failed for about ten minutes this morning.",
+    "If the error rate grows again we roll back the deploy before we try another fix.",
+)
+
+
+def reviewed_item(svc: Services, clock: FixedClock, user_id: UUID) -> tuple[LessonStart, UUID]:
+    """A confirmed item from an earlier lesson, rated 3 in this lesson's warm-up."""
+    onboard(svc, user_id)
+    with svc.uow(user_id) as uow:
+        earlier = add_closed_session(
+            uow, first_item(uow), clock.now - timedelta(days=2), clock.now - timedelta(days=2)
+        )
+        row = insert_glossary(
+            uow,
+            earlier.id,
+            "roll back the deploy",
+            clock.now - timedelta(days=2),
+            kind="chunk",
+            first_due=clock.now,
+        )
+    lesson = voice_lesson(svc, user_id)
+    clock.advance(timedelta(minutes=1))
+    record_review(svc, user_id, lesson.session_id, [(row.id, 3)])
+    return lesson, row.id
+
+
+def test_an_incomplete_session_never_upgrades_to_rating_four(
+    svc: Services, clock: FixedClock, user_id: UUID
+) -> None:
+    # Final review M5: only a closed lesson counts as evidence of spontaneous use.
+    lesson, item_id = reviewed_item(svc, clock, user_id)
+    with svc.uow(user_id) as uow:
+        after_review = uow.reviews.state(item_id)
+    clock.advance(timedelta(minutes=2))
+    short = ("We roll back the deploy now.", "Then I roll back the deploy again.")
+    result = end_session(svc, user_id, lesson.session_id, sample_evidence(turns=short), RAW)
+    assert result.status == "incomplete"
+    with svc.uow(user_id) as uow:
+        assert [log.rating for log in uow.reviews.session_logs(lesson.session_id)] == [3]
+        assert uow.reviews.state(item_id) == after_review
+
+
+def test_an_item_reinforced_in_the_same_session_keeps_its_reinforced_state(
+    svc: Services, clock: FixedClock, user_id: UUID
+) -> None:
+    # Final review M5: replaying FSRS from state_before would overwrite the reinforce's due.
+    lesson, item_id = reviewed_item(svc, clock, user_id)
+    clock.advance(timedelta(minutes=10))
+    saved = save_glossary(
+        svc, user_id, lesson.session_id, "confirmed", [incoming("roll back the deploy", "chunk")]
+    )
+    assert saved.reinforced == 1
+    with svc.uow(user_id) as uow:
+        reinforced = uow.reviews.state(item_id)
+    clock.advance(timedelta(minutes=10))
+    result = end_session(svc, user_id, lesson.session_id, sample_evidence(turns=REUSE_TURNS), RAW)
+    assert result.status == "closed"
+    with svc.uow(user_id) as uow:
+        assert [log.rating for log in uow.reviews.session_logs(lesson.session_id)] == [3]
+        assert uow.reviews.state(item_id) == reinforced
+
+
+def test_an_item_from_an_earlier_lesson_reused_twice_is_upgraded(
+    svc: Services, clock: FixedClock, user_id: UUID
+) -> None:
+    lesson, item_id = reviewed_item(svc, clock, user_id)
+    clock.advance(timedelta(minutes=20))
+    end_session(svc, user_id, lesson.session_id, sample_evidence(turns=REUSE_TURNS), RAW)
+    with svc.uow(user_id) as uow:
+        (log,) = uow.reviews.session_logs(lesson.session_id)
+        assert log.rating == 4
+        assert uow.reviews.state(item_id) == review(log.state_before, 4, log.reviewed_at)

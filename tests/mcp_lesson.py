@@ -215,3 +215,40 @@ async def run_provisional_round_trip(mcp: FastMCP, clock: Clock) -> None:
         clock.advance(days=1)
         after = await call(c, "get_profile", {})
         assert (after["provisional_count"], after["due_reviews_count"]) == (0, 1)
+
+
+REUSE_TURNS = [
+    "Hi Ana, I need to talk with you about the release date for the payments service today.",
+    "The tests are failing in the deploy pipeline, so can we push back on the date until Friday?",
+    "If the fix takes longer, I will push back on the date again and send you a short update.",
+]
+
+
+async def run_review_then_reuse(mcp: FastMCP, clock: Clock, *, reinforce: bool) -> str:
+    """Lesson 1 confirms GLOSSARY_ITEM; the next day lesson 2 rates it 3, the learner reuses it
+    in two turns and the lesson closes. With `reinforce`, lesson 2's feedback saves the item
+    again (a reinforce) before end_session. Returns lesson 2's session_id."""
+    async with Client(mcp) as c:
+        await call(c, "save_profile", PROFILE_ARGS)
+        first = await call(c, "start_lesson", {"mode": "text"})
+        args = {"session_id": first["session_id"], "status": "confirmed", "items": [GLOSSARY_ITEM]}
+        await call(c, "save_glossary", args)
+        clock.advance(minutes=15)
+        await call(c, "end_session", end_args(first["session_id"], []))
+
+        clock.advance(days=1)
+        lesson = await call(c, "start_lesson", {"mode": "text"})
+        session_id = lesson["session_id"]
+        [due] = lesson["due_reviews"]
+        review = {"session_id": session_id, "results": [{"item_id": due["item_id"], "rating": 3}]}
+        await call(c, "record_review", review)
+        clock.advance(minutes=10)
+        if reinforce:
+            saved = await call(c, "save_glossary", {**args, "session_id": session_id})
+            assert saved["reinforced"] == 1
+        clock.advance(minutes=5)
+        end = await call(
+            c, "end_session", end_args(session_id, [], user_turns=REUSE_TURNS, errors=[])
+        )
+        assert end["status"] == "closed"
+    return str(session_id)
