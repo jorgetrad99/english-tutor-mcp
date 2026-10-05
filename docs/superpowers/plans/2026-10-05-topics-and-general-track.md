@@ -285,7 +285,7 @@ def test_practice_text_is_kept_as_data() -> None:
 
 # Review Focus 3
 def test_practice_text_of_300_characters_with_accents_and_emoji_is_allowed() -> None:
-    text = (f"Explicar síntomas {SMILE} " * 15)[:PRACTICE_TEXT_MAX]
+    text = (f"Explicar síntomas {SMILE} " * 15)[: PRACTICE_TEXT_MAX - 1] + "."
     assert len(text) == 300 and text == text.strip()
     assert ok(raw(practice_text=text)).practice_text == text
 
@@ -1396,9 +1396,9 @@ from tutor.domain.track import (
 
 In the `test_parse_reports_item_problems` table, replace the two `"must be a non-empty list"` rows with:
 
-```python
-((lambda i: i.update(use_cases=[]), "items[0].use_cases: required"),)
-((lambda i: i.update(use_cases="standup"), "items[0].use_cases: must be a list"),)
+```text
+(lambda i: i.update(use_cases=[]), "items[0].use_cases: required"),
+(lambda i: i.update(use_cases="standup"), "items[0].use_cases: must be a list"),
 ```
 
 and append:
@@ -2205,7 +2205,7 @@ Imports: replace `from tutor.content import load_track` with `from tutor.content
 
 ```python
 SMILE = "\N{SLIGHTLY SMILING FACE}"
-PRACTICE_300 = (f"Explicar síntomas {SMILE} " * 15)[:300]  # 300 code points, no edge spaces
+PRACTICE_300 = (f"Explicar síntomas {SMILE} " * 15)[:299] + "."  # 300 code points, no edge spaces
 ```
 
 Replace `sample_profile` with:
@@ -2357,7 +2357,7 @@ from .conftest import run_alembic
 pytestmark = pytest.mark.integration
 
 SMILE = "\N{SLIGHTLY SMILING FACE}"
-PRACTICE_300 = (f"Explicar síntomas {SMILE} " * 15)[:300]
+PRACTICE_300 = (f"Explicar síntomas {SMILE} " * 15)[:299] + "."
 USER = (
     "INSERT INTO users (id, google_sub, display_name, created_at) VALUES (:u, :sub, 'Seed', now())"
 )
@@ -2481,11 +2481,10 @@ def test_session_topic_is_a_closed_enum(engine: Engine) -> None:
 
 In `tests/integration/test_db_schema.py`, `_SEED_SQL`'s profile insert gains the topic column:
 
-```python
+```text
 "INSERT INTO profiles (user_id, topics, domains, use_cases, minutes_per_day, days_per_week,"
-
 " self_level, target_level, onboarded_at, updated_at)"
-(" VALUES (:u, ARRAY['tech'], ARRAY['it'], ARRAY['standup'], 20, 3, 'B1', 'B2', now(), now())",)
+" VALUES (:u, ARRAY['tech'], ARRAY['it'], ARRAY['standup'], 20, 3, 'B1', 'B2', now(), now())"
 ```
 
 In `tests/integration/test_pg_track.py`, append:
@@ -2999,9 +2998,9 @@ In `_start_once`, replace the lines from `track = {item.id: item for item in uow
 
 and in the `LessonStart(...)` return add, after `prep_text=prep,`:
 
-```python
-topic = (topic,)
-practice_text = (profile.practice_text if topic == "custom" else None,)
+```text
+topic=topic,
+practice_text=profile.practice_text if topic == "custom" else None,
 ```
 
 - [ ] **Step 5: Run the tests**
@@ -3188,14 +3187,14 @@ def topic_args() -> dict[str, Any]:
 
 Add `("save_profile", topic_args(), ""),` to `UNKNOWN_KEY_CASES`. In `EDGE_CASES`, delete `("save_profile", profile_args(), ("use_cases",), []),` (an empty list is now valid; the domain reports `too_few` for tech learners) and add:
 
-```python
-(("save_profile", topic_args(), ("topics",), []),)
-(("save_profile", topic_args(), ("topics",), ["travel", "work", "health", "social", "studies"]),)
-(("save_profile", topic_args(), ("topics",), ["karaoke"]),)
-(("save_profile", topic_args(), ("practice_text",), "x" * (PRACTICE_TEXT_MAX + 1)),)
-(("save_profile", profile_args(), ("domains",), ["it", "general", "it"]),)
-(("start_lesson", {"mode": "text"}, ("prep_topic",), "tech"),)
-(("start_lesson", {"mode": "text"}, ("domain",), "business"),)
+```text
+("save_profile", topic_args(), ("topics",), []),
+("save_profile", topic_args(), ("topics",), ["travel", "work", "health", "social", "studies"]),
+("save_profile", topic_args(), ("topics",), ["karaoke"]),
+("save_profile", topic_args(), ("practice_text",), "x" * (PRACTICE_TEXT_MAX + 1)),
+("save_profile", profile_args(), ("domains",), ["it", "general", "it"]),
+("start_lesson", {"mode": "text"}, ("prep_topic",), "tech"),
+("start_lesson", {"mode": "text"}, ("domain",), "business"),
 ```
 
 - Replace `test_start_lesson_prep_needs_its_use_case` with:
