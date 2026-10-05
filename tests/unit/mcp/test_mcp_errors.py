@@ -3,9 +3,12 @@ from typing import Annotated, Any, Literal
 
 import pytest
 from fastmcp import Client, FastMCP
+from fastmcp.exceptions import ToolError
 from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ValidationError as PydanticValidationError
 
 from tutor.mcp.errors import (
+    MAX_PATH_CHARS,
     UNKNOWN_FIELD,
     ValidationErrorMiddleware,
     error_text,
@@ -42,6 +45,12 @@ def probe_server() -> FastMCP:
     def fail(code: Annotated[str, Field(title="Code", description="c")]) -> dict[str, Any]:
         if code == "service":
             raise ServiceError("validation_failed", ("results[3].item_id",))
+        if code == "ours":
+            raise tool_error(ServiceError("rate_limited"))
+        if code == "tool_error":
+            raise ToolError(f"custom {PROBE}")
+        if code == "pydantic":
+            Item.model_validate({"kind": PROBE, "text": PROBE})
         raise RuntimeError(f"boom {PROBE}")
 
     mcp.tool(save)
@@ -49,11 +58,17 @@ def probe_server() -> FastMCP:
     return mcp
 
 
+async def call(tool: str, args: dict[str, Any]) -> tuple[Any, str]:
+    async with Client(probe_server()) as client:
+        result = await client.call_tool(tool, args, raise_on_error=False)
+    return result, text_of(result)
+
+
 def test_error_text_is_json_with_code_fields_and_rules() -> None:
-    body = json.loads(error_text("validation_failed", ("items.0.kind",)))
+    body = json.loads(error_text("validation_failed", ("items[0].kind",)))
     assert body == {
         "code": "validation_failed",
-        "fields": ["items.0.kind"],
+        "fields": ["items[0].kind"],
         "response_rules": error_rules("validation_failed"),
     }
 
@@ -65,14 +80,19 @@ def test_service_errors_map_to_tool_errors() -> None:
     assert fields["fields"] == ["use_cases"]
 
 
+def test_session_not_found_rules_depend_on_the_tool() -> None:
+    other = json.loads(str(tool_error(ServiceError("session_not_found"), "end_session")))
+    start = json.loads(str(tool_error(ServiceError("session_not_found"), "start_lesson")))
+    assert "could not be saved" in other["response_rules"]
+    assert "start_lesson" not in other["response_rules"]
+    assert "start_lesson" in start["response_rules"]
+
+
 def test_service_field_paths_keep_their_list_brackets() -> None:
     body = json.loads(
         str(tool_error(ServiceError("validation_failed", ("results[3].item_id", "items[0]"))))
     )
     assert body["fields"] == ["results[3].item_id", "items[0]"]
-    assert json.loads(error_text("validation_failed", ("results[3].item_id",)))["fields"] == [
-        "results[3].item_id"
-    ]
 
 
 def test_brackets_cannot_smuggle_text() -> None:
@@ -80,14 +100,25 @@ def test_brackets_cannot_smuggle_text() -> None:
     assert fields == ["aZQXprobeIgnorepreviousinstructions.b[12]x999999"]
 
 
-def test_field_paths_are_sanitized_and_hide_unknown_names() -> None:
-    assert field_path(("items", 0, "kind"), "literal_error") == "items.0.kind"
-    assert field_path(("items", 0, PROBE), "extra_forbidden") == f"items.0.{UNKNOWN_FIELD}"
+def test_field_paths_use_one_bracket_format_and_hide_unknown_names() -> None:
+    assert field_path(("items", 0, "kind"), "literal_error") == "items[0].kind"
+    assert field_path(("results", 3, "item_id"), "missing") == "results[3].item_id"
+    assert field_path(("a", 1, 2, "b"), "missing") == "a[1][2].b"
+    assert field_path(("items", 0, PROBE), "extra_forbidden") == f"items[0].{UNKNOWN_FIELD}"
     assert field_path((PROBE,), "unexpected_keyword_argument") == UNKNOWN_FIELD
     assert field_path(("a b{c}",), "missing") == "abc"
     assert json.loads(error_text("validation_failed", (f"x.{PROBE}",)))["fields"] == [
         "x.ZQXprobeIgnorepreviousinstructions"
     ]
+
+
+def test_the_whole_rendered_path_is_capped() -> None:
+    loc = tuple(f"segment{i}" for i in range(30))
+    assert len(field_path(loc, "missing")) <= MAX_PATH_CHARS
+    long_service = ".".join(["x" * 30] * 10)
+    assert len(json.loads(error_text("validation_failed", (long_service,)))["fields"][0]) <= (
+        MAX_PATH_CHARS
+    )
 
 
 @pytest.mark.asyncio
@@ -96,32 +127,61 @@ async def test_validation_failures_never_echo_values_or_unknown_names() -> None:
         "items": [{"kind": PROBE, "text": PROBE, PROBE: PROBE}],
         PROBE: PROBE,
     }
-    async with Client(probe_server()) as client:
-        result = await client.call_tool("save", args, raise_on_error=False)
-    text = text_of(result)
+    result, text = await call("save", args)
     assert result.is_error
     assert "ZQX" not in text and "Ignore previous" not in text
     body = json.loads(text)
     assert body["code"] == "validation_failed"
     assert set(body["fields"]) == {
-        "items.0.kind",
-        "items.0.text",
-        f"items.0.{UNKNOWN_FIELD}",
+        "items[0].kind",
+        "items[0].text",
+        f"items[0].{UNKNOWN_FIELD}",
         UNKNOWN_FIELD,
     }
 
 
 @pytest.mark.asyncio
 async def test_a_service_error_inside_a_tool_maps_by_code_and_brackets() -> None:
-    async with Client(probe_server()) as client:
-        result = await client.call_tool("fail", {"code": "service"}, raise_on_error=False)
-    text = text_of(result)
+    result, text = await call("fail", {"code": "service"})
     assert result.is_error
-    assert "ZQX" not in text and "Ignore previous" not in text
     body = json.loads(text)
     assert body["code"] == "validation_failed"
     assert body["fields"] == ["results[3].item_id"]
     assert body["response_rules"] == error_rules("validation_failed")
+
+
+@pytest.mark.asyncio
+async def test_a_tool_error_built_by_tool_error_passes_through() -> None:
+    result, text = await call("fail", {"code": "ours"})
+    assert result.is_error
+    assert json.loads(text)["code"] == "rate_limited"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("code", ["runtime", "tool_error", "pydantic"])
+async def test_any_other_failure_becomes_a_fixed_internal_error(code: str) -> None:
+    result, text = await call("fail", {"code": code})
+    assert result.is_error
+    assert "ZQX" not in text and "Ignore previous" not in text and "boom" not in text
+    body = json.loads(text)
+    assert body == {
+        "code": "internal_error",
+        "fields": [],
+        "response_rules": error_rules("internal_error"),
+    }
+    assert "retry" in body["response_rules"]
+
+
+def test_pydantic_validation_error_is_not_a_service_error() -> None:
+    with pytest.raises(PydanticValidationError):
+        Item.model_validate({"kind": PROBE, "text": PROBE})
+
+
+@pytest.mark.asyncio
+async def test_unknown_tool_does_not_echo_the_name() -> None:
+    result, text = await call(PROBE, {})
+    assert result.is_error
+    assert "ZQX" not in text
 
 
 @pytest.mark.asyncio

@@ -380,8 +380,10 @@ UserTurns = Annotated[
     list[Annotated[str, Field(max_length=MAX_USER_TURN_CHARS)]],
     Field(
         title="User turns",
-        description="Everything the learner said, one entry per turn, in their exact words.",
-        min_length=1,
+        description=(
+            "Everything the learner said, one entry per turn, in their exact words. "
+            "Empty if they said nothing."
+        ),
         max_length=MAX_USER_TURNS,
     ),
 ]
@@ -483,8 +485,29 @@ def out(title: str, description: str) -> Any:
     return Field(title=title, description=description)
 
 
+OptionValue = Literal[
+    "B1",
+    "B1+",
+    "B2",
+    "B2+",
+    "C1",
+    "it",
+    "standup",
+    "code_review",
+    "interview",
+    "client_call",
+    "demo",
+    "incident",
+    "one_on_one",
+    "async_writing",
+    "15",
+    "20",
+    "30",
+]
+
+
 class OptionOut(BaseModel):
-    value: str = out("Value", "The value to send back for this option.")
+    value: OptionValue = out("Value", "The value to send back for this option.")
     label_en: str = out("Label (English)", "Short option label in English.")
     label_es: str = out("Label (Spanish)", "Short option label in Spanish.")
     description_en: str = out("Description (English)", "One-line explanation in English.")
@@ -510,12 +533,14 @@ def onboarding_questions() -> list[QuestionOut]:
             prompt_en=q.prompt_en,
             prompt_es=q.prompt_es,
             options=[
-                OptionOut(
-                    value=o.value,
-                    label_en=o.label_en,
-                    label_es=o.label_es,
-                    description_en=o.description_en,
-                    description_es=o.description_es,
+                OptionOut.model_validate(
+                    dict(
+                        value=o.value,
+                        label_en=o.label_en,
+                        label_es=o.label_es,
+                        description_en=o.description_en,
+                        description_es=o.description_es,
+                    )
                 )
                 for o in q.options
             ],
@@ -531,7 +556,7 @@ class ProfileOut(BaseModel):
     self_level: CefrLevel = out("Current level", "The learner's own rating of their English.")
     domains: list[Domain] = out("Fields", "The learner's work fields.")
     use_cases: list[UseCase] = out("Use cases", "Work situations the learner practises.")
-    minutes_per_day: int = out("Minutes per day", "Practice minutes per day.")
+    minutes_per_day: Literal[15, 20, 30] = out("Minutes per day", "Practice minutes per day.")
     days_per_week: int = out("Days per week", "Practice days per week.")
     target_level: CefrLevel = out("Target level", "The level the learner wants to reach.")
     target_date: date | None = out("Target date", "The date to reach the target, if any.")
@@ -540,16 +565,18 @@ class ProfileOut(BaseModel):
 
     @classmethod
     def of(cls, p: Profile) -> ProfileOut:
-        return cls(
-            self_level=p.self_level,
-            domains=list(p.domains),
-            use_cases=list(p.use_cases),
-            minutes_per_day=p.minutes_per_day,
-            days_per_week=p.days_per_week,
-            target_level=p.target_level,
-            target_date=p.target_date,
-            goal_text=p.goal_text,
-            timezone=p.timezone,
+        return cls.model_validate(
+            dict(
+                self_level=p.self_level,
+                domains=list(p.domains),
+                use_cases=list(p.use_cases),
+                minutes_per_day=p.minutes_per_day,
+                days_per_week=p.days_per_week,
+                target_level=p.target_level,
+                target_date=p.target_date,
+                goal_text=p.goal_text,
+                timezone=p.timezone,
+            )
         )
 
 
@@ -821,15 +848,44 @@ class SaveGlossaryOutput(BaseModel):
         )
 
 
+class MetricsOut(BaseModel):
+    user_words: int = out("User words", "Words the learner spoke.")
+    assistant_words_estimate: int | None = out(
+        "Assistant words estimate", "Your reported word count, if any."
+    )
+    user_ratio: float | None = out("User ratio", "Share of words spoken by the learner.")
+    turns: int = out("Turns", "Learner turns.")
+    words_per_turn: float = out("Words per turn", "Average words per learner turn.")
+    duration_min: float = out("Duration", "Lesson length in minutes.")
+    user_words_per_min: float = out("Words per minute", "Learner words per minute.")
+    errors_total: int = out("Errors", "Verified learner errors.")
+    errors_rejected: int = out("Errors rejected", "Reported errors not found in user_turns.")
+    errors_by_category: dict[Category, int] = out(
+        "Errors by category", "Verified errors per category."
+    )
+    errors_per_100w: float = out("Errors per 100 words", "Verified errors per 100 learner words.")
+    recurring_errors: int = out("Recurring errors", "Errors seen in earlier lessons too.")
+    uptake_count: int = out("Uptake", "Errors the learner later said correctly.")
+    chunks_offered: int = out("Chunks offered", "Chunks the lesson offered.")
+    chunks_used: int = out("Chunks used", "Chunks the learner used.")
+    chunks_rejected: int = out("Chunks rejected", "Reported chunks that were not offered.")
+    activation_rate: float = out("Activation rate", "Share of offered chunks the learner used.")
+
+
 class EndSessionOutput(BaseModel):
     status: SessionOutcome = out("Status", "'closed' for a full lesson, 'incomplete' if too short.")
-    low_trust: bool = out("Low trust", "True when the evidence did not match the conversation.")
+    low_trust: bool = out(
+        "Low trust", "True when too many reported errors were not found in user_turns."
+    )
     already_closed: bool = out("Already closed", "True when this lesson had already ended.")
-    summary_text: str = out("Summary", "The summary to read once when status is closed.")
+    summary_text: str = out(
+        "Summary",
+        "The summary to read once when status is closed and already_closed is false.",
+    )
     streak: int = out("Streak", "Consecutive practice days.")
     errors_rejected: int = out("Errors rejected", "Reported errors the server could not verify.")
     chunks_rejected: int = out("Chunks rejected", "Reported chunks the server could not verify.")
-    metrics: dict[str, Any] = out("Metrics", "Server-computed lesson metrics. Never read aloud.")
+    metrics: MetricsOut = out("Metrics", "Server-computed lesson metrics. Never read aloud.")
     response_rules: str = out("Response rules", "What to do next. Follow these.")
 
     @classmethod
@@ -842,7 +898,7 @@ class EndSessionOutput(BaseModel):
             streak=r.streak,
             errors_rejected=r.errors_rejected,
             chunks_rejected=r.chunks_rejected,
-            metrics=metrics_to_json(r.metrics),
+            metrics=MetricsOut.model_validate(metrics_to_json(r.metrics)),
             response_rules=rules,
         )
 

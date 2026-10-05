@@ -1,3 +1,4 @@
+import copy
 from datetime import date
 from typing import Any
 from uuid import uuid4
@@ -6,11 +7,24 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from tutor.domain.glossary import CONTEXT_MAX, MEANING_MAX, TEXT_MAX, IncomingItem
-from tutor.domain.profile import GOAL_TEXT_MAX, MINUTES_CHOICES
+from tutor.domain.profile import (
+    GOAL_TEXT_MAX,
+    MAX_DAYS_PER_WEEK,
+    MAX_USE_CASES,
+    MIN_DAYS_PER_WEEK,
+    MINUTES_CHOICES,
+)
 from tutor.domain.validation import ReportedError
 from tutor.mcp import schemas
 from tutor.mcp.schemas import (
     INPUT_MODELS,
+    MAX_CEFR_EVIDENCE,
+    MAX_CEFR_EVIDENCE_CHARS,
+    MAX_CHUNK_ID_CHARS,
+    MAX_CHUNK_IDS,
+    MAX_ERROR_TEXT_CHARS,
+    MAX_REPORTED_ERRORS,
+    MAX_USER_TURNS,
     OUTPUT_MODELS,
     RAW_EVIDENCE_MAX_BYTES,
     EndSessionInput,
@@ -19,7 +33,8 @@ from tutor.mcp.schemas import (
     StartLessonInput,
 )
 from tutor.services.errors import ServiceError
-from tutor.services.lesson import MAX_PREP_CHARS, MAX_REVIEW_RESULTS
+from tutor.services.glossary import MAX_GLOSSARY_ITEMS
+from tutor.services.lesson import MAX_MINUTES, MAX_PREP_CHARS, MAX_REVIEW_RESULTS, MIN_MINUTES
 from tutor.services.session_end import MAX_RAW_EVIDENCE_BYTES
 
 pytestmark = pytest.mark.unit
@@ -178,7 +193,7 @@ def test_end_session_keeps_the_section_7_shape() -> None:
     props = schema["properties"]
     assert (props["hints_given"]["minimum"], props["hints_given"]["maximum"]) == (0, 3)
     assert (props["confidence_1_5"]["minimum"], props["confidence_1_5"]["maximum"]) == (1, 5)
-    assert props["user_turns"]["minItems"] == 1
+    assert "minItems" not in props["user_turns"]  # empty reaches the service (incomplete)
     assert props["user_turns"]["items"]["maxLength"] == 2000
 
 
@@ -253,7 +268,6 @@ def test_raw_evidence_excludes_the_session_id_and_is_capped() -> None:
 @pytest.mark.parametrize(
     "overrides",
     [
-        {"user_turns": []},
         {"hints_given": 4},
         {"confidence_1_5": 0},
         {"task_result": "done"},
@@ -321,7 +335,7 @@ def test_unknown_keys_are_rejected_at_every_level(
 ) -> None:
     model = INPUT_MODELS[tool]
     model.model_validate(payload)  # the payload itself is valid
-    broken: dict[str, Any] = {**payload}
+    broken: dict[str, Any] = copy.deepcopy(payload)
     node: Any = broken
     for step in filter(None, where.split(".")):
         node = node[int(step)] if step.isdigit() else node[step]
@@ -376,3 +390,94 @@ def test_glossary_item_converts_to_incoming() -> None:
         context_sentence="Can we push back on the date?",
         domain="it",
     )
+
+
+def test_empty_user_turns_reach_the_service() -> None:
+    ev = EndSessionInput.model_validate(end_args(user_turns=[])).to_evidence()
+    assert ev.user_turns == ()
+
+
+def _over(payload: dict[str, Any], path: tuple[Any, ...], value: Any) -> dict[str, Any]:
+    broken = copy.deepcopy(payload)
+    node: Any = broken
+    for step in path[:-1]:
+        node = node[step]
+    node[path[-1]] = value
+    return broken
+
+
+EDGE_CASES: list[tuple[str, dict[str, Any], tuple[Any, ...], Any]] = [
+    ("start_lesson", {"mode": "text"}, ("mode",), "video"),
+    ("start_lesson", {"mode": "text"}, ("minutes",), MIN_MINUTES - 1),
+    ("start_lesson", {"mode": "text"}, ("minutes",), MAX_MINUTES + 1),
+    ("start_lesson", {"mode": "text"}, ("prep",), "x" * (MAX_PREP_CHARS + 1)),
+    ("start_lesson", {"mode": "text"}, ("prep_use_case",), "party"),
+    ("record_review", review_args(), ("results", 0, "rating"), 5),
+    ("record_review", review_args(), ("results", 0, "rating"), 0),
+    ("record_review", review_args(), ("session_id",), "not-a-uuid"),
+    ("save_glossary", glossary_args(), ("status",), "archived"),
+    ("save_glossary", glossary_args(), ("items", 0, "kind"), "idiom"),
+    ("save_glossary", glossary_args(), ("items", 0, "text"), "x" * (TEXT_MAX + 1)),
+    ("save_glossary", glossary_args(), ("items", 0, "meaning"), "x" * (MEANING_MAX + 1)),
+    ("save_glossary", glossary_args(), ("items", 0, "context_sentence"), "x" * (CONTEXT_MAX + 1)),
+    ("save_profile", profile_args(), ("minutes_per_day",), 25),
+    ("save_profile", profile_args(), ("days_per_week",), MIN_DAYS_PER_WEEK - 1),
+    ("save_profile", profile_args(), ("days_per_week",), MAX_DAYS_PER_WEEK + 1),
+    ("save_profile", profile_args(), ("self_level",), "A2"),
+    ("save_profile", profile_args(), ("goal_text",), "x" * (GOAL_TEXT_MAX + 1)),
+    ("save_profile", profile_args(), ("use_cases",), ["standup"] * (MAX_USE_CASES + 1)),
+    ("save_profile", profile_args(), ("use_cases",), []),
+    ("end_session", end_args(), ("errors", 0, "said"), "x" * (MAX_ERROR_TEXT_CHARS + 1)),
+    ("end_session", end_args(), ("errors", 0, "correct"), "x" * (MAX_ERROR_TEXT_CHARS + 1)),
+    ("end_session", end_args(), ("errors",), [end_args()["errors"][0]] * (MAX_REPORTED_ERRORS + 1)),
+    (
+        "end_session",
+        end_args(),
+        ("cefr_estimate", "evidence"),
+        ["x"] * (MAX_CEFR_EVIDENCE + 1),
+    ),
+    (
+        "end_session",
+        end_args(),
+        ("cefr_estimate", "evidence"),
+        ["x" * (MAX_CEFR_EVIDENCE_CHARS + 1)],
+    ),
+    ("end_session", end_args(), ("chunks_used",), ["x" * (MAX_CHUNK_ID_CHARS + 1)]),
+    ("end_session", end_args(), ("chunks_used",), ["c"] * (MAX_CHUNK_IDS + 1)),
+    ("end_session", end_args(), ("user_turns",), ["t"] * (MAX_USER_TURNS + 1)),
+    ("save_glossary", glossary_args(), ("items",), [glossary_item()] * (MAX_GLOSSARY_ITEMS + 1)),
+    ("save_glossary", glossary_args(), ("items",), []),
+    (
+        "record_review",
+        review_args(),
+        ("results",),
+        [review_args()["results"][0]] * (MAX_REVIEW_RESULTS + 1),
+    ),
+    ("record_review", review_args(), ("results",), []),
+]
+
+
+@pytest.mark.parametrize(("tool", "payload", "path", "value"), EDGE_CASES)
+def test_edge_values_are_rejected(
+    tool: str, payload: dict[str, Any], path: tuple[Any, ...], value: Any
+) -> None:
+    model = INPUT_MODELS[tool]
+    model.model_validate(payload)
+    with pytest.raises(ValidationError):
+        model.model_validate(_over(payload, path, value))
+
+
+@pytest.mark.parametrize(
+    ("tool", "payload", "path", "value"),
+    [
+        ("start_lesson", {"mode": "text"}, ("minutes",), MIN_MINUTES),
+        ("start_lesson", {"mode": "text"}, ("minutes",), MAX_MINUTES),
+        ("save_profile", profile_args(), ("days_per_week",), MAX_DAYS_PER_WEEK),
+        ("end_session", end_args(), ("hints_given",), 3),
+        ("end_session", end_args(), ("cefr_estimate", "evidence"), ["x" * 200] * 5),
+    ],
+)
+def test_limit_values_themselves_are_accepted(
+    tool: str, payload: dict[str, Any], path: tuple[Any, ...], value: Any
+) -> None:
+    INPUT_MODELS[tool].model_validate(_over(payload, path, value))

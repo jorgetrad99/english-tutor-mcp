@@ -39,9 +39,10 @@ def all_rules() -> list[str]:
                 mode, has_provisional=prov, has_due_reviews=due, plan_exhausted=done
             )
         )
-    found += [rules.end_session_rules(s) for s in get_args(SessionOutcome)]
+    found += [rules.end_session_rules(s, already_closed=False) for s in get_args(SessionOutcome)]
     found += [rules.end_session_rules(s, already_closed=True) for s in get_args(SessionOutcome)]
-    found += [rules.error_rules(c) for c in get_args(ErrorCode)]
+    found += [rules.error_rules(c) for c in (*get_args(ErrorCode), "internal_error")]
+    found.append(rules.error_rules("session_not_found", "start_lesson"))
     return found
 
 
@@ -104,21 +105,59 @@ def test_start_lesson_rules_follow_mode_and_state() -> None:
 
 
 def test_end_session_rules_read_the_summary_only_when_closed() -> None:
-    assert "summary_text once, word for word" in rules.end_session_rules("closed")
-    assert "Do not read summary_text" in rules.end_session_rules("incomplete")
+    assert "summary_text once, word for word" in rules.end_session_rules(
+        "closed", already_closed=False
+    )
+    assert "Do not read summary_text" in rules.end_session_rules("incomplete", already_closed=False)
 
 
 def test_a_repeated_end_session_never_reads_the_summary_again() -> None:
     for status in get_args(SessionOutcome):
         text = rules.end_session_rules(status, already_closed=True)
-        assert "do not read it again" in text
+        assert "do not read summary_text again" in text
         assert "word for word" not in text
         assert "end_session again" in text  # no third call either
 
 
 def test_error_rules_cover_every_code_and_limit_retries() -> None:
-    assert set(rules.ERRORS) == set(get_args(ErrorCode))
-    for code in get_args(ErrorCode):
+    codes = {*get_args(ErrorCode), "internal_error"}
+    assert set(rules.ERRORS) == codes
+    for code in codes:
         text = rules.error_rules(code)
         assert "one sentence" in text or "Do not mention" in text or "do not mention" in text
         assert "retry" in text or "save_profile" in text
+
+
+def test_section_12_conversation_rules_are_in_the_instructions() -> None:
+    for phrase in (
+        "at most 60 words per turn",
+        "one question per turn",
+        "no bold and no emoji",
+        "Never summarize back what the user just said",
+        "Spanish only for a meaning check",
+        "numbered list",
+        "at most 8 lines",
+        "unless meaning breaks down",
+    ):
+        assert phrase.lower() in INSTRUCTIONS.lower(), phrase
+
+
+def test_scenario_and_close_rules_carry_the_section_12_exceptions() -> None:
+    for mode in MODES:
+        text = rules.start_lesson_rules(
+            mode, has_provisional=False, has_due_reviews=False, plan_exhausted=False
+        )
+        assert "unless meaning breaks down; then one short recast and continue" in text
+        assert "at most 3 hints (a hard limit)" in text
+        assert "numbered list of at most 8 lines" in text
+
+
+def test_save_glossary_rules_name_the_next_action() -> None:
+    assert "call end_session next" in rules.SAVE_GLOSSARY
+    assert "warm-up" in rules.SAVE_GLOSSARY
+
+
+def test_payload_too_large_never_shortens_user_turns() -> None:
+    text = rules.error_rules("payload_too_large")
+    assert "never shorten or paraphrase user_turns" in text
+    assert "cefr evidence" in text

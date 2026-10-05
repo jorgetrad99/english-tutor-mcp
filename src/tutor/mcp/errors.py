@@ -15,41 +15,63 @@ from fastmcp.exceptions import ToolError, ValidationError
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from pydantic import ValidationError as PydanticValidationError
 
-from tutor.mcp.rules import error_rules
-from tutor.services.errors import ErrorCode, ServiceError
+from tutor.mcp.rules import McpErrorCode, error_rules
+from tutor.services.errors import ServiceError
 
 MAX_FIELDS = 20
 MAX_PART_CHARS = 40
+MAX_PATH_CHARS = 80
 UNKNOWN_FIELD = "unknown_field"
 # A path segment keeps names and list indexes: `results[3]` stays `results[3]`.
 _TOKEN = re.compile(r"[A-Za-z0-9_]+|\[\d{1,4}\]")
 _UNKNOWN_FIELD_TYPES = frozenset({"extra_forbidden", "unexpected_keyword_argument"})
 
 
-def _part(part: int | str) -> str:
-    if isinstance(part, int):
-        return str(part)
+class TutorToolError(ToolError):
+    """A ToolError built by this module; the middleware lets it through untouched."""
+
+
+def _part(part: str) -> str:
     tokens = _TOKEN.findall(part)
     return "".join(t if t.startswith("[") else t[:MAX_PART_CHARS] for t in tokens)
 
 
+def _cap(path: str) -> str:
+    if len(path) <= MAX_PATH_CHARS:
+        return path
+    cut = path[:MAX_PATH_CHARS]
+    if cut.rfind("[") > cut.rfind("]"):  # do not leave a half index
+        cut = cut[: cut.rfind("[")]
+    return cut.rstrip(".")
+
+
 def field_path(loc: Sequence[int | str], error_type: str) -> str:
-    """Dotted location; the name of an unknown field is the caller's text, so it is replaced."""
-    parts = [_part(p) for p in loc]
-    if error_type in _UNKNOWN_FIELD_TYPES and parts:
-        parts[-1] = UNKNOWN_FIELD
-    return ".".join(p for p in parts if p) or UNKNOWN_FIELD
+    """One format for the model: `items[0].kind`. The name of an unknown field is the
+    caller's text, so it is replaced."""
+    segments: list[str] = []
+    for index, part in enumerate(loc):
+        if isinstance(part, int):
+            if segments:
+                segments[-1] += f"[{part}]"
+            else:
+                segments.append(f"[{part}]")
+            continue
+        last = index == len(loc) - 1
+        segments.append(
+            UNKNOWN_FIELD if last and error_type in _UNKNOWN_FIELD_TYPES else _part(part)
+        )
+    return _cap(".".join(s for s in segments if s)) or UNKNOWN_FIELD
 
 
-def error_text(code: ErrorCode, fields: Sequence[str] = ()) -> str:
-    safe = [p for p in (".".join(_part(x) for x in f.split(".")) for f in fields) if p]
+def error_text(code: McpErrorCode, fields: Sequence[str] = (), tool: str | None = None) -> str:
+    safe = [p for p in (_cap(".".join(_part(x) for x in f.split("."))) for f in fields) if p]
     return json.dumps(
-        {"code": code, "fields": safe[:MAX_FIELDS], "response_rules": error_rules(code)}
+        {"code": code, "fields": safe[:MAX_FIELDS], "response_rules": error_rules(code, tool)}
     )
 
 
-def tool_error(exc: ServiceError) -> ToolError:
-    return ToolError(error_text(exc.code, exc.fields))
+def tool_error(exc: ServiceError, tool: str | None = None) -> ToolError:
+    return TutorToolError(error_text(exc.code, exc.fields, tool))
 
 
 def validation_fields(exc: BaseException) -> tuple[str, ...]:
@@ -65,20 +87,28 @@ def validation_fields(exc: BaseException) -> tuple[str, ...]:
 
 
 class ValidationErrorMiddleware(Middleware):
-    """Schema failures become validation_failed with field paths; pydantic's text holds values.
+    """Every failure leaves as {code, fields, response_rules}; no exception text gets out.
 
-    A ServiceError raised inside a tool (FastMCP wraps it in a ToolError) is mapped by its
-    code too. The original exception is not chained, so its text cannot reach a client or a log.
+    Argument-schema failures become validation_failed with field paths (pydantic's own text
+    holds the values). A ServiceError, raw or as the cause of FastMCP's wrapping ToolError,
+    maps by its code. Anything else (a foreign ToolError, a pydantic error raised inside a tool
+    body, any Exception) becomes internal_error. The original is never chained and nothing is
+    logged here.
     """
 
     async def on_call_tool(self, context: MiddlewareContext[Any], call_next: Any) -> Any:
+        tool = getattr(context.message, "name", None)
         try:
             return await call_next(context)
-        except ValidationError as exc:
-            raise ToolError(error_text("validation_failed", validation_fields(exc))) from None
-        except ServiceError as exc:
-            raise tool_error(exc) from None
-        except ToolError as exc:
-            if isinstance(exc.__cause__, ServiceError):
-                raise tool_error(exc.__cause__) from None
+        except TutorToolError:
             raise
+        except ValidationError as exc:
+            raise TutorToolError(
+                error_text("validation_failed", validation_fields(exc), tool)
+            ) from None
+        except ServiceError as exc:
+            raise tool_error(exc, tool) from None
+        except Exception as exc:
+            if isinstance(exc.__cause__, ServiceError):
+                raise tool_error(exc.__cause__, tool) from None
+            raise TutorToolError(error_text("internal_error", (), tool)) from None
