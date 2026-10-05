@@ -2,6 +2,8 @@ from dataclasses import replace
 from datetime import UTC, date, datetime
 from uuid import uuid4
 
+import pytest
+
 from tutor.domain.dashboard.billing import banners_for, next_subscription
 from tutor.domain.dashboard.types import (
     BannerKind,
@@ -12,6 +14,8 @@ from tutor.domain.dashboard.types import (
     SubStatus,
     Tier,
 )
+
+pytestmark = pytest.mark.unit
 
 TODAY = date(2027, 1, 12)
 FREE = Subscription(tier=Tier.FREE, status=SubStatus.NONE, price_id="price_29", price_cents=2900)
