@@ -75,10 +75,10 @@ def memory_app(tmp_path: Path) -> PathDispatch:
 
 @asynccontextmanager
 async def serving(
-    app: Any, client: tuple[str, int] = ("127.0.0.1", 123)
+    app: Any, peer: tuple[str, int] = ("127.0.0.1", 123)
 ) -> AsyncIterator[httpx.AsyncClient]:
     """Run the ASGI lifespan through the dispatcher, as uvicorn does, then serve requests.
-    `client` is the peer address; httpx's default is loopback, like the container probe."""
+    `peer` is the client address; httpx's default is loopback, like the container probe."""
     inbox: asyncio.Queue[Message] = asyncio.Queue()
     outbox: asyncio.Queue[Message] = asyncio.Queue()
     task = asyncio.create_task(
@@ -87,7 +87,7 @@ async def serving(
     await inbox.put({"type": "lifespan.startup"})
     assert (await outbox.get())["type"] == "lifespan.startup.complete"
     try:
-        transport = httpx.ASGITransport(app=app, client=client)
+        transport = httpx.ASGITransport(app=app, client=peer)
         async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
             yield client
     finally:
@@ -152,7 +152,7 @@ async def test_build_app_serves_mcp_and_the_website_with_separate_headers(
     app = build_app(
         settings(tmp_path), engine=sqlalchemy.create_engine("sqlite://"), web_config=WEB_CONFIG
     )
-    async with serving(app, client=("203.0.113.9", 4000)) as client:
+    async with serving(app, peer=("203.0.113.9", 4000)) as client:
         denied = await client.post("/mcp", json=INIT, headers=HEADERS)
         metadata = await client.get("/.well-known/oauth-authorization-server")
         home = await client.get("/app/connect")
