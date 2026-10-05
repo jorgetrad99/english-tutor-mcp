@@ -300,6 +300,19 @@ def test_purge_deletes_only_expired_sessions(
     assert set(_session_rows(engine)) == {"2" * 64, "5" * 64}
 
 
+def test_a_two_day_idle_session_survives_the_purge(
+    engine: Engine, backend: PgWebBackend, user_id: UUID
+) -> None:
+    real_now = datetime.now(UTC)
+    two_days = real_now - timedelta(days=2)
+    backend.create_session(WebSession("a" * 63 + "1", user_id, "ca", two_days, two_days, {}))
+    assert (
+        backend.purge_expired(real_now, idle=IDLE, absolute=ABSOLUTE, anonymous=ANONYMOUS_LIFETIME)
+        == 0
+    )
+    assert set(_session_rows(engine)) == {"a" * 63 + "1"}
+
+
 def test_purge_cannot_end_live_sessions(
     engine: Engine, login_engine: Engine, backend: PgWebBackend, user_id: UUID
 ) -> None:
@@ -311,18 +324,31 @@ def test_purge_cannot_end_live_sessions(
         backend.purge_expired(future, idle=IDLE, absolute=ABSOLUTE, anonymous=ANONYMOUS_LIFETIME)
         == 0
     )
-    with pytest.raises(ValueError, match="minimum"):
+    with pytest.raises(ValueError, match="differ"):
         backend.purge_expired(
             real_now, idle=timedelta(0), absolute=ABSOLUTE, anonymous=ANONYMOUS_LIFETIME
         )
+    # The caller cannot pass lifetimes any more: the old four-argument signature is gone.
     with pytest.raises(DBAPIError), scoped_connection(login_engine) as conn:
         conn.execute(
             text(
-                "SELECT purge_expired_web_sessions(now(), interval '0', interval '30 days',"
-                " interval '0')"
+                "SELECT public.purge_expired_web_sessions(now(), interval '0',"
+                " interval '30 days', interval '0')"
             )
         )
     assert set(_session_rows(engine)) == {"6" * 64, "7" * 64}
+
+
+def test_create_session_maps_only_a_duplicate_token_to_session_exists(
+    backend: PgWebBackend, now: datetime
+) -> None:
+    from sqlalchemy.exc import IntegrityError
+
+    backend.create_session(_anon("i" * 64, now))
+    with pytest.raises(ValueError, match="session exists"):
+        backend.create_session(_anon("i" * 64, now))
+    with pytest.raises(IntegrityError):  # a foreign key violation is not "session exists"
+        backend.create_session(WebSession("j" * 64, uuid4(), "cj", now, now, {}))
 
 
 # --- DashboardReader ---------------------------------------------------------
@@ -366,6 +392,16 @@ def test_home_after_one_lesson(
     assert home.last_celebrated_session_id is None
     backend.mark_celebrated(user_id, seeded.session_id)
     assert backend.home(user_id, TODAY).last_celebrated_session_id == seeded.session_id
+
+
+def test_mark_celebrated_ignores_a_session_of_another_user(
+    backend: PgWebBackend, seeded: LessonStart, user_id: UUID, other_user_id: UUID
+) -> None:
+    backend.mark_celebrated(other_user_id, seeded.session_id)  # user A's session id
+    with scoped_connection(backend._engine, user_id=other_user_id) as conn:
+        stored = conn.execute(select(users.c.last_celebrated_session_id)).scalar_one()
+    assert stored is None
+    assert backend.home(user_id, TODAY).last_celebrated_session_id is None
 
 
 def test_home_today_is_the_next_item_when_nothing_closed_today(
@@ -618,7 +654,7 @@ def test_a_deletion_pending_user_gets_the_deletion_page_and_no_session(
     assert _events(engine, user.id) == ["user_created", "web_login"]
 
 
-def test_build_app_purges_web_sessions_in_the_server_lifespan(
+def test_build_app_installs_the_scheduled_purge_and_its_job_purges_through_the_login_role(
     engine: Engine, login_engine: Engine, backend: PgWebBackend, user_id: UUID, tmp_path: Path
 ) -> None:
     settings = replace(pg_settings(), oauth_storage_dir=tmp_path / "oauth")

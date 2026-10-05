@@ -18,7 +18,19 @@ from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import Connection, Engine, Select, delete, func, insert, select, text, update
+from psycopg.errors import UniqueViolation
+from sqlalchemy import (
+    Connection,
+    Engine,
+    Select,
+    delete,
+    exists,
+    func,
+    insert,
+    select,
+    text,
+    update,
+)
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import IntegrityError
 
@@ -49,10 +61,13 @@ from tutor.web.ports import UNCAPPED, Clock, GoogleIdentity, WebDeps, WebSession
 
 FREE = dash.Subscription(dash.Tier.FREE, dash.SubStatus.NONE, price_id="", price_cents=0)
 
-# Floors the purge function of migration 0004 enforces too.
-MIN_IDLE = MIN_ABSOLUTE = timedelta(days=1)
-MIN_ANONYMOUS = timedelta(minutes=10)
-_PURGE = text("SELECT purge_expired_web_sessions(:now, :idle, :absolute, :anonymous)")
+# Lifetimes baked into purge_expired_web_sessions (migration 0005); WebConfig must match.
+PURGE_IDLE = timedelta(days=14)
+PURGE_ABSOLUTE = timedelta(days=30)
+PURGE_ANONYMOUS = timedelta(minutes=10)
+_SESSION_PK = "web_sessions_pkey"  # the token_hash primary key (a constraint name)
+_PURGE_TIMEOUT = text("SET LOCAL statement_timeout = '5s'")
+_PURGE = text("SELECT public.purge_expired_web_sessions(:now)")
 
 _SESSION_COLUMNS = (
     sessions.c.id,
@@ -308,8 +323,11 @@ class PgWebBackend:
                         last_seen_at=session.last_seen_at,
                     )
                 )
-        except IntegrityError:
-            raise ValueError("session exists") from None  # no driver text past this point
+        except IntegrityError as exc:
+            orig = exc.orig
+            if isinstance(orig, UniqueViolation) and orig.diag.constraint_name == _SESSION_PK:
+                raise ValueError("session exists") from None  # no driver text past this point
+            raise
 
     def touch_session(self, token_hash: str, last_seen_at: datetime, data: dict[str, Any]) -> bool:
         """`UPDATE ... WHERE token_hash` only, never an upsert: a row deleted meanwhile (logout
@@ -345,13 +363,13 @@ class PgWebBackend:
         self, now: datetime, *, idle: timedelta, absolute: timedelta, anonymous: timedelta
     ) -> int:
         """Delete every expired web session; returns how many. RLS hides other people's rows
-        from tutor_app, so this calls migration 0004's function, which only deletes rows
-        expired by the database clock and refuses lifetimes below the floors."""
-        if idle < MIN_IDLE or absolute < MIN_ABSOLUTE or anonymous < MIN_ANONYMOUS:
-            raise ValueError("web session lifetimes below the minimum")
-        params = {"now": now, "idle": idle, "absolute": absolute, "anonymous": anonymous}
+        from tutor_app, so this calls migration 0005's function. It takes only the clock and
+        applies its own lifetimes, so the arguments here must equal them."""
+        if (idle, absolute, anonymous) != (PURGE_IDLE, PURGE_ABSOLUTE, PURGE_ANONYMOUS):
+            raise ValueError("web session lifetimes differ from the database function")
         with scoped_connection(self._engine) as conn:
-            return int(conn.execute(_PURGE, params).scalar_one())
+            conn.execute(_PURGE_TIMEOUT)  # transaction-local: a stuck purge cannot hold a worker
+            return int(conn.execute(_PURGE, {"now": now}).scalar_one())
 
     # --- DashboardReader ---------------------------------------------------
 
@@ -660,7 +678,10 @@ class PgWebBackend:
         with scoped_connection(self._engine, user_id=user_id) as conn:
             conn.execute(
                 update(users)
-                .where(users.c.id == user_id)
+                .where(
+                    users.c.id == user_id,
+                    exists().where(sessions.c.id == session_id, sessions.c.user_id == user_id),
+                )
                 .values(last_celebrated_session_id=session_id)
             )
 

@@ -30,7 +30,13 @@ from tutor.services.context import Services
 from tutor.settings import Settings
 from tutor.web.app import create_app
 from tutor.web.config import WebConfig
-from tutor.web.pg import PgWebBackend, pg_web_deps
+from tutor.web.pg import (
+    PURGE_ABSOLUTE,
+    PURGE_ANONYMOUS,
+    PURGE_IDLE,
+    PgWebBackend,
+    pg_web_deps,
+)
 from tutor.web.sessions import ANONYMOUS_LIFETIME
 
 Scope = MutableMapping[str, Any]
@@ -186,7 +192,7 @@ class PeriodicPurge:
     async def _loop(self) -> None:
         while True:
             try:
-                deleted = await anyio.to_thread.run_sync(self.job)
+                deleted = await anyio.to_thread.run_sync(self.job, abandon_on_cancel=True)
                 _web_log.info(json.dumps({"event": "web_sessions_purged", "deleted": deleted}))
             except Exception as exc:  # never the message: it can carry driver details
                 _web_log.error("web session purge failed exc=%s", type(exc).__name__)
@@ -202,12 +208,16 @@ class PeriodicPurge:
             nonlocal task
             if message["type"] == "lifespan.startup.complete" and task is None:
                 task = asyncio.create_task(self._loop())
-            elif message["type"].startswith("lifespan.shutdown") and task is not None:
-                task.cancel()
             await send(message)
 
+        async def listen() -> Message:
+            message = await receive()
+            if message["type"] == "lifespan.shutdown" and task is not None:
+                task.cancel()  # before the inner app starts its own shutdown
+            return message
+
         try:
-            await self.app(scope, receive, watch)
+            await self.app(scope, listen, watch)
         finally:
             if task is not None:
                 task.cancel()
@@ -285,6 +295,9 @@ def _session_purge(
 ) -> Callable[[], int]:
     idle = timedelta(days=config.session_idle_days)
     absolute = timedelta(days=config.session_max_days)
+    if (idle, absolute, ANONYMOUS_LIFETIME) != (PURGE_IDLE, PURGE_ABSOLUTE, PURGE_ANONYMOUS):
+        # The database function (migration 0005) has these lifetimes built in.
+        raise SystemExit("web session lifetimes must be 14 days idle, 30 days absolute")
 
     def purge() -> int:
         return store.purge_expired(

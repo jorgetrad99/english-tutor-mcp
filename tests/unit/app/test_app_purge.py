@@ -100,3 +100,79 @@ async def test_http_passes_through() -> None:
     app = PeriodicPurge(lifespan_app, lambda: 0)
     await app({"type": "http", "method": "GET", "path": "/"}, receive, send)
     assert sent[0]["status"] == 204
+
+
+@pytest.mark.asyncio
+async def test_shutdown_is_not_blocked_by_a_running_purge() -> None:
+    started, release = threading.Event(), threading.Event()
+    seen_by_inner: list[bool] = []
+
+    def job() -> int:
+        started.set()
+        release.wait(10)  # a stuck purge
+        return 0
+
+    async def inner(scope: Scope, receive: Any, send: Any) -> None:
+        while True:
+            message = await receive()
+            if message["type"] == "lifespan.startup":
+                await send({"type": "lifespan.startup.complete"})
+            elif message["type"] == "lifespan.shutdown":
+                await asyncio.sleep(0.05)  # the inner shutdown takes a moment
+                seen_by_inner.append(True)
+                await send({"type": "lifespan.shutdown.complete"})
+                return
+
+    try:
+        await asyncio.wait_for(run_lifespan(PeriodicPurge(inner, job, every_s=0.01), started), 3)
+    finally:
+        release.set()
+    assert started.is_set()
+    assert seen_by_inner == [True]
+
+
+@pytest.mark.asyncio
+async def test_the_periodic_task_is_cancelled_as_soon_as_shutdown_is_received() -> None:
+    calls: list[int] = []
+    ready = threading.Event()
+    after_shutdown: list[int] = []
+    shutdown_seen = asyncio.Event()
+
+    def job() -> int:
+        calls.append(1)
+        ready.set()
+        if shutdown_seen.is_set():
+            after_shutdown.append(1)
+        return 0
+
+    async def inner(scope: Scope, receive: Any, send: Any) -> None:
+        while True:
+            message = await receive()
+            if message["type"] == "lifespan.startup":
+                await send({"type": "lifespan.startup.complete"})
+            elif message["type"] == "lifespan.shutdown":
+                shutdown_seen.set()
+                await asyncio.sleep(0.2)  # slow inner shutdown; the loop must not tick now
+                await send({"type": "lifespan.shutdown.complete"})
+                return
+
+    await run_lifespan(PeriodicPurge(inner, job, every_s=0.01), ready)
+    assert after_shutdown == []
+
+
+def test_build_time_check_rejects_lifetimes_the_database_function_does_not_have() -> None:
+    from datetime import UTC, datetime
+    from unittest.mock import MagicMock
+
+    from tutor.app import _session_purge
+    from tutor.web.config import WebConfig
+
+    config = WebConfig(
+        env="dev",
+        base_url="http://localhost:8000",
+        mcp_url="http://localhost:8000/mcp",
+        support_email="a@example.com",
+        session_idle_days=7,
+    )
+    with pytest.raises(SystemExit, match="14 days idle"):
+        _session_purge(MagicMock(), config, lambda: datetime.now(UTC))

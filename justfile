@@ -25,7 +25,7 @@ lint:
 
 # Unit tests only
 test:
-    uv run pytest -m "not integration and not eval" -q
+    uv run pytest -m "not integration and not eval" -q -n 3
 
 # Integration tests against db-test
 test-int:
@@ -44,7 +44,7 @@ serve:
 check-fast:
     uv run ruff check .
     uv run mypy
-    uv run pytest -m "not integration and not eval" -q -x
+    uv run pytest -m "not integration and not eval" -q -n 3 -x
 
 # Full gate: lint, all non-eval tests, coverage (>= 90% on tutor/domain), dependency audit
 check: lint
