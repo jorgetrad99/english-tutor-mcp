@@ -393,3 +393,23 @@ def test_stripe_webhook_path_is_not_exempt(config: WebConfig) -> None:
 
     with pytest.raises(RuntimeError, match="/webhooks/stripe"):
         assert_csrf_everywhere(bare, config)
+
+
+def test_csrf_if_session_is_accepted_only_on_logout(config: WebConfig) -> None:
+    from tutor.web.deps import require_csrf_if_session
+
+    ok = FastAPI()
+
+    @ok.post("/auth/logout", dependencies=[Depends(require_csrf_if_session)])
+    async def logout() -> PlainTextResponse:
+        return PlainTextResponse("x")
+
+    assert_csrf_everywhere(ok, config)
+    bad = FastAPI()
+
+    @bad.post("/app/sneaky", dependencies=[Depends(require_csrf_if_session)])
+    async def sneaky() -> PlainTextResponse:
+        return PlainTextResponse("x")
+
+    with pytest.raises(RuntimeError, match="/app/sneaky"):
+        assert_csrf_everywhere(bad, config)

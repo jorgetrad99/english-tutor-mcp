@@ -89,7 +89,7 @@ async def require_csrf_if_session(request: Request) -> None:
 
 
 APP_ROUTER_DEPS = [Depends(require_csrf)]
-_CSRF_GUARDS = (require_csrf, require_csrf_if_session)
+LOGOUT_PATH = "/auth/logout"
 
 
 def _depends_on(dependant: Dependant, call: object) -> bool:
@@ -102,15 +102,20 @@ def csrf_exempt_paths(config: WebConfig) -> frozenset[str]:
 
 
 def assert_csrf_everywhere(app: FastAPI, config: WebConfig) -> None:
-    """Fail at startup if an unsafe-method route forgot `require_csrf`."""
+    """Fail at startup if an unsafe-method route forgot `require_csrf`.
+
+    `require_csrf_if_session` counts only on `/auth/logout`."""
     exempt = csrf_exempt_paths(config)
     for route in app.routes:
         if not isinstance(route, APIRoute) or route.path in exempt:
             continue
-        if ((route.methods or set()) - _SAFE_METHODS) and not any(
-            _depends_on(route.dependant, guard) for guard in _CSRF_GUARDS
-        ):
-            raise RuntimeError(f"route {route.path} accepts unsafe methods without require_csrf")
+        if not ((route.methods or set()) - _SAFE_METHODS):
+            continue
+        if _depends_on(route.dependant, require_csrf):
+            continue
+        if route.path == LOGOUT_PATH and _depends_on(route.dependant, require_csrf_if_session):
+            continue  # the only route where "no session, nothing to forge" is accepted
+        raise RuntimeError(f"route {route.path} accepts unsafe methods without require_csrf")
 
 
 def login_redirect_target(next_path: str) -> str:
