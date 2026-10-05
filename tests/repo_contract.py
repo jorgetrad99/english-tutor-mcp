@@ -8,7 +8,7 @@ identity resolver, with seeded track ids, so the same tests run on memory and on
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import date, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
@@ -297,7 +297,9 @@ class RepoContract:
         # here would swallow Task 16's placeholder repositories instead of letting them xfail.
         with pytest.raises(ContractAbort), uow_factory(user_id) as uow:
             uow.profiles.upsert(sample_profile(timezone=NEW_YORK), now)
-            start_session(uow, first_item(uow), now)
+            aborted = start_session(uow, first_item(uow), now)
+            uow.plans.create(planned_items(uow.track.items("it")), RATIONALE, now)
+            insert_glossary(uow, aborted.id, "ship it", now)
             uow.audit.record("profile_saved", {"plan_inputs_changed": True}, now)
             raise ContractAbort
         with uow_factory(user_id) as uow:
@@ -305,6 +307,8 @@ class RepoContract:
             assert uow.users.timezone() == DEFAULT_TIMEZONE
             assert uow.sessions.open_session() is None
             assert uow.sessions.count_started_since(now - timedelta(days=1)) == 0
+            assert uow.plans.active() is None
+            assert dict(uow.glossary.by_norms(["ship it"])) == {}
 
     def test_identity_resolves_by_sub_never_by_email(
         self, identity: IdentityResolver, now: datetime
@@ -1126,6 +1130,52 @@ class RepoContract:
             uow.reviews.set_log_rating(session.id, row.id, 1)
         with uow_factory(user_id) as uow:
             assert uow.reviews.session_logs(session.id)[0].rating == 3
+
+    def test_writes_against_another_users_rows_raise_lookup_error(
+        self, uow_factory: UowFactory, user_id: UUID, other_user_id: UUID, now: datetime
+    ) -> None:
+        with uow_factory(user_id) as uow:
+            session = start_session(uow, first_item(uow), now)
+            row = insert_glossary(uow, session.id, "ship it", now)
+            state = present(uow.reviews.state(row.id))
+        reinforce = Reinforce(
+            index=0, item_id=row.id, kind="correction", seen_count=9, leech=True, due=now
+        )
+        attempts: list[Callable[[UnitOfWork], object]] = [
+            lambda u: u.sessions.save_metrics(session.id, sample_metrics()),
+            lambda u: u.sessions.save_errors(session.id, [RECENT_ERROR]),
+            lambda u: u.reviews.save_state(row.id, new_state(now)),
+            lambda u: u.reviews.log(session.id, row.id, 3, now, state),
+            lambda u: u.glossary.apply(
+                [reinforce], [incoming("ship it")], session_id=session.id, now=now
+            ),
+        ]
+        for attempt in attempts:
+            with pytest.raises(LookupError), uow_factory(other_user_id) as uow:
+                attempt(uow)
+        with uow_factory(user_id) as uow:
+            assert uow.glossary.get_many([row.id])[row.id] == row
+            assert uow.reviews.state(row.id) == state
+            assert uow.reviews.session_logs(session.id) == ()
+            assert uow.sessions.recent_correct_norms(now - timedelta(days=1), uuid4()) == (
+                frozenset()
+            )
+
+    def test_session_logs_with_equal_timestamps_are_stable_and_complete(
+        self, uow_factory: UowFactory, user_id: UUID, now: datetime
+    ) -> None:
+        with uow_factory(user_id) as uow:
+            session = start_session(uow, first_item(uow), now)
+            items = [insert_glossary(uow, session.id, t, now) for t in ("ship it", "roll back")]
+            for row in items:
+                before = present(uow.reviews.state(row.id))
+                assert uow.reviews.log(session.id, row.id, 3, now, before) is True
+        with uow_factory(user_id) as uow:
+            first = uow.reviews.session_logs(session.id)
+            second = uow.reviews.session_logs(session.id)
+        assert first == second
+        assert {log.item_id for log in first} == {r.id for r in items}
+        assert all(log.reviewed_at == now for log in first)
 
     # Audit
 

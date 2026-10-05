@@ -695,7 +695,7 @@ class MemoryReviewRepo(_Repo):
                 for e in self._t.review_logs
                 if e.user_id == self._uid and e.session_id == session_id
             ),
-            key=lambda e: e.reviewed_at,
+            key=lambda e: (e.reviewed_at, str(e.id)),
         )
         return tuple(
             ReviewLogRow(

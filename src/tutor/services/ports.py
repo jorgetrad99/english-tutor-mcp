@@ -1,7 +1,10 @@
 """Repository ports and row types for the use cases.
 
-Every method acts on the unit of work's user only; another user's rows are invisible and writes
-to them are no-ops. Implementations: tutor.services.memory (tests) and tutor.db (Postgres, RLS).
+Every method acts on the unit of work's user only; another user's rows are invisible. Writes to
+them are no-ops (close, mark_incomplete, mark_done, set_log_rating), except save_metrics,
+save_errors, save_state, log and apply, which raise LookupError when the referenced session or
+glossary item is not visible to the user.
+Implementations: tutor.services.memory (tests) and tutor.db (Postgres, RLS).
 These docstrings are the semantics; tests/repo_contract.py pins them on both backends.
 """
 
@@ -203,10 +206,10 @@ class SessionRepo(Protocol):
         """track_item_id -> newest ended_at among closed sessions."""
 
     def save_metrics(self, session_id: UUID, metrics: SessionMetrics) -> None:
-        """Insert or replace the session's metrics row."""
+        """Insert or replace the session's metrics row. Raises LookupError if not the user's."""
 
     def save_errors(self, session_id: UUID, errors: Sequence[ValidError]) -> None:
-        """Replace the session's validated errors."""
+        """Replace the session's validated errors. Raises LookupError if not the user's."""
 
     def recent_correct_norms(self, since: datetime, exclude: UUID) -> frozenset[str]:
         """correct_norm of errors saved for closed sessions with ended_at >= since,
@@ -233,7 +236,8 @@ class GlossaryRepo(Protocol):
         is set; unique (user, text_norm). Reinforce: kind, seen_count, leech, last_seen,
         updated_at, and the review state's due (new_state(due) if none). Promote: confirmed,
         no expiry, review state new_state(first_due). SetStatus: status and expiry. Reject is
-        ignored; `items` is informational and meaning/context never change after insert."""
+        ignored; `items` is informational and meaning/context never change after insert.
+        Raises LookupError if an action targets an item that is not the user's."""
 
     def due_candidates(self, now: datetime) -> tuple[DueCandidate, ...]:
         """Confirmed items whose review state due <= now, ordered by (due, id); last_ratings
@@ -258,12 +262,13 @@ class ReviewRepo(Protocol):
         """The item's FSRS state, or None."""
 
     def save_state(self, item_id: UUID, state: FsrsState) -> None:
-        """Insert or replace the item's FSRS state."""
+        """Insert or replace the item's FSRS state. Raises LookupError if not the user's."""
 
     def log(
         self, session_id: UUID, item_id: UUID, rating: int, now: datetime, state_before: FsrsState
     ) -> bool:
-        """Append a review log; False (and nothing written) if (session, item) is logged."""
+        """Append a review log; False (and nothing written) if (session, item) is logged.
+        Raises LookupError if the session or item is not the user's."""
 
     def session_logs(self, session_id: UUID) -> tuple[ReviewLogRow, ...]:
         """The session's logs ordered by (reviewed_at, id)."""
