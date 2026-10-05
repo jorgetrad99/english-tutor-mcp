@@ -1,0 +1,82 @@
+# Production stack on the homelab (core loop v0; runbook: docs/v0/runbook.md).
+# Run from deploy/:  docker compose -f compose.prod.yml up -d --build
+# Nothing is published on the host; cloudflared reaches the app over the tutor network.
+#
+# Database roles (three, never one owner URL for the app):
+#   db.env / migrate.env  owner       -> migrate service only (migrations, role provisioning)
+#   tutor.env             app login   -> app service only (DATABASE_URL, no owner credentials)
+#   tutor_report          gate report -> on demand, GATE_REPORT_DATABASE_URL (runbook)
+name: tutor
+
+services:
+  db:
+    image: postgres:16 # PostgreSQL 16 or later is required (see runbook)
+    restart: unless-stopped
+    env_file: db.env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [tutor]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: tutor:latest
+    # alembic upgrade head, then create/update the app login role and tutor_report.
+    entrypoint: ["tutor-migrate"]
+    restart: "no"
+    env_file: migrate.env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [tutor]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    read_only: true
+
+  app:
+    image: tutor:latest
+    restart: unless-stopped
+    env_file: tutor.env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - oauth:/data/oauth
+    networks: [tutor]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: ["/tmp"]
+    # The image HEALTHCHECK calls an MCP-side path; website paths reject any Host but the public one.
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest # pin to a digest after the first pull (runbook)
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    env_file: tunnel.env
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      tutor:
+        ipv4_address: 172.30.10.3 # the only FORWARDED_ALLOW_IPS entry
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    read_only: true
+
+networks:
+  tutor:
+    ipam:
+      config:
+        - subnet: 172.30.10.0/24
+
+volumes:
+  pgdata:
+  oauth:
