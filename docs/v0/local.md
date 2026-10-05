@@ -1,10 +1,66 @@
 # Run the real app on your machine (Windows)
 
-Website and MCP server in one process on port 8000, backed by the dev Postgres (compose service
-`db`, port 5432), reachable from claude.ai and the Claude mobile app through a second hostname on
-the spike's Cloudflare tunnel. Example host: `tutor.develancoders.com`. The spike stays on
-`tutor-spike.develancoders.com` (port 8765) and keeps running untouched. Never use `db-test`
-(5433). Commands run from the repo root. Offline variant: section 8.
+Website and MCP server in one process on port 8000, reachable from claude.ai and the Claude mobile
+app through a second hostname on the spike's Cloudflare tunnel. Example host:
+`tutor.develancoders.com`. The spike stays on `tutor-spike.develancoders.com` (port 8765) and keeps
+running untouched. Never use `db-test` (5433). Commands run from the repo root.
+
+**The spike connector (`https://tutor-spike.develancoders.com/mcp`) is a different server with 2
+tools. The product is a NEW connector at `https://tutor.develancoders.com/mcp` with 6 tools:** add it
+as a separate custom connector in claude.ai. If a connector's tool list looks stale after a server
+change, remove and re-add the connector (or disconnect and reconnect) and start a new chat.
+
+## Run with Docker (recommended)
+
+Database, migrations and app in one stack (`deploy/compose.local.yml`, project `tutor-local`): the
+production image and the three database roles, with its own volumes. It does not touch the dev
+`db` (5432) or `db-test` (5433). The app is published on `127.0.0.1:8000` only; the database is not
+published. Your existing host tunnel does the rest.
+
+1. Copy the env examples (git-ignored copies, `deploy/*.env`):
+
+   ```
+   cp deploy/db.env.example deploy/local-db.env
+   cp deploy/migrate.env.example deploy/local-migrate.env
+   cp deploy/local-docker.env.example deploy/local-docker.env
+   ```
+
+   PowerShell: `Copy-Item` with the same names.
+2. Generate secrets and edit the three files by hand (every `<placeholder>` must go):
+
+   ```
+   uv run python -c "import secrets; print(secrets.token_urlsafe(48))"   # TUTOR_JWT_SIGNING_KEY
+   uv run python -c "import secrets; print(secrets.token_urlsafe(48))"   # TUTOR_WEB_SESSION_SECRET
+   uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"   # TUTOR_OAUTH_STORAGE_KEY
+   uv run python -c "import secrets; print(secrets.token_hex(24))"   # POSTGRES_PASSWORD, APP_DB_PASSWORD, REPORT_DB_PASSWORD (three different)
+   ```
+
+   - `local-db.env`: `POSTGRES_USER=tutor_owner`, the password, `POSTGRES_DB=tutor`.
+   - `local-migrate.env`: `MIGRATION_DATABASE_URL=postgresql://tutor_owner:<POSTGRES_PASSWORD>@db:5432/tutor`
+     plus `APP_DB_PASSWORD` and `REPORT_DB_PASSWORD`.
+   - `local-docker.env`: the three app secrets, and `DATABASE_URL=postgresql://tutor_login:<APP_DB_PASSWORD>@db:5432/tutor`.
+3. Paste the spike's Google client id and secret into `local-docker.env` (`GOOGLE_CLIENT_ID`,
+   `GOOGLE_CLIENT_SECRET`), and add the redirect URIs of step 4 in Google.
+4. `uv run just up-local` builds the image, migrates, creates the roles and starts the app
+   (detached; first build takes a few minutes). Other recipes: `logs-local`, `down-local` (keeps
+   data), `reset-local` (DESTRUCTIVE: also deletes the database, roles and OAuth registrations).
+5. Tunnel hostname: step 5 below (`tutor.develancoders.com` -> `http://127.0.0.1:8000`).
+6. Connect Claude: step 7 below.
+
+`FORWARDED_ALLOW_IPS=172.31.90.1`: traffic that enters through Docker's published port reaches
+uvicorn from the gateway of the `edge` network, not from 127.0.0.1 (verified on Docker Desktop for
+Windows). `compose.local.yml` pins that network to `172.31.90.0/24` with gateway `172.31.90.1` so
+the value is stable; if the subnet collides with your LAN, change both together. Never `*`.
+
+Smoke check from the host:
+`curl -H "Host: tutor.develancoders.com" -H "X-Forwarded-Proto: https" http://127.0.0.1:8000/login`
+is 200, `/.well-known/oauth-protected-resource/mcp` shows resource
+`https://tutor.develancoders.com/mcp`, and `POST /mcp` without a token is 401.
+
+## Alternative: run on the host with uv
+
+Steps 1 to 4 and 6 below use the dev `db` (5432) and `deploy/local.env`; the Docker path above
+replaces them.
 
 ## 1. Database
 
@@ -96,7 +152,7 @@ Cloudflare dashboard for the new hostname (rationale and details: [runbook.md](r
 uv run --env-file deploy/local.env python -m tutor
 ```
 
-or `uv run just serve-local`. Leave it running (Ctrl+C stops it). Checks:
+or `uv run just serve-local` (host alternative). Leave it running (Ctrl+C stops it). Checks:
 
 ```
 curl -s https://tutor.develancoders.com/.well-known/oauth-protected-resource/mcp

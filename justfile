@@ -81,3 +81,19 @@ inspector:
 # Dashboard over in-memory demo data (no Google, no Stripe); open http://localhost:8780/auth/test-login
 dashboard-demo:
     uv run uvicorn tutor.web.demo_server:app --port 8780 --reload
+
+# Local Docker stack for the real app (project tutor-local; docs/v0/local.md): build, migrate, start
+up-local:
+    docker compose -f deploy/compose.local.yml up -d --build --wait app
+
+# Stop the local stack (keeps its database and OAuth volumes)
+down-local:
+    docker compose -f deploy/compose.local.yml down
+
+# Follow the local app logs
+logs-local:
+    docker compose -f deploy/compose.local.yml logs -f --tail 100 app
+
+# DESTRUCTIVE: stops the local stack and deletes its volumes (database, roles, OAuth registrations)
+reset-local:
+    docker compose -f deploy/compose.local.yml down --volumes

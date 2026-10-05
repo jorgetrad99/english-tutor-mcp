@@ -134,3 +134,24 @@ def test_host_scripts_are_executable_in_git(script: str) -> None:
         text=True,
     ).stdout
     assert out.startswith("100755 "), out
+
+
+def test_local_compose_publishes_only_the_app_on_loopback() -> None:
+    doc = yaml.safe_load((DEPLOY / "compose.local.yml").read_text(encoding="utf-8"))
+    assert doc["name"] == "tutor-local"  # cannot collide with the dev or production projects
+    services = doc["services"]
+    assert services["app"]["ports"] == ["127.0.0.1:8000:8000"]
+    assert "ports" not in services["db"]
+    assert "ports" not in services["migrate"]
+    assert "cloudflared" not in services
+    assert services["app"]["env_file"] == "local-docker.env"
+    assert services["migrate"]["env_file"] == "local-migrate.env"
+    assert services["db"]["env_file"] == "local-db.env"
+    assert "@sha256:" in services["db"]["image"]
+    gateway = ip_address(doc["networks"]["edge"]["ipam"]["config"][0]["gateway"])
+    allowed = dict(
+        line.split("=", 1)
+        for line in (DEPLOY / "local-docker.env.example").read_text(encoding="utf-8").splitlines()
+        if line and not line.startswith("#")
+    )["FORWARDED_ALLOW_IPS"]
+    assert allowed == str(gateway)
