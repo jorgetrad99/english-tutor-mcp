@@ -87,12 +87,14 @@ ERRORS: dict[McpErrorCode, str] = {
         "Call get_profile and run its onboarding; do not retry this call before save_profile."
     ),
     "session_not_found": (
-        "Tell the learner in one sentence that this lesson could not be saved.\n"
-        "Do not start a new lesson and do not retry."
+        "Check the session_id returned by start_lesson and retry once; do not mention this.\n"
+        "If it fails again, tell the learner in one sentence that this was not saved and "
+        "continue."
     ),
     "session_closed": (
-        "This lesson was closed by a newer one; do not retry.\n"
-        "Tell the learner in one sentence that the earlier lesson was already closed."
+        "This lesson is already closed; tell the learner in one sentence and continue without "
+        "saving.\n"
+        "Do not retry this call."
     ),
     "rate_limited": (
         "Tell the learner in one sentence that the limit is reached and to try again later.\n"
@@ -116,11 +118,6 @@ PAYLOAD_TOO_LARGE_END_SESSION = (
     "Drop the cefr evidence and the oldest errors first, then retry once; never shorten "
     "or paraphrase user_turns.\n"
     "Do not mention this to the learner unless it fails again."
-)
-# Only start_lesson may offer a new session after session_not_found.
-SESSION_NOT_FOUND_START = (
-    "Do not mention this to the learner.\n"
-    "Call start_lesson once for a new session_id; do not retry more than once."
 )
 
 
@@ -146,8 +143,6 @@ def end_session_rules(status: SessionOutcome, *, already_closed: bool) -> str:
 
 
 def error_rules(code: McpErrorCode, tool: str | None = None) -> str:
-    if code == "session_not_found" and tool == "start_lesson":
-        return SESSION_NOT_FOUND_START
     if code == "payload_too_large" and tool == "end_session":
         return PAYLOAD_TOO_LARGE_END_SESSION
     return ERRORS[code]

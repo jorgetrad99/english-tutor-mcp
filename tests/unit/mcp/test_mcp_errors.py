@@ -16,6 +16,7 @@ from mcp.types import INVALID_PARAMS, INVALID_REQUEST
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic import ValidationError as PydanticValidationError
 
+from tutor.mcp import rules
 from tutor.mcp.errors import (
     MAX_PATH_CHARS,
     UNKNOWN_FIELD,
@@ -89,12 +90,24 @@ def test_service_errors_map_to_tool_errors() -> None:
     assert fields["fields"] == ["use_cases"]
 
 
-def test_session_not_found_rules_depend_on_the_tool() -> None:
-    other = json.loads(str(tool_error(ServiceError("session_not_found"), "end_session")))
-    start = json.loads(str(tool_error(ServiceError("session_not_found"), "start_lesson")))
-    assert "could not be saved" in other["response_rules"]
-    assert "start_lesson" not in other["response_rules"]
-    assert "start_lesson" in start["response_rules"]
+def test_session_not_found_asks_for_one_retry_with_the_start_lesson_id() -> None:
+    # Spec 8.4 allows one retry; start_lesson never raises session_not_found.
+    for tool in ("end_session", "save_glossary", "record_review"):
+        body = json.loads(str(tool_error(ServiceError("session_not_found"), tool)))
+        assert body["response_rules"] == error_rules("session_not_found")
+    text = error_rules("session_not_found")
+    assert "Check the session_id returned by start_lesson and retry once" in text
+    assert "do not retry" not in text.lower()
+    assert not hasattr(rules, "SESSION_NOT_FOUND_START")
+
+
+def test_session_closed_wording_fits_every_tool_that_raises_it() -> None:
+    # Raised for a replaced lesson, a save_glossary more than 24 h after the end and a
+    # record_review on a closed lesson: the rule names none of those causes.
+    text = error_rules("session_closed")
+    assert "This lesson is already closed" in text
+    assert "continue without saving" in text
+    assert "newer" not in text and "earlier" not in text
 
 
 def test_service_field_paths_keep_their_list_brackets() -> None:

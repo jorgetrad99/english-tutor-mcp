@@ -42,7 +42,6 @@ def all_rules() -> list[str]:
     found += [rules.end_session_rules(s, already_closed=False) for s in get_args(SessionOutcome)]
     found += [rules.end_session_rules(s, already_closed=True) for s in get_args(SessionOutcome)]
     found += [rules.error_rules(c) for c in (*get_args(ErrorCode), "internal_error")]
-    found.append(rules.error_rules("session_not_found", "start_lesson"))
     found.append(rules.error_rules("payload_too_large", "end_session"))
     return found
 
