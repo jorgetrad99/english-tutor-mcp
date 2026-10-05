@@ -270,3 +270,150 @@ msgstr "Check again"
 
 msgid "Esperando tu primera sesión…"
 msgstr "Waiting for your first session…"
+
+msgid "Hola, %(name)s"
+msgstr "Hi, %(name)s"
+
+msgid "Sesión guardada. Buen trabajo."
+msgstr "Session saved. Nice work."
+
+msgid "Tu siguiente paso"
+msgstr "Your next step"
+
+msgid "Haz tu diagnóstico en el chat: di <code lang=\"en\">start my lesson</code>."
+msgstr "Take your diagnostic in the chat: say <code lang=\"en\">start my lesson</code>."
+
+msgid "Práctica de hoy"
+msgstr "Today's practice"
+
+msgid "Hoy no hay práctica en tu plan"
+msgstr "No practice planned for today"
+
+msgid "Si tienes una reunión pronto, prepárala igual."
+msgstr "If you have a meeting soon, prepare for it anyway."
+
+msgid "Copiar frase"
+msgstr "Copy phrase"
+
+msgid "¿Tienes una reunión? Di <code lang=\"en\">prepare me for tomorrow's demo</code> y la lección se arma alrededor de ella."
+msgstr "Got a meeting? Say <code lang=\"en\">prepare me for tomorrow's demo</code> and the lesson is built around it."
+
+msgid "Ver plan"
+msgstr "See plan"
+
+msgid "Tu semana"
+msgstr "Your week"
+
+msgid "día seguido"
+msgstr "day in a row"
+
+msgid "días seguidos"
+msgstr "days in a row"
+
+msgid "Días seguidos: %(n)s"
+msgstr "Days in a row: %(n)s"
+
+msgid "Frases de la semana"
+msgstr "This week's phrases"
+
+msgid "usada en una sesión"
+msgstr "used in a session"
+
+msgid "aún sin usar"
+msgstr "not used yet"
+
+msgid "Se marcan cuando las usas en una sesión."
+msgstr "They're marked when you use them in a session."
+
+msgid "Las frases de tu próxima lección aparecerán aquí."
+msgstr "Your next lesson's phrases will appear here."
+
+msgid "Última sesión"
+msgstr "Last session"
+
+msgid "%(minutes)s min"
+msgstr "%(minutes)s min"
+
+msgid "%(wpm)s palabras por minuto"
+msgstr "%(wpm)s words per minute"
+
+msgid "Ver detalle"
+msgstr "See details"
+
+msgid "Pendiente"
+msgstr "To do"
+
+msgid "repasos esperan en tu próxima lección"
+msgstr "reviews waiting in your next lesson"
+
+msgid "frases por confirmar"
+msgstr "phrases to confirm"
+
+msgid "Se te preguntará al iniciar tu próxima sesión."
+msgstr "You'll be asked when your next session starts."
+
+msgid "Ver glosario"
+msgstr "See glossary"
+
+msgid "Reporte de la semana del %(when)s"
+msgstr "Report for the week of %(when)s"
+
+msgid "sesiones hechas de %(planned)s planeadas"
+msgstr "sessions done of %(planned)s planned"
+
+msgid "minutos hablando"
+msgstr "minutes speaking"
+
+msgid "errores que dejaste de cometer"
+msgstr "mistakes you stopped making"
+
+msgid "frases activadas"
+msgstr "phrases activated"
+
+msgid "Ver reportes"
+msgstr "See reports"
+
+msgid "+%(extra)s prep"
+msgstr "+%(extra)s prep"
+
+msgid "Hecho"
+msgstr "Done"
+
+msgid "Hoy"
+msgstr "Today"
+
+msgid "Próximo"
+msgstr "Upcoming"
+
+msgid "Sin sesión"
+msgstr "No session"
+
+msgid "Descanso"
+msgstr "Rest"
+
+msgid "Voz"
+msgstr "Voice"
+
+msgid "Texto"
+msgstr "Text"
+
+msgid "Logrado"
+msgstr "Achieved"
+
+msgid "Parcial"
+msgstr "Partial"
+
+msgid "No logrado"
+msgstr "Not achieved"
+
+msgid "Incompleta"
+msgstr "Incomplete"
+
+msgid "En curso"
+msgstr "In progress"
+
+msgid "Baja confianza"
+msgstr "Low trust"
+
+msgid "Completa"
+msgstr "Complete"

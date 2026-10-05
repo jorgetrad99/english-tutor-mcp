@@ -1,0 +1,21 @@
+{% import "macros/labels.html" as labels %}
+<div class="trail">
+  <svg class="trail__svg" viewBox="0 0 320 96" aria-hidden="true" focusable="false">
+    <path class="trail__path" d="{{ trail.path }}" fill="none"></path>
+    <path class="trail__path trail__path--walked" d="{{ trail.walked }}" fill="none" data-draw></path>
+    {% for n in trail.nodes %}
+    <circle class="trail__node trail__node--{{ n.node.state }}{% if n.node.is_today %} trail__node--is-today{% endif %}" cx="{{ n.x }}" cy="{{ n.y }}" r="{{ 11 if n.node.is_today else 8 }}"></circle>
+    {% if n.node.extra_sessions %}<circle class="trail__extra" cx="{{ n.x + 12 }}" cy="{{ n.y - 12 }}" r="4"></circle>{% endif %}
+    {% endfor %}
+  </svg>
+  <ol class="trail__days">
+    {% for n in trail.nodes %}
+    <li class="trail__label trail__label--{{ n.node.state }}" data-day="{{ n.node.day.isoformat() }}"{% if n.node.is_today %} aria-current="date"{% endif %}>
+      <span class="trail__day">{{ n.node.day|day("short") }}</span>
+      <span class="trail__state">{{ labels.trail_state(n.node.state) }}</span>
+      {% if n.node.title %}<span class="sr-only">{{ n.node.title }}</span>{% endif %}
+      {% if n.node.extra_sessions %}<span class="trail__extra-label">{% trans extra=n.node.extra_sessions %}+{{ extra }} prep{% endtrans %}</span>{% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+</div>

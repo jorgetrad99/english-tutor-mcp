@@ -1,0 +1,17 @@
+{# Labels and chips shared by the pages. Import with: import "macros/labels.html" as labels #}
+{% macro mode_label(mode) %}{% if mode == "voice" %}{{ _("Voz") }}{% else %}{{ _("Texto") }}{% endif %}{% endmacro %}
+
+{% macro client_label(client) %}{% if client == "chatgpt" %}ChatGPT{% elif client == "code" %}Claude Code{% else %}Claude{% endif %}{% endmacro %}
+
+{% macro result_label(result) %}{% if result == "achieved" %}{{ _("Logrado") }}{% elif result == "partial" %}{{ _("Parcial") }}{% elif result == "not_achieved" %}{{ _("No logrado") }}{% else %}—{% endif %}{% endmacro %}
+
+{% macro status_chip(s) %}{% if s.status == "incomplete" %}<span class="chip chip--muted">{{ _("Incompleta") }}</span>{% elif s.status == "open" %}<span class="chip chip--muted">{{ _("En curso") }}</span>{% elif s.low_trust %}<span class="chip chip--warn">{{ _("Baja confianza") }}</span>{% else %}<span class="chip chip--ok">{{ _("Completa") }}</span>{% endif %}{% endmacro %}
+
+{% macro trail_state(state) %}{% if state == "done" %}{{ _("Hecho") }}{% elif state == "today" %}{{ _("Hoy") }}{% elif state == "upcoming" %}{{ _("Próximo") }}{% elif state == "missed" %}{{ _("Sin sesión") }}{% else %}{{ _("Descanso") }}{% endif %}{% endmacro %}
+
+{% macro kpi(value, label, decimals=0) %}
+<div class="kpi">
+  <p class="kpi__value"><span aria-hidden="true" data-count-to="{{ value }}" data-count-decimals="{{ decimals }}">{{ value|decimal(decimals) }}</span><span class="sr-only">{{ value|decimal(decimals) }}</span></p>
+  <p class="kpi__label">{{ label }}</p>
+</div>
+{% endmacro %}

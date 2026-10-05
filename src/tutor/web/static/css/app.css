@@ -487,3 +487,18 @@ body[data-reduce-motion] *, body[data-reduce-motion] *::before, body[data-reduce
 .connect-status { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; margin-top: 1rem; }
 .connect-status p { margin: 0; }
 .skeleton--dot { display: inline-block; width: .75rem; height: .75rem; border-radius: 50%; background: var(--leaf); vertical-align: middle; }
+
+/* Inicio (Task 21) */
+.today .code-copy { margin-top: .75rem; }
+.streak__num { font-family: "Baloo 2", system-ui, sans-serif; font-size: 1.25rem; }
+.trail__svg { display: block; width: 100%; height: auto; max-height: 7rem; }
+.trail__path--walked { stroke: var(--leaf); }
+.trail__node--is-today { stroke: var(--coral); stroke-width: 3; }
+.trail__days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: .25rem; margin: .5rem 0 0; padding: 0; list-style: none; text-align: center; font-size: .75rem; }
+.trail__label { display: flex; flex-direction: column; gap: .1rem; min-width: 0; }
+.trail__label[aria-current="date"] .trail__day { font-weight: 700; color: var(--ink); }
+.trail__state { overflow-wrap: anywhere; }
+.trail__extra-label { color: var(--leaf); font-weight: 600; }
+.pending { display: grid; gap: .35rem; margin: 0 0 .5rem; padding: 0; list-style: none; }
+.pending strong { margin-right: .25rem; font-family: "Baloo 2", system-ui, sans-serif; font-size: 1.25rem; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); gap: .75rem; margin-bottom: .75rem; }
