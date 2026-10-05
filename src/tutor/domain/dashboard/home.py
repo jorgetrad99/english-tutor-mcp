@@ -18,6 +18,8 @@ from tutor.domain.dashboard.types import (
 
 def local_today(now: datetime, tz: str) -> date:
     """The learner's calendar day. `now` must be timezone-aware."""
+    if now.tzinfo is None:
+        raise ValueError("datetime must be timezone-aware")
     try:
         zone: ZoneInfo = ZoneInfo(tz)
     except (ZoneInfoNotFoundError, ValueError):

@@ -26,6 +26,26 @@ def test_local_today_falls_back_to_utc_for_unknown_zone() -> None:
     assert local_today(datetime(2027, 1, 12, 3, tzinfo=UTC), "Mars/Base") == date(2027, 1, 12)
 
 
+def test_local_today_rejects_naive_datetime() -> None:
+    with pytest.raises(ValueError, match="timezone-aware"):
+        local_today(datetime(2027, 1, 12, 3), "America/Mexico_City")
+
+
+def test_local_today_midnight_boundary() -> None:
+    # 06:00 UTC = 00:00 (midnight) America/Mexico_City
+    midnight_cdmx = datetime(2027, 1, 12, 6, 0, tzinfo=UTC)
+    assert local_today(midnight_cdmx, "America/Mexico_City") == date(2027, 1, 12)
+
+
+def test_local_today_across_daylight_saving() -> None:
+    # Spring forward: 2027-03-14 02:00 EST -> 03:00 EDT
+    spring_forward = datetime(2027, 3, 14, 7, 0, tzinfo=UTC)
+    assert local_today(spring_forward, "America/New_York") == date(2027, 3, 14)
+    # Fall back: 2027-11-07 02:00 EDT -> 01:00 EST
+    fall_back = datetime(2027, 11, 7, 6, 0, tzinfo=UTC)
+    assert local_today(fall_back, "America/New_York") == date(2027, 11, 7)
+
+
 def test_week_start_is_monday() -> None:
     assert week_start(date(2027, 1, 17)) == MON  # Sunday
     assert week_start(MON) == MON
