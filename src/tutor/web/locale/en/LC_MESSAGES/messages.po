@@ -417,3 +417,138 @@ msgstr "Low trust"
 
 msgid "Completa"
 msgstr "Complete"
+
+msgid "Modo"
+msgstr "Mode"
+
+msgid "Todos"
+msgstr "All"
+
+msgid "Estado"
+msgstr "Status"
+
+msgid "Filtrar"
+msgstr "Filter"
+
+msgid "Tus sesiones, de la más reciente a la más antigua"
+msgstr "Your sessions, newest first"
+
+msgid "Fecha"
+msgstr "Date"
+
+msgid "Práctica"
+msgstr "Practice"
+
+msgid "Cliente"
+msgstr "Client"
+
+msgid "Duración"
+msgstr "Duration"
+
+msgid "Palabras/min"
+msgstr "Words/min"
+
+msgid "Resultado"
+msgstr "Result"
+
+msgid "Páginas"
+msgstr "Pages"
+
+msgid "Más recientes"
+msgstr "Newer"
+
+msgid "Anteriores"
+msgstr "Older"
+
+msgid "Ninguna sesión coincide con estos filtros."
+msgstr "No session matches these filters."
+
+msgid "Aún no tienes sesiones. Cuando termines tu primera lección en Claude, aparecerá aquí."
+msgstr "You have no sessions yet. When you finish your first lesson in Claude, it will appear here."
+
+msgid "Cómo conectar"
+msgstr "How to connect"
+
+msgid "Sesión"
+msgstr "Session"
+
+msgid "Todas las sesiones"
+msgstr "All sessions"
+
+msgid "Sesión incompleta: no cuenta para tus tendencias."
+msgstr "Incomplete session: it doesn't count towards your trends."
+
+msgid "Evidencia poco confiable: guardamos tus palabras, pero no los errores de esta sesión."
+msgstr "Unreliable evidence: we kept your words but not this session's mistakes."
+
+msgid "Correcciones"
+msgstr "Corrections"
+
+msgid "dijiste"
+msgstr "you said"
+
+msgid "mejor"
+msgstr "better"
+
+msgid "La usaste después en la sesión"
+msgstr "You used it later in the session"
+
+msgid "Sin correcciones en esta sesión."
+msgstr "No corrections in this session."
+
+msgid "Tarea"
+msgstr "Task"
+
+msgid "Pistas"
+msgstr "Hints"
+
+msgid "Palabras por minuto"
+msgstr "Words per minute"
+
+msgid "Tu confianza"
+msgstr "Your confidence"
+
+msgid "%(n)s de 5"
+msgstr "%(n)s of 5"
+
+msgid "Frases"
+msgstr "Phrases"
+
+msgid "Esta sesión no tuvo frases propuestas."
+msgstr "This session had no suggested phrases."
+
+msgid "Nivel estimado"
+msgstr "Estimated level"
+
+msgid "Es la opinión del modelo, no una certificación."
+msgstr "It's the model's opinion, not a certification."
+
+msgid "Lo basó en:"
+msgstr "Based on:"
+
+msgid "Lo que dijiste"
+msgstr "What you said"
+
+msgid "Gramática"
+msgstr "Grammar"
+
+msgid "Vocabulario"
+msgstr "Vocabulary"
+
+msgid "Orden de palabras"
+msgstr "Word order"
+
+msgid "Registro"
+msgstr "Register"
+
+msgid "Otro"
+msgstr "Other"
+
+msgid "confianza alta"
+msgstr "high confidence"
+
+msgid "confianza media"
+msgstr "medium confidence"
+
+msgid "confianza baja"
+msgstr "low confidence"

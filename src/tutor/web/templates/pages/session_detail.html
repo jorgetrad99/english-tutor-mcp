@@ -1,0 +1,73 @@
+{% extends "layouts/app.html" %}
+{% import "macros/labels.html" as labels %}
+{% set active_nav = "sessions" %}
+{% block title %}{{ _("Sesión") }} · English Tutor{% endblock %}
+{% block content %}
+{% set s = d.summary %}
+<p><a href="/app/sessions">← {{ _("Todas las sesiones") }}</a></p>
+<header class="page-head vt-last-session">
+  <h1>{{ s.label }}</h1>
+  <p class="muted">{{ s.started_at|day("weekday") }} · {{ labels.mode_label(s.mode) }} · {{ labels.client_label(s.client) }} · {% trans minutes=s.duration_min %}{{ minutes }} min{% endtrans %}</p>
+  <p>{{ labels.status_chip(s) }}</p>
+</header>
+{% if s.status == "incomplete" %}<div class="banner banner--info" role="note"><p>{{ _("Sesión incompleta: no cuenta para tus tendencias.") }}</p></div>{% endif %}
+{% if s.low_trust %}<div class="banner banner--info" role="note"><p>{{ _("Evidencia poco confiable: guardamos tus palabras, pero no los errores de esta sesión.") }}</p></div>{% endif %}
+<div class="grid">
+  <section class="card card--wide" aria-labelledby="errors-title">
+    <h2 id="errors-title" class="card__title">{{ _("Correcciones") }}</h2>
+    {% if d.errors %}
+    <ol class="errors">
+      {% for e in d.errors %}
+      <li class="errors__item" data-strike>
+        <p class="said"><span class="errors__tag">{{ _("dijiste") }}</span> <span lang="en">{{ e.said }}</span></p>
+        <p class="correct"><span class="errors__tag">{{ _("mejor") }}</span> <span lang="en">{{ e.correct }}</span></p>
+        <p><span class="chip chip--muted">{{ labels.category_label(e.category) }}</span>{% if e.taken_up %} <span class="chip chip--ok">{{ _("La usaste después en la sesión") }}</span>{% endif %}</p>
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}
+    <p class="empty">{{ _("Sin correcciones en esta sesión.") }}</p>
+    {% endif %}
+  </section>
+
+  <section class="card" aria-labelledby="result-title">
+    <h2 id="result-title" class="card__title">{{ _("Resultado") }}</h2>
+    <dl class="facts">
+      <dt>{{ _("Tarea") }}</dt><dd>{{ labels.result_label(s.task_result) }}</dd>
+      <dt>{{ _("Pistas") }}</dt><dd>{{ d.hints_given|integer }}</dd>
+      <dt>{{ _("Palabras por minuto") }}</dt><dd>{{ s.words_per_min|decimal(0) if s.words_per_min is not none else "—" }}</dd>
+      <dt>{{ _("Tu confianza") }}</dt><dd>{% if d.confidence_1_5 %}{% trans n=d.confidence_1_5 %}{{ n }} de 5{% endtrans %}{% else %}—{% endif %}</dd>
+    </dl>
+  </section>
+
+  <section class="card" aria-labelledby="chunks-title">
+    <h2 id="chunks-title" class="card__title">{{ _("Frases") }}</h2>
+    {% if d.chunks_offered %}
+    <ul class="stamps">
+      {% for c in d.chunks_offered %}
+      <li class="stamp{% if c in d.chunks_used %} stamp--used{% endif %}"><span lang="en">{{ c }}</span> <span class="sr-only">{{ _("usada en una sesión") if c in d.chunks_used else _("aún sin usar") }}</span></li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty">{{ _("Esta sesión no tuvo frases propuestas.") }}</p>
+    {% endif %}
+  </section>
+
+  {% if d.cefr %}
+  <section class="card" aria-labelledby="cefr-title">
+    <h2 id="cefr-title" class="card__title">{{ _("Nivel estimado") }}</h2>
+    <p class="muted">{{ _("Es la opinión del modelo, no una certificación.") }}</p>
+    <p class="cefr"><strong>{{ d.cefr.level }}</strong> · {{ labels.confidence_label(d.cefr.confidence) }}</p>
+    {% if d.cefr.evidence %}
+    <p>{{ _("Lo basó en:") }}</p>
+    <ul class="evidence">{% for ev in d.cefr.evidence %}<li lang="en">{{ ev }}</li>{% endfor %}</ul>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  <section class="card card--wide" aria-labelledby="turns-title">
+    <h2 id="turns-title" class="card__title">{{ _("Lo que dijiste") }}</h2>
+    <ol class="turns">{% for t in d.user_turns %}<li lang="en">{{ t }}</li>{% endfor %}</ol>
+  </section>
+</div>
+{% endblock %}

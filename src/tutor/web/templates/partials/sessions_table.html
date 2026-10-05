@@ -1,0 +1,44 @@
+{% import "macros/labels.html" as labels %}
+<div id="sessions-table">
+  {% if result.items %}
+  <div class="table-wrap">
+    <table class="table table--stack">
+      <caption class="sr-only">{{ _("Tus sesiones, de la más reciente a la más antigua") }}</caption>
+      <thead>
+        <tr>
+          <th scope="col">{{ _("Fecha") }}</th>
+          <th scope="col">{{ _("Práctica") }}</th>
+          <th scope="col">{{ _("Modo") }}</th>
+          <th scope="col">{{ _("Cliente") }}</th>
+          <th scope="col">{{ _("Duración") }}</th>
+          <th scope="col">{{ _("Palabras/min") }}</th>
+          <th scope="col">{{ _("Resultado") }}</th>
+          <th scope="col">{{ _("Estado") }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in result.items %}
+        <tr>
+          <td data-label="{{ _('Fecha') }}"><a href="/app/sessions/{{ s.id }}">{{ s.started_at|day("short") }}</a></td>
+          <td data-label="{{ _('Práctica') }}">{{ s.label }}</td>
+          <td data-label="{{ _('Modo') }}">{{ labels.mode_label(s.mode) }}</td>
+          <td data-label="{{ _('Cliente') }}">{{ labels.client_label(s.client) }}</td>
+          <td data-label="{{ _('Duración') }}">{% trans minutes=s.duration_min %}{{ minutes }} min{% endtrans %}</td>
+          <td data-label="{{ _('Palabras/min') }}">{{ s.words_per_min|decimal(0) if s.words_per_min is not none else "—" }}</td>
+          <td data-label="{{ _('Resultado') }}">{{ labels.result_label(s.task_result) }}</td>
+          <td data-label="{{ _('Estado') }}">{{ labels.status_chip(s) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <nav class="pager" aria-label="{{ _('Páginas') }}">
+    {% if prev_url %}<a class="btn btn--ghost btn--small" href="{{ prev_url }}" hx-get="{{ prev_url }}" hx-target="#sessions-table" hx-swap="outerHTML" hx-push-url="true">{{ _("Más recientes") }}</a>{% endif %}
+    {% if next_url %}<a class="btn btn--ghost btn--small" href="{{ next_url }}" hx-get="{{ next_url }}" hx-target="#sessions-table" hx-swap="outerHTML" hx-push-url="true">{{ _("Anteriores") }}</a>{% endif %}
+  </nav>
+  {% elif f.mode or f.status %}
+  <p class="empty">{{ _("Ninguna sesión coincide con estos filtros.") }}</p>
+  {% else %}
+  <p class="empty">{{ _("Aún no tienes sesiones. Cuando termines tu primera lección en Claude, aparecerá aquí.") }} <a href="/app/connect">{{ _("Cómo conectar") }}</a></p>
+  {% endif %}
+</div>

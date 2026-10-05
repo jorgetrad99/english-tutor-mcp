@@ -502,3 +502,22 @@ body[data-reduce-motion] *, body[data-reduce-motion] *::before, body[data-reduce
 .pending { display: grid; gap: .35rem; margin: 0 0 .5rem; padding: 0; list-style: none; }
 .pending strong { margin-right: .25rem; font-family: "Baloo 2", system-ui, sans-serif; font-size: 1.25rem; }
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); gap: .75rem; margin-bottom: .75rem; }
+
+/* Sesiones (Task 22) */
+@media (max-width: 599px) {
+  .table--stack thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .table--stack, .table--stack tbody, .table--stack tr, .table--stack td, .table--stack th { display: block; width: 100%; }
+  .table--stack tr { padding: .75rem 0; border-bottom: 1px solid var(--paper); }
+  .table--stack [data-label]::before { content: attr(data-label); display: block; font-size: .75rem; font-weight: 600; opacity: .75; }
+}
+.pager { display: flex; justify-content: space-between; gap: .5rem; margin-top: .75rem; }
+.errors { display: grid; gap: .75rem; margin: 0; padding: 0; list-style: none; }
+.errors__item { padding: .75rem; border-radius: .75rem; background: var(--paper); }
+.errors__item p { margin: .15rem 0; overflow-wrap: anywhere; }
+.errors__tag { display: inline-block; min-width: 4.5rem; font-size: .75rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.facts { display: grid; grid-template-columns: auto 1fr; gap: .35rem 1rem; margin: 0; }
+.facts dt { font-weight: 600; }
+.facts dd { margin: 0; }
+.turns, .evidence { display: grid; gap: .5rem; padding-left: 1.25rem; }
+.turns li, .evidence li { overflow-wrap: anywhere; }
+.cefr strong { font-family: "Baloo 2", system-ui, sans-serif; font-size: 1.5rem; }

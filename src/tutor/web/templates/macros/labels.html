@@ -15,3 +15,7 @@
   <p class="kpi__label">{{ label }}</p>
 </div>
 {% endmacro %}
+
+{% macro category_label(category) %}{% if category == "grammar" %}{{ _("Gramática") }}{% elif category == "lexis" %}{{ _("Vocabulario") }}{% elif category == "word_order" %}{{ _("Orden de palabras") }}{% elif category == "register" %}{{ _("Registro") }}{% else %}{{ _("Otro") }}{% endif %}{% endmacro %}
+
+{% macro confidence_label(confidence) %}{% if confidence == "high" %}{{ _("confianza alta") }}{% elif confidence == "medium" %}{{ _("confianza media") }}{% else %}{{ _("confianza baja") }}{% endif %}{% endmacro %}
