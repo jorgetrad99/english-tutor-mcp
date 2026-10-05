@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, date, datetime
 from functools import partial
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import Request
 from fastapi.responses import HTMLResponse
@@ -27,6 +28,7 @@ from tutor.web.i18n import (
     negotiate,
 )
 from tutor.web.ports import WebDeps
+from tutor.web.security import safe_next
 
 
 def _day_filter(lang: Lang) -> Callable[..., str]:
@@ -98,6 +100,12 @@ def _csrf(request: Request) -> str:
     return session.csrf_token if session is not None and session.user_id is not None else ""
 
 
+def _next_qs(request: Request) -> str:
+    """`&next=<encoded>` for the language link; only a same-site path survives."""
+    raw = request.query_params.get("next")
+    return f"&next={quote(safe_next(raw), safe='/')}" if raw else ""
+
+
 def render(
     request: Request,
     template: str,
@@ -134,6 +142,7 @@ def render(
         "today": today,
         "reduce_motion": bool(user and user.reduce_motion),
         "public_url": public_url,
+        "next_qs": _next_qs(request),
     }
     html = views.envs[lang].get_template(template).render({**base, **(ctx or {})})
     return HTMLResponse(html, status_code=status_code, headers=dict(headers or {}))

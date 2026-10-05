@@ -21,5 +21,8 @@ class AssetManifest:
         """`/static/<rel>?v=<hash>`; raises KeyError for a missing file so typos fail tests."""
         return f"/static/{rel}?v={self._hashes[rel]}"
 
+    def hash_of(self, rel: str) -> str | None:
+        return self._hashes.get(rel)
+
     def files(self) -> tuple[str, ...]:
         return tuple(self._hashes)

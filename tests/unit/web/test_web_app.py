@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -75,29 +76,102 @@ def test_safe_next_blocks_open_redirects() -> None:
         assert safe_next(bad) == "/app/"
 
 
-def test_unhandled_error_logs_only_class_and_route(
-    app: FastAPI, caplog: pytest.LogCaptureFixture
-) -> None:
-    probe = "PROBE-learner-text-7f3a"
-
+def _boom_client(app: FastAPI, probe: str) -> TestClient:
     @app.get("/boom")
     async def boom() -> None:
         raise ValueError(probe)
 
-    caplog.set_level(logging.DEBUG)
-    with TestClient(app, base_url="https://testserver", raise_server_exceptions=False) as c:
+    return TestClient(app, base_url="https://testserver", raise_server_exceptions=False)
+
+
+def test_unhandled_error_is_guarded_headed_and_logged_safely(
+    app: FastAPI, caplog: pytest.LogCaptureFixture
+) -> None:
+    probe = "PROBE-learner-text-7f3a"
+    caplog.set_level(logging.DEBUG)  # root logger: every logger is captured
+    with _boom_client(app, probe) as c:
         response = c.get(f"/boom?q={probe}")
     assert response.status_code == 500
     assert "Algo sali\N{LATIN SMALL LETTER O WITH ACUTE} mal" in response.text
     assert probe not in response.text
-    ours = [r for r in caplog.records if r.name.startswith("tutor")]  # not the HTTP client's
-    assert ours, "the failure must be logged"
-    for record in ours:
-        assert probe not in record.getMessage()
+    assert response.headers["content-security-policy"] == CSP
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    ours = [r for r in caplog.records if r.name == "tutor.web"]
+    assert len(ours) == 1
+    assert ours[0].getMessage().endswith("route=/boom exc=ValueError")
+    for record in caplog.records:
+        if record.name.startswith("httpx"):  # the test client's own request line
+            continue
+        text = record.getMessage() + str(record.args) + (record.exc_text or "")
+        assert probe not in text and "Traceback" not in text
         assert record.exc_info is None
-        assert probe not in str(record.args) and probe not in (record.stack_info or "")
-    line = ours[0].getMessage()
-    assert "path=/boom" in line and "exc=ValueError" in line
+
+
+def test_error_page_has_no_inline_code(app: FastAPI) -> None:
+    with _boom_client(app, "x") as c:
+        page = c.get("/boom").text
+    for banned in ("<script>", "style=", "<style", "hx-on", " onclick=", " onerror=", " onload="):
+        assert banned not in page
+
+
+def test_language_link_never_leaves_the_origin(client: TestClient) -> None:
+    for path in ("//evil.example/x", "/%5Cevil.example"):
+        page = client.get(path).text
+        hrefs = re.findall(r'href="([^"]*)"', page)
+        assert hrefs
+        for href in hrefs:
+            assert not href.startswith(("//", "http", "\\")), href
+    hostile = client.get("/login?next=//evil.example").text
+    assert "evil.example" not in hostile
+    ok = client.get("/login?next=/app/glossary%3Fq%3Dx").text
+    assert 'href="?lang=en&amp;next=/app/glossary%3Fq%3Dx"' in ok
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "/\t/evil.example",
+        "/\n/evil.example",
+        "/\r\\evil.example",
+        "/\\evil",
+        "https://evil",
+        "//evil",
+    ],
+)
+def test_safe_next_rejects_control_and_scheme_tricks(bad: str) -> None:
+    assert safe_next(bad) == "/app/"
+
+
+def test_static_cache_policy_is_honest(client: TestClient) -> None:
+    miss = client.get("/static/nope?v=1")
+    assert miss.status_code == 404 and miss.headers["cache-control"] == "no-store"
+    page = client.get("/login").text
+    good = page.split('href="/static/css/app.css?v=')[1].split('"')[0]
+    assert client.get("/static/css/app.css?v=deadbeef").headers["cache-control"] == "no-cache"
+    assert client.get(f"/static/css/app.css?xv={good}").headers["cache-control"] == "no-cache"
+    assert client.get("/static/css/app.css").headers["cache-control"] == "no-cache"
+
+
+def test_cross_origin_headers_and_trusted_host(client: TestClient) -> None:
+    ok = client.get("/login")
+    assert ok.headers["cross-origin-opener-policy"] == "same-origin"
+    assert ok.headers["cross-origin-resource-policy"] == "same-origin"
+    forged = client.get("/", headers={"host": "evil.example"})
+    assert forged.status_code == 400 and "location" not in forged.headers
+
+
+def test_http_error_keeps_headers_and_validation_error_does_not_echo(app: FastAPI) -> None:
+    @app.get("/needs-int")
+    async def needs_int(n: int) -> None:
+        return None
+
+    with TestClient(app, base_url="https://testserver", follow_redirects=False) as c:
+        not_allowed = c.post("/login")
+        assert not_allowed.status_code == 405 and "GET" in not_allowed.headers["allow"]
+        invalid = c.get("/needs-int?n=SECRET-input")
+        assert invalid.status_code == 422 and "SECRET-input" not in invalid.text
+        assert invalid.headers["content-security-policy"] == CSP
 
 
 def test_missing_translations_detects_untranslated_template(
