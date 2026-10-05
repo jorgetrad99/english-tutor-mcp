@@ -1,17 +1,22 @@
 """Validation-gate numbers (core loop v0 spec section 14), read only.
 
-Run on the server with the owner's URL, never the app's:
-    MIGRATION_DATABASE_URL=... python -m tutor.ops.gate_report --from 2026-11-16 [--to 2026-12-04]
-        [--labels labels.json] [--author NAME] [--tz America/Mexico_City] [--database-url URL]
-The URL comes from --database-url, else MIGRATION_DATABASE_URL. DATABASE_URL (the app's
-NOSUPERUSER, NOBYPASSRLS login) is never used: every user table has FORCE ROW LEVEL SECURITY with
+Run on the server with the report role's URL, never the app's:
+    GATE_REPORT_DATABASE_URL=... python -m tutor.ops.gate_report --from 2026-11-16
+        [--to 2026-12-04] [--labels labels.json] [--author NAME] [--tz America/Mexico_City]
+        [--database-url URL]
+The URL comes from --database-url, else GATE_REPORT_DATABASE_URL. The app's DATABASE_URL
+(NOSUPERUSER, NOBYPASSRLS) is never used: every user table has FORCE ROW LEVEL SECURITY with
 policies keyed on app.user_id, so that role, and equally a plain table owner, would read zero rows.
 Only a SUPERUSER or a BYPASSRLS role sees all users (SET LOCAL row_security = off does not help a
-role that is subject to RLS: it makes the query fail instead). The report checks the connected
-role for one of the two and stops with a message otherwise.
+role that is subject to RLS: it makes the query fail instead). The least-privilege choice is the
+dedicated role tutor_report (see tutor.ops.report_role): LOGIN, BYPASSRLS, SELECT on sessions,
+session_metrics and audit_log only, read-only by default. The report checks the connected role
+for SUPERUSER or BYPASSRLS and stops with a message otherwise.
 Every transaction is READ ONLY. `labels.json` maps user hashes (first 12 hex of SHA-256 of the user
-id, as in the logs) to names. The output holds counts, rates, those hashes and dates only: no
-email, display name, Google sub or learner text is selected.
+id, as in the logs) to names. The hash is pseudonymous, not anonymous: anyone with a user id can
+recompute it, so never publish labels or a labelled report together with the hashes. The output
+holds counts, rates, those hashes and dates only: no email, display name, Google sub or learner
+text is selected.
 """
 
 from __future__ import annotations
@@ -30,6 +35,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import Connection, Engine, create_engine, select, text
+from sqlalchemy.exc import ArgumentError, OperationalError
 from sqlalchemy.pool import NullPool
 
 from tutor.db.engine import psycopg_url
@@ -37,9 +43,10 @@ from tutor.db.tables import audit_log, session_metrics, sessions
 from tutor.mcp.observe import user_hash
 
 DEFAULT_TZ = "America/Mexico_City"
-OWNER_URL_KEY = "MIGRATION_DATABASE_URL"
+URL_KEY = "GATE_REPORT_DATABASE_URL"
 _HASH = re.compile(r"^[0-9a-f]{12}$")
-_LABEL = re.compile(r"^[^|\x00-\x1f\x7f]{1,40}$")
+# No pipe, no C0/C1 control codes (\x85 included), no U+2028/U+2029 line separators.
+_LABEL = re.compile(r"[^|\x00-\x1f\x7f-\x9f\u2028\u2029]{1,40}")
 NOTE = "evidence_fidelity comes from `just eval-fidelity`, not from this report."
 # Plan ruling 9: archived counts as confirmed (never produced in v0).
 _CONFIRMED = frozenset({"confirmed", "archived"})
@@ -107,9 +114,14 @@ def require_unrestricted_role(conn: Connection) -> None:
     ).scalar_one()
     if not row:
         raise SystemExit(
-            f"the {OWNER_URL_KEY} role must be a SUPERUSER or have BYPASSRLS: under FORCE ROW "
+            f"the {URL_KEY} role must have BYPASSRLS (or be a superuser): under FORCE ROW "
             "LEVEL SECURITY any other role, even the table owner, sees no users' rows"
         )
+
+
+def valid_label(value: str) -> bool:
+    """A name safe to print in a Markdown table cell: 1 to 40 characters, no separators."""
+    return _LABEL.fullmatch(value) is not None
 
 
 def window(start: date, end: date, tz: ZoneInfo) -> tuple[datetime, datetime]:
@@ -151,6 +163,9 @@ def build_report(
     labels: Mapping[str, str],
     author: str | None,
 ) -> GateReport:
+    conn.execute(text("SET TRANSACTION READ ONLY"))
+    if conn.execute(text("SHOW transaction_read_only")).scalar_one() != "on":
+        raise SystemExit("the report transaction is not read only")
     low, high = window(start, end, ZoneInfo(tz_name))
     rows = conn.execute(
         select(
@@ -187,6 +202,7 @@ def build_report(
         line[3] += int(r.mode == "voice")
         if r.user_words_per_min is not None:
             wpm[r.mode].append(float(r.user_words_per_min))
+        if r.chunks_offered is not None:
             offered += r.chunks_offered
             used += r.chunks_used
     final = _glossary_final_statuses(conn, low, high)
@@ -280,7 +296,7 @@ def load_labels(path: Path) -> dict[str, str]:
     for key, value in data.items():
         if not _HASH.match(str(key)) or not isinstance(value, str):
             raise SystemExit("labels keys must be 12 hex user hashes and values must be names")
-        if not _LABEL.match(value):
+        if not valid_label(value):
             raise SystemExit("label names must be 1 to 40 characters without | or control codes")
     return {str(k): v for k, v in data.items()}
 
@@ -298,19 +314,31 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    url = args.database_url or os.environ.get(OWNER_URL_KEY, "")
+    url = args.database_url or os.environ.get(URL_KEY, "")
     if not url:
         print(
-            f"Set {OWNER_URL_KEY} (the owner's URL, not the app's DATABASE_URL) "
+            f"Set {URL_KEY} (the report role's URL, not the app's DATABASE_URL) "
             "or pass --database-url",
             file=sys.stderr,
         )
         return 2
-    labels = load_labels(args.labels) if args.labels else {}
-    end = args.end or datetime.now(ZoneInfo(args.tz)).date()
-    engine = read_only_engine(url)
+    if args.author is not None and not valid_label(args.author):
+        raise SystemExit("--author must be 1 to 40 characters without | or control codes")
     try:
-        with engine.connect() as conn:
+        zone = ZoneInfo(args.tz)
+    except (ValueError, OSError, LookupError):
+        raise SystemExit(f"unknown time zone: {args.tz[:40]!r}") from None
+    end = args.end or datetime.now(zone).date()
+    if end < args.start:
+        raise SystemExit("--to must not be before --from")
+    labels = load_labels(args.labels) if args.labels else {}
+    try:  # fixed message: a driver error can carry the host, user or password
+        engine = read_only_engine(url)
+        conn = engine.connect()
+    except (ArgumentError, OperationalError):
+        raise SystemExit("cannot connect (check the report URL)") from None
+    try:
+        with conn:
             require_unrestricted_role(conn)
             report = build_report(conn, args.start, end, args.tz, labels, args.author)
     finally:

@@ -36,3 +36,6 @@ Thumbs.db
 
 # Raw eval material (real learner text) never leaves the machine; commit only redacted fixtures
 evals/raw/
+
+# Labels map user hashes to names: they re-identify users
+labels*.json

@@ -40,7 +40,7 @@ migrate:
 serve:
     uv run python -m tutor
 
-# Gate report (spec 14), read only, as the owner role: MIGRATION_DATABASE_URL (superuser or BYPASSRLS)
+# Gate report (spec 14), read only, as the tutor_report role: GATE_REPORT_DATABASE_URL (needs BYPASSRLS)
 gate-report from:
     uv run python -m tutor.ops.gate_report --from {{from}}
 
@@ -48,6 +48,10 @@ gate-report from:
 [working-directory: 'evals']
 eval-fidelity:
     uv run python -m fidelity.report --fixtures fixtures
+
+# Print the idempotent SQL that creates the tutor_report role (no password; deploy sets it)
+report-role-sql:
+    uv run python -m tutor.ops.report_role
 
 # LLM evaluations (marked eval); never part of check
 eval:

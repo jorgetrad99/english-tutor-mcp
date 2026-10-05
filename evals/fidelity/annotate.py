@@ -1,6 +1,6 @@
 """Print a transcript's learner turns, numbered, for blind error annotation.
 
-Usage (from evals/): uv run python -m fidelity.annotate fixtures/transcripts/<name>.md
+Usage (from evals/): uv run python -m fidelity.annotate raw/<name>.md
 Only the learner's messages are shown, so the tutor's feedback cannot steer the annotation.
 """
 

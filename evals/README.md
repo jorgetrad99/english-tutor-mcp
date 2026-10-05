@@ -28,9 +28,19 @@ Workflow for one real text session (names like `2026-11-18-author-01`):
    (the session id is the last part of its Sesiones page URL).
 3. From `evals/`: `uv run python -m fidelity.annotate raw/<name>.md`, then write
    the annotation by hand, without looking at the payload.
-4. From `evals/`: `uv run python -m fidelity.redact --names "<every name>" <the three files>`, then
-   move them to `fixtures/transcripts/` and `fixtures/annotations/`.
+4. From `evals/`, once per target folder (inputs must be under `raw/`; copies are written, the raw
+   files are never rewritten):
+   `uv run python -m fidelity.redact --names "<every name>" --out-dir fixtures/transcripts raw/<name>.md raw/<name>.payload.json`
+   and the same with `--out-dir fixtures/annotations raw/<name>.json`. Redaction is best effort
+   (names, emails, URLs, @handles, phone numbers): read every output file before you commit it.
+   A unit test fails if a file under `fixtures/` contains an email, a phone number or a UUID.
 5. `uv run just eval-fidelity` prints recall and precision and exits 1 below a threshold.
+
+## Gate report and labels
+
+`labels*.json` (user hash to name) is git-ignored. The 12-hex user hash is pseudonymous, not
+anonymous: anyone with a user id can recompute it, so a report and its labels file are never
+published together.
 
 ## Evidence fidelity (requirements section 11)
 

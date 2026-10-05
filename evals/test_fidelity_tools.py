@@ -2,9 +2,11 @@
 tutor.domain.text.normalize). Not an eval: no LLM; runs in `just check`."""
 
 import json
+import re
 import unicodedata
 from pathlib import Path
 
+import fidelity.redact as redact_module
 import pytest
 from fidelity.annotate import main as annotate_main
 from fidelity.metrics import Match, chunks_fidelity, errors_fidelity, turns_fidelity, user_messages
@@ -14,6 +16,8 @@ from fidelity.report import failures, load_sessions, totals
 from fidelity.report import main as report_main
 
 pytestmark = pytest.mark.unit
+
+FIXTURES = Path(__file__).parent / "fixtures"
 
 TRANSCRIPT = """U: Let's practise English for 15 minutes.
 A: Sure! Which situation?
@@ -124,19 +128,73 @@ def test_redact_json_touches_values_never_keys() -> None:
     }
 
 
-def test_redact_cli_rewrites_files_in_place(tmp_path: Path) -> None:
-    transcript = tmp_path / "s.md"
-    payload = tmp_path / "s.payload.json"
+@pytest.fixture
+def raw_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    monkeypatch.setattr(redact_module, "RAW_DIR", raw)
+    return raw
+
+
+def test_redact_phones_handles_and_urls() -> None:
+    text = "Call +52 55 1234 5678 or (555) 123-4567; ping @mateo_x, see https://x.io/a?b=1 now."
+    assert redact(text, []) == "Call [phone] or [phone]; ping [handle], see [url] now."
+    assert redact("mail a@b.co", []) == "mail [email]"
+    assert redact("I have 15 minutes and 3 days", []) == "I have 15 minutes and 3 days"
+
+
+def test_redact_cli_writes_copies_and_leaves_the_raw_files(raw_dir: Path, tmp_path: Path) -> None:
+    transcript = raw_dir / "s.md"
+    payload = raw_dir / "s.payload.json"
     transcript.write_text("U: I am Mateo.\n", encoding="utf-8")
     payload.write_text(json.dumps({"user_turns": ["I am Mateo."]}), encoding="utf-8")
-    assert redact_main(["--names", "Mateo", str(transcript), str(payload)]) == 0
-    assert transcript.read_text(encoding="utf-8") == "U: I am [name].\n"
-    assert json.loads(payload.read_text(encoding="utf-8")) == {"user_turns": ["I am [name]."]}
+    out = tmp_path / "out"
+    args = ["--names", "Mateo", "--out-dir", str(out), str(transcript), str(payload)]
+    assert redact_main(args) == 0
+    assert (out / "s.md").read_text(encoding="utf-8") == "U: I am [name].\n"
+    assert json.loads((out / "s.payload.json").read_text(encoding="utf-8")) == {
+        "user_turns": ["I am [name]."]
+    }
+    assert transcript.read_text(encoding="utf-8") == "U: I am Mateo.\n"
+    with pytest.raises(SystemExit, match="overwrite"):
+        redact_main(args)
 
 
-def test_redact_cli_needs_names(tmp_path: Path) -> None:
+def test_redact_cli_refuses_inputs_outside_raw(raw_dir: Path, tmp_path: Path) -> None:
+    stray = tmp_path / "s.md"
+    stray.write_text("U: hi\n", encoding="utf-8")
+    with pytest.raises(SystemExit, match="evals/raw"):
+        redact_main(["--names", "Mateo", "--out-dir", str(tmp_path / "o"), str(stray)])
+    with pytest.raises(SystemExit, match="must not be under"):
+        redact_main(["--names", "Mateo", "--out-dir", str(raw_dir / "o"), str(raw_dir / "x.md")])
+
+
+def test_redact_cli_needs_names(raw_dir: Path, tmp_path: Path) -> None:
     with pytest.raises(SystemExit, match="name"):
-        redact_main(["--names", " ", str(tmp_path / "x.md")])
+        redact_main(["--names", " ", "--out-dir", str(tmp_path), str(raw_dir / "x.md")])
+
+
+def test_committed_fixtures_hold_no_email_phone_or_uuid() -> None:
+    """Guard: fixtures are synthetic or redacted; this fails on obvious personal data."""
+    patterns = {
+        "email": re.compile(r"[\w.+-]+@[\w-]+(\.[\w-]+)+"),
+        "phone": redact_module._PHONE,
+        "uuid": re.compile(
+            r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE
+        ),
+    }
+    found = [
+        f"{path.name}: {kind}"
+        for path in sorted(FIXTURES.rglob("*"))
+        if path.is_file() and path.name != ".gitkeep"
+        for kind, pattern in patterns.items()
+        if pattern.search(path.read_text(encoding="utf-8"))
+    ]
+    assert found == []
+
+
+def test_the_guard_pattern_catches_what_redaction_leaves_out() -> None:
+    assert redact("x 555 123 4567 y", []) == "x [phone] y"
 
 
 def test_annotate_prints_only_the_learner_turns(
