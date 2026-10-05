@@ -13,6 +13,7 @@ from uuid import UUID
 from sqlalchemy import Connection, Engine, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from tutor.db.repos.track import PgTrackRepo
 from tutor.db.tables import users
 from tutor.services.ports import (
     AuditRepo,
@@ -92,7 +93,7 @@ class PgUnitOfWork:
         self.user_id = user_id
         self.users = cast(UserRepo, _Pending("users"))
         self.profiles = cast(ProfileRepo, _Pending("profiles"))
-        self.track = cast(TrackRepo, _Pending("track"))
+        self.track = PgTrackRepo(conn)
         self.plans = cast(PlanRepo, _Pending("plans"))
         self.sessions = cast(SessionRepo, _Pending("sessions"))
         self.glossary = cast(GlossaryRepo, _Pending("glossary"))
