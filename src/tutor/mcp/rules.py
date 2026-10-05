@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Literal
 
+from tutor.domain.lesson import MAX_DRILLED_REVIEWS
 from tutor.domain.validation import SessionOutcome
 from tutor.services.errors import ErrorCode
 from tutor.services.ports import Mode
@@ -36,8 +37,8 @@ _PROVISIONAL = (
 _GOAL = "State today's goal in one sentence from item.can_do_en."
 _WARMUP = "Warm-up: say each of the 5 chunks once and let the learner repeat it."
 _WARMUP_REVIEWS = (
-    "Warm-up: say each of the 5 chunks once and let the learner repeat it, then drill up to 4 "
-    "due_reviews by production and call record_review with the ratings."
+    "Warm-up: say each of the 5 chunks once and let the learner repeat it, then drill up to "
+    f"{MAX_DRILLED_REVIEWS} due_reviews by production and call record_review with the ratings."
 )
 _SCENARIO: dict[Mode, str] = {
     "voice": (

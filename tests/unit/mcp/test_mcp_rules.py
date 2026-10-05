@@ -188,3 +188,14 @@ def test_provisional_items_go_back_exactly_as_returned() -> None:
     description = TOOL_DESCRIPTIONS["save_glossary"]
     assert "send each one back exactly as returned, without item_id" in description
     assert "Send only items from this lesson or its provisional_items." in description
+
+
+def test_drilled_review_cap_comes_from_the_domain() -> None:
+    # Final review M9: the rule's "up to N due_reviews" is MAX_DRILLED_REVIEWS, not a literal.
+    from tutor.domain.lesson import MAX_DRILLED_REVIEWS
+
+    text = rules.start_lesson_rules(
+        "voice", has_provisional=False, has_due_reviews=True, plan_exhausted=False
+    )
+    assert f"drill up to {MAX_DRILLED_REVIEWS} due_reviews" in text
+    assert rules.MAX_DRILLED_REVIEWS is MAX_DRILLED_REVIEWS  # imported, not restated

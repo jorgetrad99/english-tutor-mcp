@@ -67,6 +67,7 @@ class StartLessonRequest:
     mode: Mode
     prep: str | None = None
     prep_use_case: UseCase | None = None
+    # Part of the start_lesson tool contract (requirements section 7): validated, unused in v0.
     minutes: int | None = None
     domain: Domain = "it"
     client: ClientName = "claude"

@@ -281,3 +281,10 @@ def test_htmx_config_pins_every_safety_key(client: TestClient) -> None:
     assert config["historyCacheSize"] == 0
     assert config["selfRequestsOnly"] is True
     assert config["allowScriptTags"] is False
+
+
+def test_forms_post_only_to_this_site_or_google() -> None:
+    # Final review M9: no billing in v0, so no Stripe origin in form-action.
+    [form_action] = [d for d in CSP.split("; ") if d.startswith("form-action")]
+    assert form_action == "form-action 'self' https://accounts.google.com"
+    assert "stripe" not in CSP

@@ -12,8 +12,8 @@ from tutor.web.assets import AssetManifest
 CSP = (
     "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
     "font-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; "
-    "form-action 'self' https://checkout.stripe.com https://billing.stripe.com "
-    "https://accounts.google.com; frame-ancestors 'none'; base-uri 'none'; object-src 'none'"
+    "form-action 'self' https://accounts.google.com; frame-ancestors 'none'; base-uri 'none'; "
+    "object-src 'none'"
 )
 MAX_NEXT_LENGTH = 512  # bounds what an anonymous login session can store
 _HSTS = "max-age=31536000; includeSubDomains"
