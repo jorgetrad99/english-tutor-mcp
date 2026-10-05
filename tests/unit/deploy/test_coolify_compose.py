@@ -8,6 +8,7 @@ import pytest
 import yaml
 
 from tutor.ops.provision_roles import KEYS as MIGRATE_KEYS
+from tutor.settings import REQUIRED as APP_REQUIRED
 
 pytestmark = pytest.mark.unit
 
@@ -113,30 +114,45 @@ def test_each_service_reads_only_its_own_secrets() -> None:
     assert _refs("cloudflared") == {"TUNNEL_TOKEN"}
 
 
-def test_every_variable_is_required() -> None:
-    # ${NAME:?} stops the deploy when Coolify has no value, instead of starting with "".
+def test_variables_are_plain_references() -> None:
+    # Coolify's build step interpolates the whole file with build-time variables only, and the
+    # secrets are runtime-only: ${NAME:?} would stop every build. No defaults either: an empty
+    # value must reach the service, whose own startup check refuses it (see the next test).
     for name in _services():
         for value in _env(name).values():
             for m in REF.finditer(value):
-                assert m.group(2) == ":?", f"{name}: {m.group(0)} must be ${{{m.group(1)}:?}}"
+                assert m.group(2) == "", f"{name}: {m.group(0)} must be ${{{m.group(1)}}}"
+
+
+def test_every_service_refuses_an_empty_value_itself() -> None:
+    # What replaces ${NAME:?}: each referenced variable is checked where it is used.
+    # app: Settings.from_env (REQUIRED) and WebConfig (TUTOR_SUPPORT_EMAIL, TUTOR_BASE_URL).
+    # migrate: provision_roles.check_inputs; an empty owner user or password fails to connect.
+    # db: the postgres image refuses to initialise without POSTGRES_PASSWORD; an empty
+    #     POSTGRES_USER or POSTGRES_DB breaks MIGRATION_DATABASE_URL, so migrate fails.
+    # cloudflared: no tunnel without TUNNEL_TOKEN, so nothing is reachable.
+    app_checked = set(APP_REQUIRED) | {"TUTOR_SUPPORT_EMAIL", "TUTOR_MCP_URL"}
+    app_values = {key: value for key, value in _env("app").items() if REF.search(value)}
+    assert set(app_values) <= app_checked
+    assert set(_env("migrate")) == set(MIGRATE_KEYS)
 
 
 def test_app_fixed_settings_are_not_editable_in_coolify() -> None:
     env = _env("app")
     assert env["TUTOR_ENV"] == "prod"
-    assert env["TUTOR_MCP_URL"] == "${TUTOR_BASE_URL:?}/mcp"
+    assert env["TUTOR_MCP_URL"] == "${TUTOR_BASE_URL}/mcp"
     assert env["TUTOR_OAUTH_STORAGE_DIR"] == "/data/oauth"
     assert env["TUTOR_TEST_LOGIN"] == ""
     assert env["FORWARDED_ALLOW_IPS"] == _cloudflared_address()
     assert (
         env["DATABASE_URL"]
-        == "postgresql://${APP_DB_USER:?}:${APP_DB_PASSWORD:?}@db:5432/${POSTGRES_DB:?}"
+        == "postgresql://${APP_DB_USER}:${APP_DB_PASSWORD}@db:5432/${POSTGRES_DB}"
     )
 
 
 def test_migrate_owner_url_is_built_from_the_db_values() -> None:
     url = _env("migrate")["MIGRATION_DATABASE_URL"]
-    assert url == "postgresql://${POSTGRES_USER:?}:${POSTGRES_PASSWORD:?}@db:5432/${POSTGRES_DB:?}"
+    assert url == "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}"
 
 
 def test_edge_subnet_is_outside_dockers_default_pools() -> None:

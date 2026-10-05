@@ -134,6 +134,19 @@ def test_missing_web_setting_exits_naming_the_key() -> None:
         web_config_from_env(env)
 
 
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_blank_support_email_exits_as_missing(blank: str) -> None:
+    # Compose turns an unset ${TUTOR_SUPPORT_EMAIL} into "" (deploy/compose.coolify.yml).
+    env = {
+        "TUTOR_ENV": "test",
+        "TUTOR_BASE_URL": "https://t.example",
+        "TUTOR_MCP_URL": "https://t.example/mcp",
+        "TUTOR_SUPPORT_EMAIL": blank,
+    }
+    with pytest.raises(SystemExit, match="Missing settings: TUTOR_SUPPORT_EMAIL"):
+        web_config_from_env(env)
+
+
 def test_invalid_web_setting_exits_without_its_value() -> None:
     env = {
         "TUTOR_ENV": "test",
