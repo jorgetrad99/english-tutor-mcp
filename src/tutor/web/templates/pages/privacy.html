@@ -1,0 +1,18 @@
+{% extends "layouts/public.html" %}
+{% block title %}{{ _("Aviso de privacidad") }} · English Tutor{% endblock %}
+{% block content %}
+<article class="prose">
+  <h1>{{ _("Aviso de privacidad") }}</h1>
+  <h2>{{ _("Qué datos guardamos") }}</h2>
+  <p>{{ _("Tu nombre y correo de Google, tu plan de estudio, los turnos de conversación que tu asistente reporta al terminar cada sesión, tus errores corregidos y tu glosario. No guardamos audio ni transcripciones completas.") }}</p>
+  <h2>{{ _("Para qué") }}</h2>
+  <p>{{ _("Para continuar cada sesión donde quedó la anterior, calcular tu progreso y enviarte el reporte semanal si lo activas.") }}</p>
+  <h2>{{ _("Tu asistente de IA") }}</h2>
+  <p>{{ _("El contenido de tus lecciones pasa por el proveedor de tu asistente (por ejemplo Claude) bajo los términos de ese proveedor.") }}</p>
+  <h2>{{ _("Cookies") }}</h2>
+  <p>{{ _("Solo usamos una cookie de sesión para mantenerte dentro del tablero. No hay analítica ni publicidad.") }}</p>
+  <h2>{{ _("Tus derechos") }}</h2>
+  <p>{{ _("Puedes descargar todos tus datos o eliminar tu cuenta desde Cuenta. La eliminación se completa en 24 horas.") }}</p>
+  <p>{% trans email=config.support_email %}Contacto: {{ email }}{% endtrans %}</p>
+</article>
+{% endblock %}

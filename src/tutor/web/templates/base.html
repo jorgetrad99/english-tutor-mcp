@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="{{ html_lang }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{% block title %}English Tutor{% endblock %}</title>
+  <meta name="theme-color" content="#11402c">
+  {% if csrf_token %}<meta name="csrf-token" content="{{ csrf_token }}">{% endif %}
+  <meta name="htmx-config" content='{"allowEval":false,"includeIndicatorStyles":false,"historyCacheSize":0,"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"422","swap":true},{"code":"[45]..","swap":false,"error":true}]}'>
+  <link rel="stylesheet" href="{{ asset('css/app.css') }}">
+  {% block head %}{% endblock %}
+  <script src="{{ asset('js/app.js') }}" type="module"></script>
+</head>
+<body{% if csrf_token %} hx-headers='{"X-CSRF-Token": "{{ csrf_token }}"}'{% endif %}{% if reduce_motion %} data-reduce-motion{% endif %}>
+  <a class="skip-link" href="#main">{{ _("Saltar al contenido") }}</a>
+  {% block body %}{% endblock %}
+  <div class="sr-only" aria-live="polite" id="live"></div>
+</body>
+</html>

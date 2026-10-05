@@ -1,0 +1,11 @@
+/* Filled by Task 13. */
+
+/* HTMX injects no indicator styles (includeIndicatorStyles is false); these replace them. */
+.htmx-indicator {
+  opacity: 0;
+}
+
+.htmx-request .htmx-indicator,
+.htmx-request.htmx-indicator {
+  opacity: 1;
+}

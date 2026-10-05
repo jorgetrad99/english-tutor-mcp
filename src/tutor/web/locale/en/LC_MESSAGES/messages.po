@@ -6,3 +6,177 @@ msgstr ""
 
 msgid "Entrar con Google"
 msgstr "Sign in with Google"
+
+msgid "Saltar al contenido"
+msgstr "Skip to content"
+
+msgid "Idioma"
+msgstr "Language"
+
+msgid "Precios"
+msgstr "Pricing"
+
+msgid "Aviso de privacidad"
+msgstr "Privacy notice"
+
+msgid "Términos"
+msgstr "Terms"
+
+msgid "Inicio"
+msgstr "Home"
+
+msgid "Plan"
+msgstr "Plan"
+
+msgid "Progreso"
+msgstr "Progress"
+
+msgid "Sesiones"
+msgstr "Sessions"
+
+msgid "Glosario"
+msgstr "Glossary"
+
+msgid "Reportes"
+msgstr "Reports"
+
+msgid "Cuenta"
+msgstr "Account"
+
+msgid "Secciones"
+msgstr "Sections"
+
+msgid "Ajustes"
+msgstr "Settings"
+
+msgid "Annual"
+msgstr "Annual"
+
+msgid "Free"
+msgstr "Free"
+
+msgid "%(used)s de %(cap)s sesiones esta semana"
+msgstr "%(used)s of %(cap)s sessions this week"
+
+msgid "Cerrar sesión"
+msgstr "Log out"
+
+msgid "Más"
+msgstr "More"
+
+msgid "No pudimos cobrar tu renovación. Actualiza tu método de pago para conservar Annual."
+msgstr "We couldn't charge your renewal. Update your payment method to keep Annual."
+
+msgid "Actualizar método de pago"
+msgstr "Update payment method"
+
+msgid "Tu plan Annual se renueva el %(when)s por %(amount)s."
+msgstr "Your Annual plan renews on %(when)s for %(amount)s."
+
+msgid "Gestionar pago"
+msgstr "Manage payment"
+
+msgid "Tu plan volvió a Free; no se borró nada."
+msgstr "Your plan is back on Free; nothing was deleted."
+
+msgid "Volver a Annual"
+msgstr "Go back to Annual"
+
+msgid "Usaste tus sesiones Free de esta semana. Se renuevan el %(when)s."
+msgstr "You've used this week's Free sessions. They renew on %(when)s."
+
+msgid "Ver Annual"
+msgstr "See Annual"
+
+msgid "Tu glosario llegó a 50 elementos, el máximo en Free. Lo que ya tienes se queda."
+msgstr "Your glossary reached 50 items, the Free maximum. What you have stays."
+
+msgid "Entrar"
+msgstr "Sign in"
+
+msgid "Habla con confianza en el trabajo"
+msgstr "Speak with confidence at work"
+
+msgid "Tu tutor de inglés recuerda cada sesión, tus errores y tus frases. Tu progreso vive en tu servidor, no dentro de un solo chat."
+msgstr "Your English tutor remembers every session, your mistakes and your phrases. Your progress lives on your server, not inside one chat."
+
+msgid "No pudimos iniciar sesión con Google. Intenta de nuevo."
+msgstr "We couldn't sign you in with Google. Please try again."
+
+msgid "Al entrar aceptas los <a href=\"%(terms)s\">términos</a> y el <a href=\"%(privacy)s\">aviso de privacidad</a>."
+msgstr "By signing in you accept the <a href=\"%(terms)s\">terms</a> and the <a href=\"%(privacy)s\">privacy notice</a>."
+
+msgid "Qué datos guardamos"
+msgstr "What we store"
+
+msgid "Tu nombre y correo de Google, tu plan de estudio, los turnos de conversación que tu asistente reporta al terminar cada sesión, tus errores corregidos y tu glosario. No guardamos audio ni transcripciones completas."
+msgstr "Your Google name and email, your study plan, the conversation turns your assistant reports at the end of each session, your corrected mistakes and your glossary. We store no audio and no full transcripts."
+
+msgid "Para qué"
+msgstr "Why"
+
+msgid "Para continuar cada sesión donde quedó la anterior, calcular tu progreso y enviarte el reporte semanal si lo activas."
+msgstr "To continue each session where the last one ended, compute your progress and send your weekly report if you turn it on."
+
+msgid "Tu asistente de IA"
+msgstr "Your AI assistant"
+
+msgid "El contenido de tus lecciones pasa por el proveedor de tu asistente (por ejemplo Claude) bajo los términos de ese proveedor."
+msgstr "Your lesson content passes through your assistant's vendor (for example Claude) under that vendor's terms."
+
+msgid "Cookies"
+msgstr "Cookies"
+
+msgid "Solo usamos una cookie de sesión para mantenerte dentro del tablero. No hay analítica ni publicidad."
+msgstr "We only use one session cookie to keep you signed in to the dashboard. No analytics, no advertising."
+
+msgid "Tus derechos"
+msgstr "Your rights"
+
+msgid "Puedes descargar todos tus datos o eliminar tu cuenta desde Cuenta. La eliminación se completa en 24 horas."
+msgstr "You can download all your data or delete your account from Account. Deletion completes within 24 hours."
+
+msgid "Contacto: %(email)s"
+msgstr "Contact: %(email)s"
+
+msgid "Términos del servicio"
+msgstr "Terms of service"
+
+msgid "English Tutor te ayuda a practicar inglés hablado y escrito para el trabajo a través de tu asistente de IA."
+msgstr "English Tutor helps you practise spoken and written English for work through your AI assistant."
+
+msgid "Lo que no hace"
+msgstr "What it does not do"
+
+msgid "No evalúa pronunciación ni audio y no emite certificados de nivel. Los niveles CEFR que ves son la opinión del modelo, mostrada como tendencia."
+msgstr "It does not score pronunciation or audio and issues no level certificates. The CEFR levels you see are the model's opinion, shown as a trend."
+
+msgid "Pagos y reembolsos"
+msgstr "Payments and refunds"
+
+msgid "Annual se cobra una vez al año con tarjeta. Puedes pedir el reembolso completo dentro de los primeros 14 días. No emitimos CFDI por ahora."
+msgstr "Annual is charged once a year by card. You can ask for a full refund within the first 14 days. We do not issue CFDI invoices for now."
+
+msgid "Algo salió mal"
+msgstr "Something went wrong"
+
+msgid "No encontramos esta página"
+msgstr "We couldn't find this page"
+
+msgid "Ir a Inicio"
+msgstr "Go to Home"
+
+msgid "Tu sesión cambió"
+msgstr "Your session changed"
+
+msgid "Recarga la página e intenta de nuevo."
+msgstr "Reload the page and try again."
+
+msgid "Tu progreso está a salvo. Intenta de nuevo en un momento."
+msgstr "Your progress is safe. Try again in a moment."
+
+msgid "Referencia: %(ref)s"
+msgstr "Reference: %(ref)s"
+
+msgid "Reintentar"
+msgstr "Try again"

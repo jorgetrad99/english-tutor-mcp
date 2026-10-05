@@ -93,7 +93,8 @@ def fmt_date(day: date, lang: Lang, style: Literal["short", "long", "weekday"] =
 
 def missing_translations() -> list[str]:
     """msgids used in templates that the English catalog does not translate."""
-    english = load_translations(Lang.EN)
+    with _po_path(Lang.EN).open("rb") as fh:
+        catalog = read_po(fh, locale=Lang.EN.value)
     method_map = [("**.html", "jinja2.ext:babel_extract")]
     options = {"**.html": {"extensions": "jinja2.ext.i18n"}}
     missing: set[str] = set()
@@ -104,6 +105,7 @@ def missing_translations() -> list[str]:
     ):
         ids = message if isinstance(message, tuple) else (message,)
         msgid = ids[0]
-        if msgid and english.gettext(msgid) == msgid:
+        entry = catalog.get(msgid) if msgid else None
+        if msgid and not (entry and entry.string):
             missing.add(msgid)
     return sorted(missing)

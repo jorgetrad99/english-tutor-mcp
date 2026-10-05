@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% set nav = [
+  ("home", "/app/", _("Inicio"), "home"),
+  ("plan", "/app/plan", _("Plan"), "plan"),
+  ("progress", "/app/progress", _("Progreso"), "progress"),
+  ("sessions", "/app/sessions", _("Sesiones"), "sessions"),
+  ("glossary", "/app/glossary", _("Glosario"), "glossary"),
+  ("reports", "/app/reports", _("Reportes"), "reports"),
+  ("account", "/app/account", _("Cuenta"), "account"),
+] %}
+{% block body %}
+<div class="shell">
+  <aside class="sidebar">
+    <a class="brand brand--light" href="/app/">English Tutor</a>
+    <nav class="sidebar__nav" aria-label="{{ _('Secciones') }}">
+      {% for key, href, label, icon in nav %}
+      <a class="nav-link{% if active_nav == key %} nav-link--active{% endif %}" href="{{ href }}"{% if active_nav == key %} aria-current="page"{% endif %}>
+        <svg class="icon" aria-hidden="true"><use href="{{ asset('icons/sprite.svg') }}#{{ icon }}"></use></svg>{{ label }}
+      </a>
+      {% endfor %}
+      {% if user.role == "admin" %}
+      <a class="nav-link{% if active_nav == 'admin' %} nav-link--active{% endif %}" href="/admin/settings">{{ _("Ajustes") }}</a>
+      {% endif %}
+    </nav>
+    <div class="sidebar__foot">
+      {% if subscription.tier == "annual" %}
+      <span class="chip chip--annual">{{ _("Annual") }}</span>
+      {% else %}
+      <span class="chip chip--free">{{ _("Free") }}</span>
+      {% if usage %}
+      <a class="meter-link" href="/billing/checkout">
+        <span>{% trans used=usage.sessions_this_week, cap=usage.session_cap %}{{ used }} de {{ cap }} sesiones esta semana{% endtrans %}</span>
+        <svg class="meter" viewBox="0 0 100 6" aria-hidden="true" preserveAspectRatio="none">
+          <rect class="meter__track" width="100" height="6" rx="3"></rect>
+          <rect class="meter__fill" data-grow width="{{ (100 * [usage.sessions_this_week, usage.session_cap]|min / (usage.session_cap or 1))|round(1) }}" height="6" rx="3"></rect>
+        </svg>
+      </a>
+      {% endif %}
+      {% endif %}
+      <form method="post" action="/app/lang" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="back" value="{{ path }}">
+        <button class="btn btn--ghost btn--small" name="lang" value="{{ 'en' if lang == 'es_MX' else 'es_MX' }}">{{ "English" if lang == "es_MX" else "Español" }}</button>
+      </form>
+      <form method="post" action="/auth/logout" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="btn btn--ghost btn--small">{{ _("Cerrar sesión") }}</button>
+      </form>
+    </div>
+  </aside>
+  <main id="main" class="main">
+    {% include "partials/banners.html" %}
+    {% block content %}{% endblock %}
+  </main>
+  <nav class="tabbar" aria-label="{{ _('Secciones') }}">
+    {% for key, href, label, icon in nav[:3] + [nav[4]] %}
+    <a class="tabbar__link{% if active_nav == key %} tabbar__link--active{% endif %}" href="{{ href }}"{% if active_nav == key %} aria-current="page"{% endif %}>
+      <svg class="icon" aria-hidden="true"><use href="{{ asset('icons/sprite.svg') }}#{{ icon }}"></use></svg><span>{{ label }}</span>
+    </a>
+    {% endfor %}
+    <details class="tabbar__more">
+      <summary class="tabbar__link{% if active_nav in ('sessions', 'reports', 'account', 'admin') %} tabbar__link--active{% endif %}">
+        <svg class="icon" aria-hidden="true"><use href="{{ asset('icons/sprite.svg') }}#more"></use></svg><span>{{ _("Más") }}</span>
+      </summary>
+      <ul class="tabbar__menu">
+        <li><a href="/app/sessions">{{ _("Sesiones") }}</a></li>
+        <li><a href="/app/reports">{{ _("Reportes") }}</a></li>
+        <li><a href="/app/account">{{ _("Cuenta") }}</a></li>
+      </ul>
+    </details>
+  </nav>
+</div>
+{% endblock %}
