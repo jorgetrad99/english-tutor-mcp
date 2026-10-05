@@ -1,0 +1,107 @@
+{# Perfil body: the onboarding form and the plan-lite. The page includes it; HTMX swaps it. #}
+{% set es = lang == "es_MX" %}
+{% set messages = {
+  "level": _("Elige tu nivel de inglés de hoy."),
+  "field": _("Elige tu área."),
+  "use_cases_few": _("Elige al menos 1 situación."),
+  "use_cases_many": _("Elige como máximo 4 situaciones."),
+  "use_cases_choice": _("Elige situaciones de la lista."),
+  "minutes": _("Elige 15, 20 o 30 minutos."),
+  "days": _("Elige de 2 a 7 días."),
+  "target_choice": _("Elige el nivel que quieres alcanzar."),
+  "target_below": _("Tu meta debe ser igual o más alta que tu nivel de hoy."),
+  "date": _("Elige una fecha entre 4 semanas y 1 año a partir de hoy, o déjala vacía."),
+  "goal_long": _("Máximo 300 caracteres."),
+  "timezone": _("No reconocimos la zona horaria de tu navegador. Recarga la página e intenta de nuevo."),
+} %}
+<div id="profile-body" class="grid">
+  {% if saved %}<p class="banner banner--info card--wide" role="status">{{ _("Guardamos tu perfil.") }}</p>{% endif %}
+  <section class="card card--wide" aria-labelledby="answers-title">
+    <h2 id="answers-title" class="card__title">{{ _("Tus respuestas") }}</h2>
+    <form id="profile-form" class="profile-form" method="post" action="/app/profile" hx-post="/app/profile" hx-target="#profile-body" hx-swap="outerHTML">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="timezone" value="{{ values.timezone }}" data-timezone>
+
+      {% set question = q.level %}
+      <fieldset{% if "self_level" in errors %} aria-describedby="err-self_level"{% endif %}>
+        <legend>{{ question.prompt_es if es else question.prompt_en }}</legend>
+        {% for o in question.options %}
+        <label class="choice"><input type="radio" name="self_level" value="{{ o.value }}"{% if values.self_level == o.value %} checked{% endif %}{% if "self_level" in errors %} aria-invalid="true"{% endif %}> <span>{{ o.label_es if es else o.label_en }}</span> <span class="choice__hint muted">{{ o.description_es if es else o.description_en }}</span></label>
+        {% endfor %}
+        {% if "self_level" in errors %}<p class="field-error" id="err-self_level">{{ messages[errors.self_level] }}</p>{% endif %}
+      </fieldset>
+
+      {% set question = q.field %}
+      <fieldset{% if "domains" in errors %} aria-describedby="err-domains"{% endif %}>
+        <legend>{{ question.prompt_es if es else question.prompt_en }}</legend>
+        {% for o in question.options %}
+        <label class="choice"><input type="checkbox" name="domains" value="{{ o.value }}"{% if o.value in values.domains %} checked{% endif %}{% if "domains" in errors %} aria-invalid="true"{% endif %}> <span>{{ o.label_es if es else o.label_en }}</span> <span class="choice__hint muted">{{ o.description_es if es else o.description_en }}</span></label>
+        {% endfor %}
+        {% if "domains" in errors %}<p class="field-error" id="err-domains">{{ messages[errors.domains] }}</p>{% endif %}
+      </fieldset>
+
+      {% set question = q.use_cases %}
+      <fieldset{% if "use_cases" in errors %} aria-describedby="err-use_cases"{% endif %}>
+        <legend>{{ question.prompt_es if es else question.prompt_en }}</legend>
+        {% for o in question.options %}
+        <label class="choice"><input type="checkbox" name="use_cases" value="{{ o.value }}"{% if o.value in values.use_cases %} checked{% endif %}{% if "use_cases" in errors %} aria-invalid="true"{% endif %}> <span>{{ o.label_es if es else o.label_en }}</span> <span class="choice__hint muted">{{ o.description_es if es else o.description_en }}</span></label>
+        {% endfor %}
+        {% if "use_cases" in errors %}<p class="field-error" id="err-use_cases">{{ messages[errors.use_cases] }}</p>{% endif %}
+      </fieldset>
+
+      {% set question = q.time %}
+      <fieldset{% if "minutes_per_day" in errors %} aria-describedby="err-minutes_per_day"{% endif %}>
+        <legend>{{ question.prompt_es if es else question.prompt_en }}</legend>
+        {% for o in question.options %}
+        <label class="choice"><input type="radio" name="minutes_per_day" value="{{ o.value }}"{% if values.minutes_per_day == o.value %} checked{% endif %}{% if "minutes_per_day" in errors %} aria-invalid="true"{% endif %}> <span>{{ o.label_es if es else o.label_en }}</span> <span class="choice__hint muted">{{ o.description_es if es else o.description_en }}</span></label>
+        {% endfor %}
+        {% if "minutes_per_day" in errors %}<p class="field-error" id="err-minutes_per_day">{{ messages[errors.minutes_per_day] }}</p>{% endif %}
+      </fieldset>
+      <label class="form-row">{{ _("Días a la semana") }}
+        <select name="days_per_week"{% if "days_per_week" in errors %} aria-invalid="true" aria-describedby="err-days_per_week"{% endif %}>
+          <option value=""{% if not values.days_per_week %} selected{% endif %}>—</option>
+          {% for n in days_choices %}<option value="{{ n }}"{% if values.days_per_week == n|string %} selected{% endif %}>{{ n }}</option>{% endfor %}
+        </select>
+      </label>
+      {% if "days_per_week" in errors %}<p class="field-error" id="err-days_per_week">{{ messages[errors.days_per_week] }}</p>{% endif %}
+
+      {% set question = q.goal %}
+      <fieldset{% if "target_level" in errors %} aria-describedby="err-target_level"{% endif %}>
+        <legend>{{ question.prompt_es if es else question.prompt_en }}</legend>
+        {% for o in question.options %}
+        <label class="choice"><input type="radio" name="target_level" value="{{ o.value }}"{% if values.target_level == o.value %} checked{% endif %}{% if "target_level" in errors %} aria-invalid="true"{% endif %}> <span>{{ o.label_es if es else o.label_en }}</span></label>
+        {% endfor %}
+        {% if "target_level" in errors %}<p class="field-error" id="err-target_level">{{ messages[errors.target_level] }}</p>{% endif %}
+      </fieldset>
+      <label class="form-row">{{ _("Fecha meta (opcional)") }}
+        <input type="date" name="target_date" value="{{ values.target_date }}" min="{{ date_min }}" max="{{ date_max }}"{% if "target_date" in errors %} aria-invalid="true" aria-describedby="err-target_date"{% endif %}>
+      </label>
+      {% if "target_date" in errors %}<p class="field-error" id="err-target_date">{{ messages[errors.target_date] }}</p>{% endif %}
+      <label class="form-row">{{ _("Para qué lo quieres, en una frase (opcional)") }}
+        <textarea name="goal_text" rows="2" maxlength="{{ goal_max }}"{% if "goal_text" in errors %} aria-invalid="true" aria-describedby="err-goal_text"{% endif %}>{{ values.goal_text }}</textarea>
+      </label>
+      {% if "goal_text" in errors %}<p class="field-error" id="err-goal_text">{{ messages[errors.goal_text] }}</p>{% endif %}
+      {% if "timezone" in errors %}<p class="field-error" id="err-timezone">{{ messages[errors.timezone] }}</p>{% endif %}
+
+      <button class="btn btn--primary">{{ _("Guardar perfil") }}</button>
+    </form>
+  </section>
+
+  {% if plan %}
+  <section class="card card--wide" aria-labelledby="plan-title">
+    <h2 id="plan-title" class="card__title">{{ _("Tu plan") }}</h2>
+    <p>{% trans weeks=plan.weeks, planned=plan.sessions_planned, done=plan.sessions_done %}{{ weeks }} semanas · {{ planned }} sesiones planeadas · {{ done }} hechas{% endtrans %}</p>
+    <p class="muted">{{ feasibility }}</p>
+    <h3>{% trans n=plan.current_week_no %}Semana {{ n }}{% endtrans %}</h3>
+    <ol class="plan-week">
+      {% for item in plan.week_items %}
+      <li class="plan-week__item">
+        <span>{{ item.can_do_es if es else item.can_do_en }}</span>
+        <span class="muted">{{ _("Hablar") if item.skill == "speaking" else _("Escribir") }}</span>
+        {% if item.status == "done" %}<span class="chip chip--ok">{{ _("Hecha") }}</span>{% elif item.status == "skipped" %}<span class="chip chip--muted">{{ _("Saltada") }}</span>{% else %}<span class="chip chip--muted">{{ _("Pendiente") }}</span>{% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+  </section>
+  {% endif %}
+</div>

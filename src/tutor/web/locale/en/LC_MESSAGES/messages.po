@@ -115,9 +115,6 @@ msgstr "Your Google name and email, your study plan, the conversation turns your
 msgid "Para qué"
 msgstr "Why"
 
-msgid "Para continuar cada sesión donde quedó la anterior, calcular tu progreso y enviarte el reporte semanal si lo activas."
-msgstr "To continue each session where the last one ended, compute your progress and send your weekly report if you turn it on."
-
 msgid "Tu asistente de IA"
 msgstr "Your AI assistant"
 
@@ -133,9 +130,6 @@ msgstr "We only use one session cookie to keep you signed in to the dashboard. N
 msgid "Tus derechos"
 msgstr "Your rights"
 
-msgid "Puedes descargar todos tus datos o eliminar tu cuenta desde Cuenta. La eliminación se completa en 24 horas."
-msgstr "You can download all your data or delete your account from Account. Deletion completes within 24 hours."
-
 msgid "Contacto: %(email)s"
 msgstr "Contact: %(email)s"
 
@@ -150,12 +144,6 @@ msgstr "What it does not do"
 
 msgid "No evalúa pronunciación ni audio y no emite certificados de nivel. Los niveles CEFR que ves son la opinión del modelo, mostrada como tendencia."
 msgstr "It does not score pronunciation or audio and issues no level certificates. The CEFR levels you see are the model's opinion, shown as a trend."
-
-msgid "Pagos y reembolsos"
-msgstr "Payments and refunds"
-
-msgid "Annual se cobra una vez al año con tarjeta. Puedes pedir el reembolso completo dentro de los primeros 14 días. No emitimos CFDI por ahora."
-msgstr "Annual is charged once a year by card. You can ask for a full refund within the first 14 days. We do not issue CFDI invoices for now."
 
 msgid "Algo salió mal"
 msgstr "Something went wrong"
@@ -280,9 +268,6 @@ msgstr "Session saved. Nice work."
 msgid "Tu siguiente paso"
 msgstr "Your next step"
 
-msgid "Haz tu diagnóstico en el chat: di <code lang=\"en\">start my lesson</code>."
-msgstr "Take your diagnostic in the chat: say <code lang=\"en\">start my lesson</code>."
-
 msgid "Práctica de hoy"
 msgstr "Today's practice"
 
@@ -369,9 +354,6 @@ msgstr "mistakes you stopped making"
 
 msgid "frases activadas"
 msgstr "phrases activated"
-
-msgid "Ver reportes"
-msgstr "See reports"
 
 msgid "+%(extra)s prep"
 msgstr "+%(extra)s prep"
@@ -669,3 +651,111 @@ msgstr "No session on this page."
 
 msgid "Volver a la primera página"
 msgstr "Back to the first page"
+
+msgid "Perfil"
+msgstr "Profile"
+
+msgid "Responde estas preguntas y armamos tu plan de práctica. También puedes hacerlo en el chat con tu tutor."
+msgstr "Answer these questions and we'll build your practice plan. You can also do it in the chat with your tutor."
+
+msgid "Tu cuenta"
+msgstr "Your account"
+
+msgid "Para borrar tu cuenta y tus datos, escríbenos a %(email)s."
+msgstr "To delete your account and your data, write to us at %(email)s."
+
+msgid "Elige tu nivel de inglés de hoy."
+msgstr "Choose your English level today."
+
+msgid "Elige tu área."
+msgstr "Choose your field."
+
+msgid "Elige al menos 1 situación."
+msgstr "Choose at least 1 situation."
+
+msgid "Elige como máximo 4 situaciones."
+msgstr "Choose at most 4 situations."
+
+msgid "Elige situaciones de la lista."
+msgstr "Choose situations from the list."
+
+msgid "Elige 15, 20 o 30 minutos."
+msgstr "Choose 15, 20 or 30 minutes."
+
+msgid "Elige de 2 a 7 días."
+msgstr "Choose 2 to 7 days."
+
+msgid "Elige el nivel que quieres alcanzar."
+msgstr "Choose the level you want to reach."
+
+msgid "Tu meta debe ser igual o más alta que tu nivel de hoy."
+msgstr "Your goal must be your current level or higher."
+
+msgid "Elige una fecha entre 4 semanas y 1 año a partir de hoy, o déjala vacía."
+msgstr "Choose a date between 4 weeks and 1 year from today, or leave it empty."
+
+msgid "Máximo 300 caracteres."
+msgstr "300 characters at most."
+
+msgid "No reconocimos la zona horaria de tu navegador. Recarga la página e intenta de nuevo."
+msgstr "We didn't recognise your browser's time zone. Reload the page and try again."
+
+msgid "Guardamos tu perfil."
+msgstr "Your profile is saved."
+
+msgid "Tus respuestas"
+msgstr "Your answers"
+
+msgid "Días a la semana"
+msgstr "Days a week"
+
+msgid "Fecha meta (opcional)"
+msgstr "Target date (optional)"
+
+msgid "Para qué lo quieres, en una frase (opcional)"
+msgstr "Why you want it, in one sentence (optional)"
+
+msgid "Guardar perfil"
+msgstr "Save profile"
+
+msgid "Tu plan"
+msgstr "Your plan"
+
+msgid "%(weeks)s semanas · %(planned)s sesiones planeadas · %(done)s hechas"
+msgstr "%(weeks)s weeks · %(planned)s sessions planned · %(done)s done"
+
+msgid "Semana %(n)s"
+msgstr "Week %(n)s"
+
+msgid "Hablar"
+msgstr "Speaking"
+
+msgid "Escribir"
+msgstr "Writing"
+
+msgid "Hecha"
+msgstr "Done"
+
+msgid "Saltada"
+msgstr "Skipped"
+
+msgid "Responde tu perfil y armamos tu plan de práctica."
+msgstr "Fill in your profile and we'll build your practice plan."
+
+msgid "Ir a tu perfil"
+msgstr "Go to your profile"
+
+msgid "Guardamos tu perfil, tu plan, lo que dices en cada lección (como lo reporta tu asistente), tus errores y tu glosario; nunca audio. Tus lecciones pasan por el proveedor de tu asistente, por ejemplo Claude. Para borrar tus datos, escribe a %(email)s."
+msgstr "We store your profile, your plan, what you say in each lesson (as your assistant reports it), your mistakes and your glossary; never audio. Your lessons pass through your assistant's provider, for example Claude. To delete your data, write to %(email)s."
+
+msgid "Para continuar cada sesión donde quedó la anterior y calcular tu progreso."
+msgstr "To continue each session where the last one ended and to compute your progress."
+
+msgid "En esta versión de prueba pides una copia de tus datos o el borrado de tu cuenta escribiendo a %(email)s; lo hacemos a mano y te confirmamos por correo."
+msgstr "In this trial version you ask for a copy of your data or for your account to be deleted by writing to %(email)s; we do it by hand and confirm by email."
+
+msgid "Precio"
+msgstr "Price"
+
+msgid "Esta versión de prueba no tiene cobros."
+msgstr "This trial version has no charges."

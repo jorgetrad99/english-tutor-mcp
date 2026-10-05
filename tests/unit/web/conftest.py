@@ -11,6 +11,7 @@ from tutor.web.app import create_app
 from tutor.web.config import WebConfig
 from tutor.web.demo import DemoUsers, seed_demo
 from tutor.web.memory import FakeBilling, FakeGoogle, FixedClock, MemoryBackend, memory_deps
+from tutor.web.profile import MemoryProfiles, install_profiles
 
 NOW = datetime(2027, 1, 12, 18, 0, tzinfo=UTC)  # 12:00 in Mexico City, a Tuesday
 TODAY = date(2027, 1, 12)
@@ -54,6 +55,12 @@ def config() -> WebConfig:
 
 
 @pytest.fixture
+def profiles(clock: FixedClock) -> MemoryProfiles:
+    """Core in-memory profile services behind the Perfil port (core Task 25)."""
+    return MemoryProfiles(clock)
+
+
+@pytest.fixture
 def app(
     backend: MemoryBackend,
     demo: DemoUsers,
@@ -61,8 +68,11 @@ def app(
     billing: FakeBilling,
     google: FakeGoogle,
     config: WebConfig,
+    profiles: MemoryProfiles,
 ) -> FastAPI:
-    return create_app(memory_deps(backend, clock, billing=billing, google=google), config)
+    application = create_app(memory_deps(backend, clock, billing=billing, google=google), config)
+    install_profiles(application, profiles)
+    return application
 
 
 @pytest.fixture
@@ -91,6 +101,6 @@ _CSRF = re.compile(r'<meta name="csrf-token" content="([^"]+)">')
 
 
 def csrf_of(client: TestClient) -> str:
-    match = _CSRF.search(client.get("/app/account").text)
+    match = _CSRF.search(client.get("/app/connect").text)
     assert match, "csrf meta tag missing"
     return match.group(1)

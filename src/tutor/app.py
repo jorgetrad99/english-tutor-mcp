@@ -37,6 +37,7 @@ from tutor.web.pg import (
     PgWebBackend,
     pg_web_deps,
 )
+from tutor.web.profile import ServicesProfiles, install_profiles
 from tutor.web.sessions import ANONYMOUS_LIFETIME
 
 Scope = MutableMapping[str, Any]
@@ -286,7 +287,9 @@ def build_app(
     mcp_app: ASGIApp = RequestLog(BodySizeGuard(mcp.http_app(path=MCP_PATH)))
     if on_postgres and isinstance(deps.sessions, PgWebBackend):
         mcp_app = PeriodicPurge(mcp_app, _session_purge(deps.sessions, config, deps.clock))
-    web_app = RequestLog(BodySizeGuard(create_app(deps, config)))
+    web = create_app(deps, config)
+    install_profiles(web, ServicesProfiles(svc))  # Perfil saves through the same Services
+    web_app = RequestLog(BodySizeGuard(web))
     return PathDispatch(mcp_app, web_app=web_app)
 
 

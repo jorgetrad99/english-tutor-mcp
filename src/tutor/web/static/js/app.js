@@ -280,3 +280,17 @@ if ("serviceWorker" in navigator) {
 }
 
 init(document);
+
+// Perfil (core loop v0): send the browser's IANA time zone with the profile form (spec 6.1).
+function fillTimezones(root) {
+  let zone = "";
+  try {
+    zone = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+  } catch {
+    zone = "";
+  }
+  if (!zone) return;
+  for (const input of root.querySelectorAll("input[data-timezone]")) input.value = zone;
+}
+fillTimezones(document);
+document.addEventListener("htmx:afterSwap", (event) => fillTimezones(event.target));

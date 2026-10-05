@@ -9,15 +9,25 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tutor.domain.dashboard.types import Lang
+from tutor.domain.profile import ProfileInput
 from tutor.web.app import create_app
 from tutor.web.config import WebConfig
 from tutor.web.demo import DemoUsers
 from tutor.web.memory import FakeGoogle, FixedClock, MemoryBackend, memory_deps
 from tutor.web.ports import GoogleIdentity, WebSession
+from tutor.web.profile import MemoryProfiles
 from tutor.web.sessions import COOKIE, hash_token
 
 from .conftest import BASE, NOW, csrf_of
 
+ANA_ANSWERS = ProfileInput(
+    self_level="B1",
+    domains=["it"],
+    use_cases=["standup"],
+    minutes_per_day=20,
+    days_per_week=3,
+    target_level="B2",
+)
 HOSTILE = ["//evil.example", r"/\evil.example", "/\t/evil.example", "https://evil.example"]
 
 
@@ -25,16 +35,37 @@ def _callback(start_location: str) -> str:
     return start_location.replace(BASE, "")
 
 
-def test_google_round_trip_creates_user_and_lands_on_next(
+def test_google_round_trip_creates_user_and_lands_on_profile(
     client: TestClient, google: FakeGoogle, backend: MemoryBackend
 ) -> None:
     google.next_identity = GoogleIdentity("g-123", "carla@example.com", "Carla", True)
     start = client.get("/auth/google?next=/app/glossary")
     assert start.status_code == 302
-    callback = client.get(_callback(start.headers["location"]))
-    assert callback.status_code == 303 and callback.headers["location"] == "/app/glossary"
+    callback = client.get(start.headers["location"].replace("https://testserver", ""))
+    # Core loop v0 (spec 6.3): a login without a profile goes to Perfil, whatever `next` says.
+    assert callback.status_code == 303 and callback.headers["location"] == "/app/profile"
     assert any(u.display_name == "Carla" for u in backend.users.values())
     assert COOKIE in client.cookies
+
+
+def test_onboarded_learner_lands_on_next(
+    client: TestClient, google: FakeGoogle, demo: DemoUsers, profiles: MemoryProfiles
+) -> None:
+    profiles.save(demo.ana, ANA_ANSWERS)
+    google.next_identity = GoogleIdentity("demo-ana", "ana@example.com", "Ana", True)
+    start = client.get("/auth/google?next=/app/glossary")
+    callback = client.get(start.headers["location"].replace("https://testserver", ""))
+    assert callback.headers["location"] == "/app/glossary"
+
+
+def test_open_redirect_in_next_is_ignored(
+    client: TestClient, google: FakeGoogle, demo: DemoUsers, profiles: MemoryProfiles
+) -> None:
+    profiles.save(demo.ana, ANA_ANSWERS)
+    google.next_identity = GoogleIdentity("demo-ana", "ana@example.com", "Ana", True)
+    start = client.get("/auth/google?next=https://evil.example")
+    callback = client.get(start.headers["location"].replace("https://testserver", ""))
+    assert callback.headers["location"] == "/app/"
 
 
 def test_user_is_linked_by_sub_not_email(
@@ -70,7 +101,8 @@ def test_hostile_next_is_replaced_on_start_and_again_on_callback(
     # Defence in depth: even a poisoned stored value is validated before redirecting.
     stored["login_next"] = hostile
     callback = client.get(_callback(start.headers["location"]))
-    assert callback.status_code == 303 and callback.headers["location"] == "/app/"
+    # A brand-new user has no profile, so the first login lands on Perfil (spec 6.3), not on `next`.
+    assert callback.status_code == 303 and callback.headers["location"] == "/app/profile"
 
 
 def test_deleted_user_cannot_sign_in(
@@ -95,7 +127,7 @@ def test_logout_deletes_session_clears_cookie_and_site_data(
     assert response.headers["clear-site-data"] == '"cache", "cookies", "storage"'
     assert "Max-Age=0" in response.headers["set-cookie"]
     assert backend.web_sessions == {}
-    assert c.get("/app/account").status_code == 303
+    assert c.get("/app/connect").status_code == 303
 
 
 def test_logout_requires_post_and_csrf(

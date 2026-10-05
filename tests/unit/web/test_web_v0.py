@@ -152,11 +152,11 @@ def test_request_log_names_the_route_and_the_learner(
     caplog.set_level(logging.INFO, logger="tutor.http")
     with TestClient(RequestLog(app), base_url=BASE, follow_redirects=False) as client:
         assert client.post("/auth/test-login", data={"user_id": str(demo.ana)}).status_code == 303
-        assert client.get("/app/account?q=private-words").status_code == 200
+        assert client.get("/app/connect?q=private-words").status_code == 200
     lines = [json.loads(r.getMessage()) for r in caplog.records if r.name == "tutor.http"]
     assert [(x["route"], x["status"]) for x in lines] == [
         ("/auth/test-login", 303),
-        ("/app/account", 200),
+        ("/app/connect", 200),
     ]
     assert lines[1]["user_hash"] == user_hash(demo.ana)
     assert "private-words" not in caplog.text

@@ -18,8 +18,8 @@
   {% if not home.has_plan %}
   <section class="card card--wide today" aria-labelledby="next-title">
     <h2 id="next-title" class="card__title">{{ _("Tu siguiente paso") }}</h2>
-    <p>{% trans %}Haz tu diagnóstico en el chat: di <code lang="en">start my lesson</code>.{% endtrans %}</p>
-    <a class="btn btn--primary" href="https://claude.ai" target="_blank" rel="noopener noreferrer">{{ _("Abrir Claude") }}</a>
+    <p>{{ _("Responde tu perfil y armamos tu plan de práctica.") }}</p>
+    <a class="btn btn--primary" href="/app/profile">{{ _("Ir a tu perfil") }}</a>
   </section>
   {% else %}
   <section class="card card--wide today vt-today" aria-labelledby="today-title">
@@ -38,7 +38,7 @@
     <p class="muted">{% trans %}¿Tienes una reunión? Di <code lang="en">prepare me for tomorrow's demo</code> y la lección se arma alrededor de ella.{% endtrans %}</p>
     <div class="card__foot">
       <a class="btn btn--ghost" href="https://claude.ai" target="_blank" rel="noopener noreferrer">{{ _("Abrir Claude") }}</a>
-      <a href="/app/plan">{{ _("Ver plan") }}</a>
+      <a href="/app/profile">{{ _("Ver plan") }}</a>
     </div>
   </section>
 
@@ -94,7 +94,6 @@
       {{ labels.kpi(r.errors_stopped, _("errores que dejaste de cometer")) }}
       {{ labels.kpi(r.chunks_activated, _("frases activadas")) }}
     </div>
-    <a href="/app/reports">{{ _("Ver reportes") }}</a>
   </section>
   {% endif %}
 </div>

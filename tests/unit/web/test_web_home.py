@@ -42,12 +42,14 @@ def test_first_day_shows_connect_steps(login: Login, demo: DemoUsers) -> None:
     assert "trail__label" not in html
 
 
-def test_connected_without_plan_asks_for_the_diagnostic(
+def test_connected_without_plan_points_to_the_profile(
     login: Login, demo: DemoUsers, backend: MemoryBackend
 ) -> None:
     backend.homes[demo.nuevo] = replace(empty_home(TODAY), has_connected=True)
     html = login(demo.nuevo).get("/app/").text
-    assert "Haz tu diagnóstico en el chat" in html
+    assert "Responde tu perfil y armamos tu plan de práctica." in html
+    assert 'href="/app/profile"' in html
+    assert "diagnóstico" not in html
 
 
 def test_celebrates_a_new_session_once(

@@ -23,6 +23,7 @@ from tutor.web.demo import DemoUsers
 from tutor.web.deps import current_user, require_admin
 from tutor.web.memory import FakeGoogle, FixedClock, MemoryBackend, memory_deps
 from tutor.web.ports import GoogleIdentity
+from tutor.web.profile import MemoryProfiles, install_profiles
 
 from .conftest import BASE
 
@@ -34,7 +35,7 @@ _CSRF = re.compile(r'<meta name="csrf-token" content="([^"]+)">')
 class OffLoop:
     """Forwards to the memory backend and records any call made on the event loop thread."""
 
-    def __init__(self, inner: MemoryBackend) -> None:
+    def __init__(self, inner: Any) -> None:
         self._inner = inner
         self.calls: list[str] = []
         self.on_loop: list[str] = []
@@ -62,8 +63,17 @@ def ports(backend: MemoryBackend, demo: DemoUsers) -> OffLoop:
 
 
 @pytest.fixture
+def profile_ports(clock: FixedClock) -> OffLoop:
+    return OffLoop(MemoryProfiles(clock))
+
+
+@pytest.fixture
 def threaded_app(
-    ports: OffLoop, clock: FixedClock, google: FakeGoogle, config: WebConfig
+    ports: OffLoop,
+    profile_ports: OffLoop,
+    clock: FixedClock,
+    google: FakeGoogle,
+    config: WebConfig,
 ) -> FastAPI:
     deps = replace(
         memory_deps(ports._inner, clock, google=google),
@@ -76,6 +86,7 @@ def threaded_app(
         settings=ports,
     )
     app = create_app(deps, config)
+    install_profiles(app, profile_ports)  # type: ignore[arg-type]
 
     @app.get("/app/admin-probe", dependencies=[Depends(require_admin)])
     def admin_probe() -> PlainTextResponse:
@@ -95,7 +106,12 @@ def client(threaded_app: FastAPI) -> Iterator[TestClient]:
 
 
 def test_every_port_call_runs_off_the_event_loop(
-    client: TestClient, ports: OffLoop, demo: DemoUsers, google: FakeGoogle, clock: FixedClock
+    client: TestClient,
+    ports: OffLoop,
+    profile_ports: OffLoop,
+    demo: DemoUsers,
+    google: FakeGoogle,
+    clock: FixedClock,
 ) -> None:
     google.next_identity = GoogleIdentity("g-ana-new", "x@example.com", "X", True)
     start = client.get("/auth/google?next=/app/")
@@ -103,7 +119,7 @@ def test_every_port_call_runs_off_the_event_loop(
     assert client.get(start.headers["location"].replace(BASE, "")).status_code == 303
     client.cookies.clear()
     assert client.post("/auth/test-login", data={"user_id": str(demo.ana)}).status_code == 303
-    page = client.get("/app/account")
+    page = client.get("/app/connect")
     assert page.status_code == 200
     match = _CSRF.search(page.text)
     assert match
@@ -111,10 +127,25 @@ def test_every_port_call_runs_off_the_event_loop(
     assert client.post("/app/lang", data={"lang": "en", "csrf_token": csrf}).status_code == 303
     dismissed = client.post("/app/install/dismiss", data={"csrf_token": csrf})
     assert dismissed.status_code == 303
+    saved = client.post(
+        "/app/profile",
+        data={
+            "csrf_token": csrf,
+            "self_level": "B1",
+            "domains": ["it"],
+            "use_cases": ["standup"],
+            "minutes_per_day": "20",
+            "days_per_week": "3",
+            "target_level": "B2",
+            "timezone": "America/Mexico_City",
+        },
+    )
+    assert saved.status_code == 303
+    assert client.get("/app/profile").status_code == 200
     assert client.get("/app/admin-probe").status_code == 404  # error page rendered for a user
     assert client.get("/app/crash-probe").status_code == 500  # ErrorGuard page for a user
     clock.advance(timedelta(minutes=6))
-    assert client.get("/app/account").status_code == 200  # the session is touched
+    assert client.get("/app/connect").status_code == 200  # the session is touched
     assert client.post("/auth/logout", data={"csrf_token": csrf}).status_code == 303
     called = set(ports.calls)
     assert {
@@ -131,6 +162,8 @@ def test_every_port_call_runs_off_the_event_loop(
         "subscription",
     } <= called
     assert ports.on_loop == []
+    assert {"view", "save"} <= set(profile_ports.calls)  # callback, Perfil GET and POST
+    assert profile_ports.on_loop == []
 
 
 def test_an_expired_session_is_deleted_off_the_loop(
@@ -138,7 +171,7 @@ def test_an_expired_session_is_deleted_off_the_loop(
 ) -> None:
     assert client.post("/auth/test-login", data={"user_id": str(demo.ana)}).status_code == 303
     clock.advance(timedelta(days=15))
-    assert client.get("/app/account").status_code == 303
+    assert client.get("/app/connect").status_code == 303
     assert "delete_session" in ports.calls
     assert ports.on_loop == []
 
@@ -147,7 +180,7 @@ def test_the_user_is_loaded_once_per_request(
     client: TestClient, ports: OffLoop, demo: DemoUsers
 ) -> None:
     assert client.post("/auth/test-login", data={"user_id": str(demo.ana)}).status_code == 303
-    page = client.get("/app/account")
+    page = client.get("/app/connect")
     match = _CSRF.search(page.text)
     assert match
     ports.calls.clear()

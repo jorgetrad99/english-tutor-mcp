@@ -24,6 +24,7 @@ from tutor.web.deps import (
     require_csrf_if_session,
 )
 from tutor.web.ports import LoginFailed
+from tutor.web.profile import PROFILE_PATH, optional_profiles
 from tutor.web.security import safe_next
 from tutor.web.views import render
 
@@ -54,6 +55,11 @@ async def google_callback(request: Request) -> Response:
         request.state.web.logout()  # drop the anonymous login session and its cookie
         return await run_in_threadpool(render, request, "pages/deletion_pending.html")
     target = safe_next(stored if isinstance(stored, str) else None)
+    profiles = optional_profiles(request)
+    if profiles is not None:
+        view = await run_in_threadpool(profiles.view, user.id)
+        if view.onboarding_needed:
+            target = PROFILE_PATH  # core loop v0 spec 6.3: no profile yet, so Perfil first
     request.state.web.login(user.id)
     return RedirectResponse(target, status_code=303)
 
@@ -82,12 +88,6 @@ def switch_lang(
     prefs = deps.reader.account(user.id).prefs
     deps.account.set_preferences(user.id, replace(prefs, lang=Lang(lang)))
     return RedirectResponse(safe_next(back), status_code=303)
-
-
-@app_router.get("/app/account", response_class=HTMLResponse)
-def account_stub(request: Request, user: Annotated[User, Depends(current_user)]) -> HTMLResponse:
-    # Temporary (V9): deleted by core Task 25; `csrf_of` loads it to read the CSRF meta tag.
-    return render(request, "layouts/app.html", {"active_nav": "account"})
 
 
 test_router = APIRouter()

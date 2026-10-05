@@ -55,6 +55,7 @@ POSTPONED_PREFIXES = (
     "/app/plan",
     "/app/progress",
     "/app/reports",
+    "/app/account",
 )
 NOT_USER_OWNED = {"key"}  # admin setting keys are global and guarded by require_admin
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
@@ -124,7 +125,7 @@ def test_unsafe_methods_need_the_csrf_token(app: FastAPI, login: Login, demo: De
                 f"{method} {route.path} answered {response.status_code} without a CSRF token"
             )
             checked += 1
-    assert checked >= 4
+    assert checked >= 5
 
 
 def test_another_users_ids_are_not_found(

@@ -530,3 +530,13 @@ body[data-reduce-motion] *, body[data-reduce-motion] *::before, body[data-reduce
 .edit-form__text { margin: 0; }
 .edit-form input, .edit-form textarea { width: 100%; min-height: 2.75rem; font: inherit; }
 .edit-form__actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+
+/* Perfil (core loop v0 Task 25) */
+.profile-form { display: grid; gap: 1.25rem; }
+.profile-form fieldset { display: grid; gap: .35rem; margin: 0; padding: 0; border: 0; }
+.profile-form legend { margin-bottom: .35rem; font-weight: 600; }
+.choice { display: grid; grid-template-columns: auto 1fr; column-gap: .5rem; align-items: start; min-height: 44px; }
+.choice__hint { grid-column: 2; font-size: .85rem; }
+.profile-form select, .profile-form textarea, .profile-form input[type="date"] { display: block; width: 100%; max-width: 32rem; min-height: 44px; font: inherit; }
+.plan-week { display: grid; gap: .5rem; margin: 0; padding-left: 1.25rem; }
+.plan-week__item { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }

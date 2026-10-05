@@ -12,6 +12,7 @@ import httpx
 import pytest
 import sqlalchemy
 from cryptography.fernet import Fernet
+from fastapi import FastAPI
 from key_value.aio.stores.memory import MemoryStore
 from mcp_lesson import NOW
 
@@ -23,6 +24,7 @@ from tutor.services.memory import MemoryIdentity, memory_uow
 from tutor.services.memory import MemoryStore as ServiceStore
 from tutor.settings import Settings
 from tutor.web.config import WebConfig
+from tutor.web.profile import ServicesProfiles
 from tutor.web.security import CSP
 
 pytestmark = pytest.mark.unit
@@ -151,7 +153,7 @@ async def test_build_app_serves_mcp_and_the_website_with_separate_headers(
     async with serving(app) as client:
         denied = await client.post("/mcp", json=INIT, headers=HEADERS)
         metadata = await client.get("/.well-known/oauth-authorization-server")
-        home = await client.get("/app/account")
+        home = await client.get("/app/connect")
         login = await client.get("/login?next=%2Fapp%2Fsecret-next")
         await client.get("/oauth/callback?code=secret-code&state=s")
         big = await client.post(
@@ -162,7 +164,7 @@ async def test_build_app_serves_mcp_and_the_website_with_separate_headers(
     assert denied.status_code == 401
     assert "content-security-policy" not in denied.headers
     assert "content-security-policy" not in metadata.headers
-    assert (home.status_code, home.headers["location"]) == (303, "/login?next=%2Fapp%2Faccount")
+    assert (home.status_code, home.headers["location"]) == (303, "/login?next=%2Fapp%2Fconnect")
     assert login.status_code == 200
     assert login.headers["content-security-policy"] == CSP
     assert login.headers["cache-control"] == "no-store"
@@ -172,7 +174,7 @@ async def test_build_app_serves_mcp_and_the_website_with_separate_headers(
     routes = [(line["route"], line["status"]) for line in lines]
     assert routes == [
         ("/.well-known/oauth-authorization-server", 200),
-        ("/app/account", 303),
+        ("/app/connect", 303),
         ("/login", 200),
         ("/oauth/callback", 400),
         ("unmatched", 413),
@@ -216,3 +218,14 @@ async def test_a_failing_route_is_logged_as_500_and_re_raised(
     assert json.loads(caplog.records[0].getMessage())["status"] == 500
     assert "SECRET" not in caplog.text
     assert "boom" not in caplog.text
+
+
+def test_build_app_installs_the_profile_port(tmp_path: Path) -> None:
+    app = build_app(
+        settings(tmp_path), engine=sqlalchemy.create_engine("sqlite://"), web_config=WEB_CONFIG
+    )
+    logged = app.web_app
+    assert isinstance(logged, RequestLog) and isinstance(logged.app, BodySizeGuard)
+    web = logged.app.app
+    assert isinstance(web, FastAPI)
+    assert isinstance(web.state.profiles, ServicesProfiles)
