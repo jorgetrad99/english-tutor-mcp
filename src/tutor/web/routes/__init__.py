@@ -8,12 +8,13 @@ from tutor.web.config import WebConfig
 
 
 def all_routers(config: WebConfig) -> list[APIRouter]:
-    from tutor.web.routes import auth, public, pwa
+    from tutor.web.routes import auth, connect, public, pwa
 
     routers: list[APIRouter] = [
         public.router,
         *auth.routers(config),
         pwa.router,
         pwa.app_router,
+        connect.router,
     ]
     return routers

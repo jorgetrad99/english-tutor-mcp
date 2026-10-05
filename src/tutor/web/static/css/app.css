@@ -481,3 +481,9 @@ body[data-reduce-motion] *, body[data-reduce-motion] *::before, body[data-reduce
 :root:has(body[data-reduce-motion])::view-transition-group(*),
 :root:has(body[data-reduce-motion])::view-transition-old(*),
 :root:has(body[data-reduce-motion])::view-transition-new(*) { animation: none !important; }
+
+/* Conectar (Task 20) */
+.steps h3 { margin: 0 0 .25rem; font-size: 1rem; }
+.connect-status { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; margin-top: 1rem; }
+.connect-status p { margin: 0; }
+.skeleton--dot { display: inline-block; width: .75rem; height: .75rem; border-radius: 50%; background: var(--leaf); vertical-align: middle; }

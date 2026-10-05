@@ -225,3 +225,48 @@ msgstr "Copied"
 
 msgid "No se pudo copiar; selecciona el texto."
 msgstr "Couldn't copy; select the text instead."
+
+msgid "Conectar"
+msgstr "Connect"
+
+msgid "Conecta tu tutor"
+msgstr "Connect your tutor"
+
+msgid "Tu tutor vive dentro de Claude. Conéctalo una vez; después solo di la frase de inicio."
+msgstr "Your tutor lives inside Claude. Connect it once; after that, just say the start phrase."
+
+msgid "Copia la dirección de tu tutor"
+msgstr "Copy your tutor's address"
+
+msgid "Copiar"
+msgstr "Copy"
+
+msgid "Agrégalo a Claude"
+msgstr "Add it to Claude"
+
+msgid "En Claude web, escritorio o celular: Configuración → Conectores → Agregar conector personalizado. Pega la dirección y entra con tu cuenta de Google."
+msgstr "In Claude on the web, desktop or phone: Settings → Connectors → Add custom connector. Paste the address and sign in with your Google account."
+
+msgid "En Claude Code, ejecuta:"
+msgstr "In Claude Code, run:"
+
+msgid "Empieza tu primera lección"
+msgstr "Start your first lesson"
+
+msgid "En un chat nuevo, di:"
+msgstr "In a new chat, say:"
+
+msgid "Abrir Claude"
+msgstr "Open Claude"
+
+msgid "Tu tutor ya registró tu primera sesión."
+msgstr "Your tutor has recorded your first session."
+
+msgid "Aún no vemos tu primera sesión. Cuando termines una lección en Claude, revisa de nuevo."
+msgstr "We don't see your first session yet. When you finish a lesson in Claude, check again."
+
+msgid "Revisar de nuevo"
+msgstr "Check again"
+
+msgid "Esperando tu primera sesión…"
+msgstr "Waiting for your first session…"

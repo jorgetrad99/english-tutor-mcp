@@ -1,0 +1,8 @@
+{% extends "layouts/app.html" %}
+{% set active_nav = "connect" %}
+{% block title %}{{ _("Conectar") }} · English Tutor{% endblock %}
+{% block content %}
+<header class="page-head"><h1>{{ _("Conectar") }}</h1></header>
+{% include "partials/connect_steps.html" %}
+{% include "partials/connect_status.html" %}
+{% endblock %}
