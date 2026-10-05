@@ -204,3 +204,16 @@ def test_offline_response_sets_no_cookie_and_is_not_personalised(
     assert "set-cookie" not in anonymous.headers
     logged_in = login(demo.ana).get("/offline")
     assert logged_in.text == anonymous.text
+
+
+def test_service_worker_matches_static_files_ignoring_the_query(client: TestClient) -> None:
+    body = client.get("/sw.js").text
+    assert "caches.match(request, { ignoreSearch: true })" in body  # fonts named in CSS have no ?v
+
+
+def test_install_handler_survives_a_refused_prompt() -> None:
+    source = (Path(tutor.web.__file__).parent / "static" / "js" / "app.js").read_text("utf-8")
+    handler = source.split("deferredPrompt = null;", 1)[1].split("installButton.hidden = true", 1)[
+        0
+    ]
+    assert "try {" in handler and "await prompt.prompt()" in handler and "catch" in handler

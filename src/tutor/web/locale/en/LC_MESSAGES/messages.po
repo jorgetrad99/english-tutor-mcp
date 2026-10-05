@@ -663,3 +663,9 @@ msgstr "Review due"
 
 msgid "Te cuesta"
 msgstr "Tricky for you"
+
+msgid "Ninguna sesión coincide con esta página."
+msgstr "No session on this page."
+
+msgid "Volver a la primera página"
+msgstr "Back to the first page"

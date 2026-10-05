@@ -267,3 +267,17 @@ def test_error_guard_suppresses_a_failing_error_page_without_chaining(
 def test_safe_next_is_bounded() -> None:
     assert safe_next("/" + "a" * 511) == "/" + "a" * 511
     assert safe_next("/" + "a" * 512) == "/app/"
+
+
+def test_htmx_config_pins_every_safety_key(client: TestClient) -> None:
+    import json
+
+    html = client.get("/login").text
+    raw = re.search(r"<meta name=\"htmx-config\" content='([^']+)'>", html)
+    assert raw
+    config = json.loads(raw.group(1))
+    assert config["allowEval"] is False
+    assert config["includeIndicatorStyles"] is False
+    assert config["historyCacheSize"] == 0
+    assert config["selfRequestsOnly"] is True
+    assert config["allowScriptTags"] is False

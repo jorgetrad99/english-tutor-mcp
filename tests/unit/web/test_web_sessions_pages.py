@@ -88,3 +88,29 @@ def test_first_day_has_an_empty_state(login: Login, demo: DemoUsers) -> None:
 def test_sessions_in_english(login: Login, demo: DemoUsers, backend: MemoryBackend) -> None:
     backend.users[demo.ana] = replace(backend.users[demo.ana], lang=Lang.EN)
     assert "Voice" in login(demo.ana).get("/app/sessions").text
+
+
+def test_a_page_past_the_last_offers_the_way_back(login: Login, demo: DemoUsers) -> None:
+    html = login(demo.ana).get("/app/sessions?page=99").text
+    assert "Ninguna sesión coincide con esta página." in html
+    assert 'href="/app/sessions?page=1"' in html
+    assert "Aún no tienes sesiones" not in html
+
+
+def test_first_day_learner_past_page_one_is_not_told_it_is_their_first_day(
+    login: Login, demo: DemoUsers
+) -> None:
+    html = login(demo.nuevo).get("/app/sessions?page=3").text
+    assert "Aún no tienes sesiones" not in html and 'href="/app/sessions?page=1"' in html
+    assert "Aún no tienes sesiones" in login(demo.nuevo).get("/app/sessions").text
+
+
+def test_status_filter_accepts_only_closed_and_incomplete(login: Login, demo: DemoUsers) -> None:
+    c = login(demo.ana)
+    closed = c.get("/app/sessions?status=closed").text
+    assert 'chip chip--ok">Completa<' in closed and "Incompleta<" not in closed.split("<table")[1]
+    assert '<option value="closed" selected>' in closed
+    for raw in ("open", "bogus"):
+        html = c.get(f"/app/sessions?status={raw}").text
+        assert "selected>Completa" not in html and '<option value="closed" selected>' not in html
+        assert "Explicar un bloqueo técnico" in html

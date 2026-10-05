@@ -6,11 +6,13 @@ until an isolation case is added below.
 
 import re
 from collections.abc import Callable
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
-from fastapi import APIRouter, Depends, FastAPI
+from fastapi import APIRouter, Depends, FastAPI, Request, Response
 from fastapi.routing import APIRoute
+from fastapi.staticfiles import StaticFiles
 from fastapi.testclient import TestClient
 
 from tutor.domain.dashboard.types import ConnectedClient
@@ -36,6 +38,13 @@ PUBLIC = {
     "/auth/test-login",
 }
 PROTECTED_PREFIXES = ("/app",)
+
+
+def under_app(path: str) -> bool:
+    """Exact /app prefix: "/application" is not a dashboard page."""
+    return path == "/app" or path.startswith("/app/")
+
+
 CSRF_EXEMPT = {("POST", "/auth/test-login")}
 # Core loop v0 (plan ruling 11): postponed pages are not registered at all.
 POSTPONED_PREFIXES = (
@@ -77,9 +86,11 @@ def _other_users_ids(backend: MemoryBackend, demo: DemoUsers) -> dict[str, str]:
 
 
 def test_every_route_is_classified(app: FastAPI) -> None:
-    for route in _routes(app):
+    routes = _routes(app)
+    assert len(routes) >= 20 and {r.path for r in routes} >= PUBLIC
+    for route in routes:
         public = route.path in PUBLIC
-        protected = route.path.startswith(PROTECTED_PREFIXES)
+        protected = under_app(route.path)
         assert public != protected, (
             f"classify {route.path}: list it in PUBLIC or move it under /app"
         )
@@ -88,7 +99,7 @@ def test_every_route_is_classified(app: FastAPI) -> None:
 def test_protected_pages_redirect_anonymous_visitors(app: FastAPI, client: TestClient) -> None:
     checked = 0
     for route in _routes(app):
-        if "GET" not in _methods(route) or not route.path.startswith(PROTECTED_PREFIXES):
+        if "GET" not in _methods(route) or not under_app(route.path):
             continue
         path = _fill(route.path, {})
         page = client.get(path)
@@ -155,7 +166,12 @@ def test_own_ids_still_work(login: Login, demo: DemoUsers, backend: MemoryBacken
 
 def test_postponed_pages_are_not_registered(app: FastAPI) -> None:
     paths = [route.path for route in _routes(app)]
+    assert len(paths) >= 20 and set(paths) >= PUBLIC
     assert [p for p in paths if p.startswith(POSTPONED_PREFIXES)] == []
+
+
+def bare_app() -> FastAPI:
+    return FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
 
 
 def test_csrf_guard_sees_routes_of_included_routers(config: WebConfig) -> None:
@@ -165,7 +181,7 @@ def test_csrf_guard_sees_routes_of_included_routers(config: WebConfig) -> None:
     async def unguarded() -> None:  # pragma: no cover - never called
         return None
 
-    app = FastAPI()
+    app = bare_app()
     app.include_router(router)
     with pytest.raises(RuntimeError, match="/app/unguarded"):
         assert_csrf_everywhere(app, config)
@@ -178,13 +194,13 @@ def test_csrf_guard_accepts_guarded_routes_of_included_routers(config: WebConfig
     async def guarded() -> None:  # pragma: no cover - never called
         return None
 
-    app = FastAPI()
+    app = bare_app()
     app.include_router(router)
     assert_csrf_everywhere(app, config)
 
 
 def test_route_walker_refuses_prefixed_includes() -> None:
-    app = FastAPI()
+    app = bare_app()
     app.include_router(APIRouter(), prefix="/x")
     app.include_router(_router_with_route(), prefix="/x")
     with pytest.raises(RuntimeError, match="prefix"):
@@ -199,3 +215,76 @@ def _router_with_route() -> APIRouter:
         return None
 
     return router
+
+
+def test_csrf_guard_sees_unguarded_posts_in_nested_includes(config: WebConfig) -> None:
+    inner = APIRouter()
+
+    @inner.post("/app/deep")
+    async def deep() -> None:  # pragma: no cover - never called
+        return None
+
+    outer = APIRouter()
+    outer.include_router(inner)
+    app = bare_app()
+    app.include_router(outer)
+    assert [r.path for r in iter_api_routes(app)] == ["/app/deep"]
+    with pytest.raises(RuntimeError, match="/app/deep"):
+        assert_csrf_everywhere(app, config)
+
+
+def test_route_walker_refuses_includes_with_dependencies(config: WebConfig) -> None:
+    app = bare_app()
+    app.include_router(_router_with_route(), dependencies=[Depends(require_csrf)])
+    with pytest.raises(RuntimeError, match="dependencies"):
+        iter_api_routes(app)
+    with pytest.raises(RuntimeError, match="dependencies"):
+        assert_csrf_everywhere(app, config)
+
+
+def test_route_walker_refuses_a_parent_router_with_a_prefix() -> None:
+    parent = APIRouter(prefix="/p")
+    parent.include_router(_router_with_route())
+    app = bare_app()
+    app.include_router(parent)
+    with pytest.raises(RuntimeError, match="prefix"):
+        iter_api_routes(app)
+
+
+def test_route_walker_refuses_plain_starlette_routes(config: WebConfig) -> None:
+    async def handler(request: Request) -> Response:  # pragma: no cover - never called
+        return Response()
+
+    app = bare_app()
+    app.add_route("/app/raw", handler, methods=["POST"])
+    with pytest.raises(RuntimeError, match="unsupported route node"):
+        iter_api_routes(app)
+    with pytest.raises(RuntimeError, match="unsupported route node"):
+        assert_csrf_everywhere(app, config)
+
+
+def test_route_walker_allows_only_the_static_mount(tmp_path: Path) -> None:
+    app = bare_app()
+    app.include_router(_router_with_route())
+    app.mount("/static", StaticFiles(directory=tmp_path), name="static")
+    assert [r.path for r in iter_api_routes(app)] == ["/a"]
+    other = bare_app()
+    other.mount("/files", StaticFiles(directory=tmp_path), name="files")
+    with pytest.raises(RuntimeError, match="unsupported route node"):
+        iter_api_routes(other)
+    sub = bare_app()
+    sub.mount("/static", bare_app())
+    with pytest.raises(RuntimeError, match="unsupported route node"):
+        iter_api_routes(sub)
+
+
+def test_route_walker_refuses_low_priority_routes() -> None:
+    app = bare_app()
+    app.router._low_priority_routes.append(object())  # type: ignore[arg-type]
+    with pytest.raises(RuntimeError, match="low-priority"):
+        iter_api_routes(app)
+
+
+def test_app_prefix_is_exact() -> None:
+    assert under_app("/app") and under_app("/app/") and under_app("/app/profile")
+    assert not under_app("/application") and not under_app("/apple")

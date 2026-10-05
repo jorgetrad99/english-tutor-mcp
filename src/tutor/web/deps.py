@@ -79,9 +79,8 @@ async def require_csrf(request: Request) -> None:
     if request.method in _SAFE_METHODS:
         return
     if (
-        request.url.path.startswith("/app")
-        and await run_in_threadpool(optional_user, request) is None
-    ):
+        request.url.path == "/app" or request.url.path.startswith("/app/")
+    ) and await run_in_threadpool(optional_user, request) is None:
         raise NotAuthenticated(request.url.path)  # nothing to forge without a session
     holder = getattr(request.state, "web", None)
     session = getattr(holder, "session", None)

@@ -16,6 +16,7 @@ from tutor.web.views import is_htmx, render
 router = APIRouter(dependencies=APP_ROUTER_DEPS)
 PER_PAGE = 20
 MAX_PAGE = 10_000
+LISTED_STATUSES = frozenset({SessionStatus.CLOSED, SessionStatus.INCOMPLETE})
 
 
 def page_url(f: SessionFilter, page: int) -> str:
@@ -26,15 +27,18 @@ def page_url(f: SessionFilter, page: int) -> str:
 @router.get("/app/sessions", response_class=HTMLResponse)
 def sessions_page(request: Request, user: Annotated[User, Depends(current_user)]) -> HTMLResponse:
     params = request.query_params
+    status = enum_or_none(SessionStatus, params.get("status"))
     f = SessionFilter(
         mode=enum_or_none(Mode, params.get("mode")),
-        status=enum_or_none(SessionStatus, params.get("status")),
+        status=status if status in LISTED_STATUSES else None,
     )
     page = bounded_int(params.get("page"), default=1, minimum=1, maximum=MAX_PAGE)
     result = get_deps(request).reader.sessions(user.id, f, page, PER_PAGE)
     ctx = {
         "result": result,
         "f": f,
+        "page": page,
+        "first_url": page_url(f, 1),
         "prev_url": page_url(f, page - 1) if page > 1 else None,
         "next_url": page_url(f, page + 1) if result.has_next else None,
     }

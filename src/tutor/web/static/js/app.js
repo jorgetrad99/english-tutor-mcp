@@ -235,8 +235,12 @@ document.addEventListener("click", async (event) => {
   if (installButton && deferredPrompt) {
     const prompt = deferredPrompt;
     deferredPrompt = null;
-    await prompt.prompt();
-    await prompt.userChoice;
+    try {
+      await prompt.prompt();
+      await prompt.userChoice;
+    } catch {
+      // The browser refused or cancelled the prompt; the button is hidden either way.
+    }
     installButton.hidden = true;
   }
 });

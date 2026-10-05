@@ -355,7 +355,7 @@ def test_purge_expired_removes_idle_absolute_and_anonymous_rows(
 
 
 def test_unprotected_unsafe_route_is_rejected_at_startup(config: WebConfig) -> None:
-    bare = FastAPI()
+    bare = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
 
     @bare.post("/oops")
     async def oops() -> PlainTextResponse:
@@ -363,14 +363,14 @@ def test_unprotected_unsafe_route_is_rejected_at_startup(config: WebConfig) -> N
 
     with pytest.raises(RuntimeError, match="/oops"):
         assert_csrf_everywhere(bare, config)
-    guarded = FastAPI()
+    guarded = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
     guarded.include_router(_probe_router())
     assert_csrf_everywhere(guarded, config)  # protected routes pass
 
 
 def test_csrf_exemption_exists_only_with_test_login(config: WebConfig) -> None:
     def build(test_login: bool) -> FastAPI:
-        bare = FastAPI()
+        bare = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
 
         @bare.post("/auth/test-login")
         async def login_route() -> PlainTextResponse:
@@ -385,7 +385,7 @@ def test_csrf_exemption_exists_only_with_test_login(config: WebConfig) -> None:
 
 
 def test_stripe_webhook_path_is_not_exempt(config: WebConfig) -> None:
-    bare = FastAPI()
+    bare = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
 
     @bare.post("/webhooks/stripe")
     async def hook() -> PlainTextResponse:
@@ -398,14 +398,14 @@ def test_stripe_webhook_path_is_not_exempt(config: WebConfig) -> None:
 def test_csrf_if_session_is_accepted_only_on_logout(config: WebConfig) -> None:
     from tutor.web.deps import require_csrf_if_session
 
-    ok = FastAPI()
+    ok = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
 
     @ok.post("/auth/logout", dependencies=[Depends(require_csrf_if_session)])
     async def logout() -> PlainTextResponse:
         return PlainTextResponse("x")
 
     assert_csrf_everywhere(ok, config)
-    bad = FastAPI()
+    bad = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
 
     @bad.post("/app/sneaky", dependencies=[Depends(require_csrf_if_session)])
     async def sneaky() -> PlainTextResponse:

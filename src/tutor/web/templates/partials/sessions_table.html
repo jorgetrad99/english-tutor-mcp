@@ -36,6 +36,8 @@
     {% if prev_url %}<a class="btn btn--ghost btn--small" href="{{ prev_url }}" hx-get="{{ prev_url }}" hx-target="#sessions-table" hx-swap="outerHTML" hx-push-url="true">{{ _("Más recientes") }}</a>{% endif %}
     {% if next_url %}<a class="btn btn--ghost btn--small" href="{{ next_url }}" hx-get="{{ next_url }}" hx-target="#sessions-table" hx-swap="outerHTML" hx-push-url="true">{{ _("Anteriores") }}</a>{% endif %}
   </nav>
+  {% elif result.page > 1 %}
+  <p class="empty">{{ _("Ninguna sesión coincide con esta página.") }} <a href="{{ first_url }}" hx-get="{{ first_url }}" hx-target="#sessions-table" hx-swap="outerHTML" hx-push-url="true">{{ _("Volver a la primera página") }}</a></p>
   {% elif f.mode or f.status %}
   <p class="empty">{{ _("Ninguna sesión coincide con estos filtros.") }}</p>
   {% else %}
