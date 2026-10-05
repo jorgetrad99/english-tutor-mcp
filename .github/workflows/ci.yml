@@ -36,3 +36,42 @@ jobs:
       - run: uv sync --locked
       # Lint, mypy, all non-eval tests, domain coverage gate and pip-audit.
       - run: uv run just check
+
+  # Version tags (v*) only, after check passes. Coolify builds the head of its `production`
+  # branch; this job points that branch at the tagged commit, deploys and waits, then smoke-tests
+  # the public host. Setup and rollback: docs/v0/coolify.md ("Releases").
+  deploy:
+    needs: check
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    concurrency:
+      group: production
+      cancel-in-progress: false # never cut a deployment (and its migrations) short
+    permissions:
+      contents: write # moves the production branch
+    env:
+      COOLIFY_URL: ${{ vars.COOLIFY_URL }}
+      COOLIFY_APP_UUID: ${{ vars.COOLIFY_APP_UUID }}
+      COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+      TUTOR_BASE_URL: ${{ vars.TUTOR_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Release tags are on main
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - name: Point production at the tag
+        run: git push --force origin "$GITHUB_SHA:refs/heads/production"
+      - name: Deploy with Coolify and wait
+        run: sh deploy/coolify_deploy.sh
+      - name: Smoke check the public host
+        run: |
+          set -o pipefail
+          : "${TUTOR_BASE_URL:?set the TUTOR_BASE_URL variable on the production environment}"
+          curl -fsS --retry 10 --retry-delay 6 --retry-all-errors \
+            "$TUTOR_BASE_URL/.well-known/oauth-authorization-server" \
+            | jq -e --arg want "$TUTOR_BASE_URL/authorize" '.authorization_endpoint == $want'
+          code="$(curl -s -o /dev/null -w '%{http_code}' -X POST "$TUTOR_BASE_URL/mcp")"
+          test "$code" = 401 || { echo "POST /mcp returned $code, expected 401" >&2; exit 1; }

@@ -1,6 +1,6 @@
 # Core loop v0 runbook
 
-The production stack for the core loop v0 (spec `docs/superpowers/specs/2026-10-04-core-loop-v0-design.md`, section 4). One process (`python -m tutor`) serves MCP (`/mcp`), the OAuth proxy and the website. Commands run on the homelab from `/opt/tutor/deploy` unless stated otherwise. Values in angle brackets are chosen once and kept in your password manager, never in the repository.
+The production stack for the core loop v0 (spec `docs/superpowers/specs/2026-10-04-core-loop-v0-design.md`, section 4). One process (`python -m tutor`) serves MCP (`/mcp`), the OAuth proxy and the website. Commands run on the homelab from `/opt/tutor/deploy` unless stated otherwise. Values in angle brackets are chosen once and kept in your password manager, never in the repository. Deploying with Coolify on a VPS instead: `docs/v0/coolify.md` lists what changes.
 
 | Thing | Value |
 | --- | --- |

@@ -18,20 +18,26 @@ chmod 700 "$BACKUP_DIR"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 dump="$BACKUP_DIR/tutor-$stamp.dump"
 roles="$BACKUP_DIR/tutor-roles-$stamp.sql"
-compose="docker compose -f compose.prod.yml"
+# compose.prod.yml by default. Under Coolify (docs/v0/coolify.md, "Backups") set DB_CONTAINER to
+# the db container's name and OAUTH_VOLUME to the oauth volume's name.
+if [ -n "${DB_CONTAINER:-}" ]; then
+  db="docker exec -i $DB_CONTAINER"
+else
+  db="docker compose -f compose.prod.yml exec -T db"
+fi
+OAUTH_VOLUME="${OAUTH_VOLUME:-tutor_oauth}"
 oauth="$BACKUP_DIR/tutor-oauth-$stamp.tgz"
 # Pinned like the other images; bump together with the runbook.
 ALPINE="alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc"
 
 # Write to .partial files and rename only when complete, so a failed run never leaves a file that
 # looks like a backup (and never deletes older ones: retention runs last).
-$compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom' \
-  > "$dump.partial"
-$compose exec -T db sh -c 'pg_dumpall -U "$POSTGRES_USER" --roles-only' > "$roles.partial"
+$db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom' > "$dump.partial"
+$db sh -c 'pg_dumpall -U "$POSTGRES_USER" --roles-only' > "$roles.partial"
 # A dump that pg_restore cannot list, or a roles file without the app role, is not a backup.
-$compose exec -T db pg_restore --list < "$dump.partial" > /dev/null
+$db pg_restore --list < "$dump.partial" > /dev/null
 grep -q 'tutor_app' "$roles.partial"
-docker run --rm -v tutor_oauth:/data/oauth:ro "$ALPINE" tar czf - -C /data oauth > "$oauth.partial"
+docker run --rm -v "$OAUTH_VOLUME":/data/oauth:ro "$ALPINE" tar czf - -C /data oauth > "$oauth.partial"
 tar tzf "$oauth.partial" > /dev/null
 mv "$dump.partial" "$dump"
 mv "$roles.partial" "$roles"

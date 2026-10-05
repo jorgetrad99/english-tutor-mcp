@@ -1,0 +1,128 @@
+# The production stack (compose.prod.yml) as a Coolify "Docker Compose" application.
+# Runbook: docs/v0/coolify.md. ADR: docs/adr/0003-coolify-deployment-keeps-the-tunnel.md.
+# Coolify settings: Base Directory /deploy, Docker Compose Location /compose.coolify.yml,
+# no Domains on any service, Connect To Predefined Network off.
+#
+# Differences from compose.prod.yml, and why:
+#   - No env_file: Coolify's checkout has no git-ignored deploy/*.env. Each service lists exactly
+#     the keys of its *.env.example; secrets are ${NAME:?} (filled in Coolify's UI, the deploy
+#     stops when one is empty) and fixed settings are literals (not editable in the UI).
+#   - The two database URLs are built from the same values, so each password is entered once.
+#   - app and migrate each build the image (cached); no shared `image:` name to depend on.
+#   - edge uses a /24 outside Docker's default pools, where Coolify allocates its own networks.
+#   - The tunnel targets http://tutor-edge-app:8000, an alias that exists on edge only, so
+#     requests always arrive from cloudflared's fixed address even if Coolify adds its network.
+#   - exclude_from_hc on migrate: an exited one-shot must not mark the stack unhealthy.
+# Third-party images and hardening are identical to compose.prod.yml (tests enforce both).
+
+services:
+  db:
+    # PostgreSQL 16 or later is required (see runbook). Digest pinned (postgres:16).
+    image: postgres:16@sha256:1a6ab3f5345eb6dbe04a1349529caabdb0ab09293a09590fad07b2246bfa4b54
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${POSTGRES_DB:?}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [backend]
+    security_opt: ["no-new-privileges:true"]
+    # The official entrypoint chowns the data dir and drops to the postgres user.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    # alembic upgrade head, then create/update the app login role and tutor_report.
+    entrypoint: ["tutor-migrate"]
+    restart: "no"
+    exclude_from_hc: true
+    environment:
+      MIGRATION_DATABASE_URL: postgresql://${POSTGRES_USER:?}:${POSTGRES_PASSWORD:?}@db:5432/${POSTGRES_DB:?}
+      APP_DB_USER: ${APP_DB_USER:?}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?}
+      REPORT_DB_PASSWORD: ${REPORT_DB_PASSWORD:?}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [backend]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    read_only: true
+
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    environment:
+      TUTOR_ENV: prod
+      TUTOR_BASE_URL: ${TUTOR_BASE_URL:?}
+      TUTOR_MCP_URL: ${TUTOR_BASE_URL:?}/mcp
+      TUTOR_SUPPORT_EMAIL: ${TUTOR_SUPPORT_EMAIL:?}
+      # The app's own LOGIN role, never the owner (no MIGRATION_DATABASE_URL here).
+      DATABASE_URL: postgresql://${APP_DB_USER:?}:${APP_DB_PASSWORD:?}@db:5432/${POSTGRES_DB:?}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:?}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:?}
+      TUTOR_JWT_SIGNING_KEY: ${TUTOR_JWT_SIGNING_KEY:?}
+      TUTOR_OAUTH_STORAGE_KEY: ${TUTOR_OAUTH_STORAGE_KEY:?}
+      TUTOR_OAUTH_STORAGE_DIR: /data/oauth
+      TUTOR_PORT: "8000"
+      TUTOR_HOST: 0.0.0.0
+      # cloudflared's fixed edge address below. Never "*".
+      FORWARDED_ALLOW_IPS: 10.213.10.3
+      TUTOR_TEST_LOGIN: ""
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - oauth:/data/oauth
+    networks:
+      backend:
+      edge: # egress to Google and the tunnel path in
+        aliases: [tutor-edge-app] # the tunnel's target; resolves on edge only
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: ["/tmp"]
+    # The image HEALTHCHECK calls an MCP-side path; website paths reject any Host but the public one.
+
+  cloudflared:
+    # Digest pinned, same as compose.prod.yml; bump both together (runbook "Upgrades").
+    image: cloudflare/cloudflared@sha256:072c067d25ccbe61d46e18f0d0723255f2bb5304f7317caa95b27031520ff92c
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?}
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      edge:
+        ipv4_address: 10.213.10.3 # the only FORWARDED_ALLOW_IPS entry; outside edge's ip_range
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    read_only: true
+
+networks:
+  backend:
+    internal: true # no route out: the database and the migration job cannot reach the internet
+  edge:
+    ipam:
+      config:
+        # Outside Docker's default pools (172.16.0.0/12, 192.168.0.0/16). If the deploy fails
+        # with "Pool overlaps", pick another /24 and change both 10.213.10.3 above.
+        - subnet: 10.213.10.0/24
+          ip_range: 10.213.10.128/25 # dynamic addresses stay clear of the fixed 10.213.10.3
+
+volumes:
+  pgdata:
+  oauth:
