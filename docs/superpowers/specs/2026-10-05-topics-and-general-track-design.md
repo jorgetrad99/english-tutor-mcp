@@ -96,7 +96,7 @@ The es-MX descriptions are written in the same style as the existing options and
 ### 3.5 Web form (`partials/profile_body.html`, `routes/profile.py`)
 
 - The `field` fieldset becomes a `topics` checkbox fieldset (name `topics`).
-- The `use_cases` fieldset carries `data-only-if-topic="tech"`. `static/js` hides it while the Tech box is unchecked and shows it when checked (no inline script; strict CSP unchanged). Without JavaScript it stays visible with the hint "Solo si elegiste Tecnología y TI", and the server drops its values as in 3.3.
+- The `use_cases` fieldset carries `data-only-if-topic="tech"`. `static/js/app.js` hides it while the Tech box is unchecked and shows it when checked (no inline script; strict CSP unchanged). Without JavaScript it stays visible with the hint "Solo si elegiste Tecnología y TI", and the server drops its values as in 3.3.
 - A `practice_text` textarea (maxlength 300) under the goal, with the four examples as hint text.
 - `_saved_values` no longer hard-codes `domains: ["it"]`; it reads `topics`. Error message ids: `topics` (required/invalid), `topics_many`, `practice_long`.
 - New strings get English entries in `locale/en/LC_MESSAGES/messages.po`.
@@ -111,7 +111,7 @@ The es-MX descriptions are written in the same style as the existing options and
 
 The track model stays one domain per file. Coverage rules run **per track**:
 
-- Unchanged for both: contiguous `order_no`, 12 B1 then 12 B2, ≥ 3 items per interaction type, ≥ 4 writing items, 5 chunks per item with the chunk text inside its example, no two consecutive items with the same interaction type, unique chunk ids and chunk texts.
+- Unchanged for both: contiguous `order_no`, only B1 and B2, ≥ 3 items per interaction type, ≥ 4 writing items, 5 chunks per item with the chunk text inside its example, no two consecutive items with the same interaction type, unique chunk ids and chunk texts.
 - `it` track: every use case covered by ≥ 3 items (unchanged).
 - `general` track: every item has `use_cases: []`; the use-case rule does not apply.
 - Across both tracks (a test over `load_tracks()`): item ids and chunk ids are unique, and no chunk text appears in both.
@@ -120,7 +120,7 @@ The track model stays one domain per file. Coverage rules run **per track**:
 
 ### 4.2 Content
 
-`src/tutor/content/track_general_v0.yaml`: `domain: general`, `version: 1`, ids `gen-01`..`gen-24`, chunk ids `gen-NN-cN`.
+`src/tutor/content/track_general_v0.yaml`: `domain: general`, `version: 1`, ids `gen-01`..`gen-24` (12 B1 then 12 B2, as in the IT track), chunk ids `gen-NN-cN`.
 
 Each item is written so that Claude can place it in any topic:
 
@@ -204,7 +204,7 @@ One migration, `0006_topics_and_general_track`:
 
 The downgrade reverses each step (deleting the general rows by id). Row-level security, grants, the purge function and the report role are unaffected: no new tables, and the new columns sit on tables that are already user-scoped. The `security-reviewer` agent reviews the migration and the repo changes.
 
-Repos: `PgPeopleRepo` reads and writes `topics` and `practice_text`; the sessions repo writes `topic` and reads the last session per topic for a user; `PgTrackRepo.items(domain)` is unchanged and is called once per domain. The in-memory store and the shared `RepoContract` tests change in the same way.
+Repos: `PgProfileRepo` reads and writes `topics` and `practice_text`; `PgSessionRepo` writes `topic` and reads the last session per topic for a user (beside `last_done_by_track`); `PgTrackRepo.items(domain)` is unchanged and is called once per domain. The in-memory store and the shared `RepoContract` tests change in the same way.
 
 ## 8. Website pages beyond the form
 
@@ -226,7 +226,7 @@ Done when `uv run just check` passes. New or changed tests, by area:
 - **Services and repos:** `RepoContract` for the new columns and the last-session-per-topic query (memory and Postgres); a profile save with only general topics producing a general-only plan; `start_lesson` on a mixed plan never missing an item.
 - **Migration:** upgrade/downgrade on `db-test`; the backfill of existing profiles; the use-case check accepting and refusing the right rows; seeded rows equal to the YAML.
 - **MCP:** schema tests updated for the new enums, fields, the `domains` alias and the prep pair; the response rule text; the contract checks (titles, descriptions ≤ 120 words, closed enums).
-- **Web:** form renders topics and practice; the no-JS path drops use cases; errors per field; `static/js` toggle covered by the existing template tests (attribute present).
+- **Web:** form renders topics and practice; the no-JS path drops use cases; errors per field; `app.js` toggle covered by the existing template tests (attribute present).
 - Existing tests that pin `DOMAINS == ("it",)` or a single-option `field` question are updated, not deleted.
 
 ## 11. Requirement edit for the author (E36)
