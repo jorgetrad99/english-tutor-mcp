@@ -1,0 +1,486 @@
+# General starter track, v0 draft (topics and general track spec, sections 4.1 and 4.2)
+#
+# Status: DRAFT for author review. Content only; the implementation plan turns it into a seed migration.
+# Spec 4.2 places the final file at src/tutor/content/track_general_v0.yaml.
+# Fields match the `track_items` and `track_chunks` tables in core spec section 5.
+#
+# Coverage (checked with a script before each commit; the plan turns it into a seed test):
+#   - 24 items: gen-01..gen-12 are B1, gen-13..gen-24 are B2, ordered as a progression.
+#   - 4 items per interaction type; no two consecutive items share a type.
+#   - Every item has use_cases: [] (spec 4.1: the use-case rule does not apply to the general track).
+#   - 5 items have skill = writing: gen-04, gen-07, gen-12, gen-17, gen-19.
+#   - 5 chunks per item, each with one example sentence.
+#   - No chunk text repeats a chunk text in track_it_v0.yaml.
+#
+# Topic-neutral (spec 4.2): the character is a role, not a place or a job; objective and obstacle
+# name no setting; every scenario_hint ends with "Set it in today's topic." and the server picks the topic.
+#
+# Review checklist for the author:
+#   1. Are the situations realistic for your testers' lives?
+#   2. Is each chunk something a B1/B2 Mexican Spanish speaker would actually use (not textbook English)?
+#   3. Is anything culturally odd for Mexican learners talking with English speakers?
+#   4. Any interaction type missing or wrongly weighted?
+#   5. Can every item be set in each of the seven non-tech topics without sounding forced?
+#      (travel, daily life, work, studies, health, shopping and services, social life)
+#
+# Writing items: the learner writes; the character replies in writing with the obstacle.
+# Chunk text has no slot markers ("...") so it can be matched against what the learner says.
+
+domain: general
+version: 1
+items:
+  - id: gen-01
+    order_no: 1
+    cefr: B1
+    skill: speaking
+    interaction_type: small_talk
+    use_cases: []
+    can_do_en: "Can start a friendly conversation with someone I have just met and keep it going with simple questions."
+    can_do_es: "Puedo iniciar una plática amable con alguien que acabo de conocer y mantenerla con preguntas sencillas."
+    character: "a person you have just met who is friendly but a little shy"
+    objective: "Start the conversation, find out two things about the other person and share two things about yourself."
+    obstacle: "The other person gives very short answers at first, so you need a better question to get them talking."
+    scenario_hint: "Two people meet for the first time while they wait for the same thing. Set it in today's topic."
+    chunks:
+      - {id: gen-01-c1, position: 1, text: "what brings you here", example: "So, what brings you here today?"}
+      - {id: gen-01-c2, position: 2, text: "is this your first time", example: "Is this your first time here?"}
+      - {id: gen-01-c3, position: 3, text: "how long have you been", example: "How long have you been waiting?"}
+      - {id: gen-01-c4, position: 4, text: "same here", example: "Oh, really? Same here."}
+      - {id: gen-01-c5, position: 5, text: "it was nice talking to you", example: "Well, it was nice talking to you."}
+
+  - id: gen-02
+    order_no: 2
+    cefr: B1
+    skill: speaking
+    interaction_type: ask_for_help
+    use_cases: []
+    can_do_en: "Can ask someone for the information I need, check the details and make sure I understood correctly."
+    can_do_es: "Puedo pedirle a alguien la información que necesito, confirmar los detalles y asegurarme de que entendí bien."
+    character: "a person in charge who knows the answer but speaks fast and skips details"
+    objective: "Get the three things you need to know: what to do, how or where to do it, and by when."
+    obstacle: "The answer comes too fast and includes a word you don't know, so you have to ask them to repeat and explain."
+    scenario_hint: "You need practical information to get something done, and you ask the person who knows. Set it in today's topic."
+    chunks:
+      - {id: gen-02-c1, position: 1, text: "excuse me, could you tell me", example: "Excuse me, could you tell me where I need to go?"}
+      - {id: gen-02-c2, position: 2, text: "sorry, could you say that again", example: "Sorry, could you say that again more slowly?"}
+      - {id: gen-02-c3, position: 3, text: "what does that mean", example: "Sorry, what does that mean exactly?"}
+      - {id: gen-02-c4, position: 4, text: "so I need to", example: "So I need to fill out this form first, right?"}
+      - {id: gen-02-c5, position: 5, text: "that's really helpful", example: "Great, thanks, that's really helpful."}
+
+  - id: gen-03
+    order_no: 3
+    cefr: B1
+    skill: speaking
+    interaction_type: explain
+    use_cases: []
+    can_do_en: "Can describe a problem clearly: what happened, when it started and what I have already done."
+    can_do_es: "Puedo describir un problema con claridad: qué pasó, cuándo empezó y qué ya hice."
+    character: "someone who can solve your problem but is in a hurry"
+    objective: "Explain the problem so the other person understands it the first time, and agree on what happens next."
+    obstacle: "The other person thinks it is a simple mistake on your side and suggests something you already tried."
+    scenario_hint: "Something you need is not working as it should, and you explain it to the person who can fix it. Set it in today's topic."
+    chunks:
+      - {id: gen-03-c1, position: 1, text: "the problem is that", example: "The problem is that it stopped working yesterday."}
+      - {id: gen-03-c2, position: 2, text: "it started when", example: "It started when I came back on Monday."}
+      - {id: gen-03-c3, position: 3, text: "I already tried", example: "I already tried that, but nothing changed."}
+      - {id: gen-03-c4, position: 4, text: "it keeps happening", example: "It's not the first time, it keeps happening every morning."}
+      - {id: gen-03-c5, position: 5, text: "what do you suggest", example: "What do you suggest I do now?"}
+
+  - id: gen-04
+    order_no: 4
+    cefr: B1
+    skill: writing
+    interaction_type: give_feedback
+    use_cases: []
+    can_do_en: "Can write a short message that thanks someone for something specific and suggests one improvement kindly."
+    can_do_es: "Puedo escribir un mensaje corto para agradecerle a alguien algo específico y sugerirle una mejora con amabilidad."
+    character: "a person who did something for you and asked for your honest opinion"
+    objective: "Write a message with one specific thank-you, one thing that could be better and a friendly closing."
+    obstacle: "The person replies that nobody else mentioned a problem and asks if you are sure."
+    scenario_hint: "Someone organized or prepared something for you and wants to know how it went. Set it in today's topic."
+    chunks:
+      - {id: gen-04-c1, position: 1, text: "thank you so much for", example: "Thank you so much for organizing everything last week."}
+      - {id: gen-04-c2, position: 2, text: "I especially liked", example: "I especially liked how clear the instructions were."}
+      - {id: gen-04-c3, position: 3, text: "the only thing is", example: "The only thing is that the start time changed twice."}
+      - {id: gen-04-c4, position: 4, text: "maybe next time", example: "Maybe next time you could send a reminder the day before."}
+      - {id: gen-04-c5, position: 5, text: "hope that helps", example: "Hope that helps, and thanks again!"}
+
+  - id: gen-05
+    order_no: 5
+    cefr: B1
+    skill: speaking
+    interaction_type: negotiate
+    use_cases: []
+    can_do_en: "Can change the time of a plan or an appointment and agree on a new one that works for both of us."
+    can_do_es: "Puedo cambiar la hora de un plan o una cita y acordar una nueva que nos funcione a los dos."
+    character: "a person with a very full schedule who doesn't like last-minute changes"
+    objective: "Move the plan to another day and agree on a new date and time."
+    obstacle: "The only free times they offer are bad for you, so you have to find something in the middle."
+    scenario_hint: "Something comes up and you need to change a plan you already made with someone. Set it in today's topic."
+    chunks:
+      - {id: gen-05-c1, position: 1, text: "something came up", example: "Sorry, something came up and I need to change our plan."}
+      - {id: gen-05-c2, position: 2, text: "is there any chance we could", example: "Is there any chance we could move it to Thursday?"}
+      - {id: gen-05-c3, position: 3, text: "I can't make it", example: "I can't make it before five, unfortunately."}
+      - {id: gen-05-c4, position: 4, text: "what about", example: "What about Friday after lunch?"}
+      - {id: gen-05-c5, position: 5, text: "let's go with", example: "Perfect, let's go with Friday at three."}
+
+  - id: gen-06
+    order_no: 6
+    cefr: B1
+    skill: speaking
+    interaction_type: disagree
+    use_cases: []
+    can_do_en: "Can politely say I don't agree with a suggestion, give one reason and propose something else."
+    can_do_es: "Puedo decir con educación que no estoy de acuerdo con una sugerencia, dar una razón y proponer otra cosa."
+    character: "a confident person who is sure their idea is the best one"
+    objective: "Explain why their suggestion doesn't work for you and agree on a different option."
+    obstacle: "They say their option is what everyone does and that yours will take longer."
+    scenario_hint: "Someone suggests a plan or a choice for you, and you think a different one is better. Set it in today's topic."
+    chunks:
+      - {id: gen-06-c1, position: 1, text: "I don't know about that", example: "Hmm, I don't know about that."}
+      - {id: gen-06-c2, position: 2, text: "the thing is", example: "The thing is, it's too far for me."}
+      - {id: gen-06-c3, position: 3, text: "I'd prefer to", example: "I'd prefer to go with the earlier one."}
+      - {id: gen-06-c4, position: 4, text: "why don't we", example: "Why don't we try the other option first?"}
+      - {id: gen-06-c5, position: 5, text: "sounds like a plan", example: "Okay, sounds like a plan."}
+
+  - id: gen-07
+    order_no: 7
+    cefr: B1
+    skill: writing
+    interaction_type: ask_for_help
+    use_cases: []
+    can_do_en: "Can write a short, polite message asking someone for a favor or information and explaining why I need it."
+    can_do_es: "Puedo escribir un mensaje corto y amable para pedirle a alguien un favor o información, explicando para qué lo necesito."
+    character: "a busy person you don't know well who gets lots of messages every day"
+    objective: "Write a message that gets a clear yes and a date for what you need."
+    obstacle: "They reply asking for more details and say they can't do it this week."
+    scenario_hint: "You need a document, an answer or a small favor from someone, and you write to ask for it. Set it in today's topic."
+    chunks:
+      - {id: gen-07-c1, position: 1, text: "I hope you're doing well", example: "Hi, I hope you're doing well."}
+      - {id: gen-07-c2, position: 2, text: "I'm writing to ask", example: "I'm writing to ask if you could send me the form."}
+      - {id: gen-07-c3, position: 3, text: "I was wondering if", example: "I was wondering if you could help me with something."}
+      - {id: gen-07-c4, position: 4, text: "the reason I'm asking is", example: "The reason I'm asking is that I need it by Friday."}
+      - {id: gen-07-c5, position: 5, text: "thank you for your time", example: "Thank you for your time, and have a nice day."}
+
+  - id: gen-08
+    order_no: 8
+    cefr: B1
+    skill: speaking
+    interaction_type: small_talk
+    use_cases: []
+    can_do_en: "Can chat about everyday things with someone I see often, like the weather, my plans and recent news."
+    can_do_es: "Puedo platicar de cosas cotidianas con alguien que veo seguido, como el clima, mis planes y las novedades."
+    character: "a friendly acquaintance you see often who always wants to know your news"
+    objective: "Chat for a couple of minutes about your week and your plans, and ask about theirs."
+    obstacle: "They ask a personal question you don't want to answer, so you change the subject politely."
+    scenario_hint: "You run into someone you know a little, and you have a few minutes to chat. Set it in today's topic."
+    chunks:
+      - {id: gen-08-c1, position: 1, text: "long time no see", example: "Hey, long time no see!"}
+      - {id: gen-08-c2, position: 2, text: "what have you been up to", example: "So, what have you been up to lately?"}
+      - {id: gen-08-c3, position: 3, text: "not much, just", example: "Not much, just busy with the usual stuff."}
+      - {id: gen-08-c4, position: 4, text: "by the way", example: "By the way, did you hear about the new schedule?"}
+      - {id: gen-08-c5, position: 5, text: "I'd better get going", example: "Anyway, I'd better get going. See you around!"}
+
+  - id: gen-09
+    order_no: 9
+    cefr: B1
+    skill: speaking
+    interaction_type: explain
+    use_cases: []
+    can_do_en: "Can explain how to do something step by step and check that the other person is following."
+    can_do_es: "Puedo explicar cómo hacer algo paso a paso y confirmar que la otra persona me va siguiendo."
+    character: "a person who is new to this and gets lost easily"
+    objective: "Explain the steps in order so the other person can do it alone next time."
+    obstacle: "They get lost in the middle and ask you to start again from a different step."
+    scenario_hint: "Someone asks you how to do something you know well, like a process, a route or a routine. Set it in today's topic."
+    chunks:
+      - {id: gen-09-c1, position: 1, text: "first of all", example: "First of all, you need to sign up online."}
+      - {id: gen-09-c2, position: 2, text: "after that", example: "After that, you choose a time that works for you."}
+      - {id: gen-09-c3, position: 3, text: "make sure you", example: "Make sure you bring your ID."}
+      - {id: gen-09-c4, position: 4, text: "the tricky part is", example: "The tricky part is finding the right entrance."}
+      - {id: gen-09-c5, position: 5, text: "are you with me so far", example: "Are you with me so far?"}
+
+  - id: gen-10
+    order_no: 10
+    cefr: B1
+    skill: speaking
+    interaction_type: disagree
+    use_cases: []
+    can_do_en: "Can say politely that something is wrong, explain what I expected and ask for it to be fixed."
+    can_do_es: "Puedo decir con educación que algo está mal, explicar lo que esperaba y pedir que lo corrijan."
+    character: "a person in charge who is sure there is no mistake"
+    objective: "Show that there is a mistake and get the other person to agree to fix it."
+    obstacle: "They insist everything is correct and that it is exactly what you asked for."
+    scenario_hint: "You get something different from what was agreed, such as the wrong amount, time or item. Set it in today's topic."
+    chunks:
+      - {id: gen-10-c1, position: 1, text: "I think there's a mistake", example: "Excuse me, I think there's a mistake here."}
+      - {id: gen-10-c2, position: 2, text: "I was told that", example: "I was told that it was included."}
+      - {id: gen-10-c3, position: 3, text: "that's not what I asked for", example: "Sorry, but that's not what I asked for."}
+      - {id: gen-10-c4, position: 4, text: "could you double-check", example: "Could you double-check, please?"}
+      - {id: gen-10-c5, position: 5, text: "I'd appreciate it if", example: "I'd appreciate it if you could fix it today."}
+
+  - id: gen-11
+    order_no: 11
+    cefr: B1
+    skill: speaking
+    interaction_type: give_feedback
+    use_cases: []
+    can_do_en: "Can tell someone what I like about how we do things together and ask for one change in a friendly way."
+    can_do_es: "Puedo decirle a alguien lo que me gusta de cómo hacemos las cosas juntos y pedirle un cambio de forma amable."
+    character: "someone you share a task or a space with, who is nice but a little careless"
+    objective: "Say something positive, mention one problem and agree on a small change."
+    obstacle: "They get a bit defensive and say you do the same thing sometimes."
+    scenario_hint: "You share something with another person, like a task, a room or a plan, and one of their habits bothers you. Set it in today's topic."
+    chunks:
+      - {id: gen-11-c1, position: 1, text: "I really like how", example: "I really like how organized you are with the schedule."}
+      - {id: gen-11-c2, position: 2, text: "can I mention something", example: "Can I mention something small?"}
+      - {id: gen-11-c3, position: 3, text: "it's just that", example: "It's just that sometimes things get left until the last minute."}
+      - {id: gen-11-c4, position: 4, text: "do you think you could", example: "Do you think you could let me know earlier next time?"}
+      - {id: gen-11-c5, position: 5, text: "that's fair", example: "That's fair, I do it too sometimes."}
+
+  - id: gen-12
+    order_no: 12
+    cefr: B1
+    skill: writing
+    interaction_type: negotiate
+    use_cases: []
+    can_do_en: "Can write a friendly message to decline an invitation, give a short reason and suggest another option."
+    can_do_es: "Puedo escribir un mensaje amable para rechazar una invitación, dar una razón breve y proponer otra opción."
+    character: "a warm person who invited you to something and really wants you to come"
+    objective: "Say no to the invitation without hurting the relationship and agree on another plan."
+    obstacle: "They reply asking you to come just for a little while, so you have to say no again, kindly."
+    scenario_hint: "Someone invites you to an event or an activity, and you can't or don't want to go. Set it in today's topic."
+    chunks:
+      - {id: gen-12-c1, position: 1, text: "thanks so much for the invite", example: "Thanks so much for the invite!"}
+      - {id: gen-12-c2, position: 2, text: "unfortunately, I won't be able to", example: "Unfortunately, I won't be able to make it on Saturday."}
+      - {id: gen-12-c3, position: 3, text: "I already have plans", example: "I already have plans that day."}
+      - {id: gen-12-c4, position: 4, text: "would you be up for", example: "Would you be up for coffee next week instead?"}
+      - {id: gen-12-c5, position: 5, text: "have a great time", example: "I hope you all have a great time!"}
+
+  - id: gen-13
+    order_no: 13
+    cefr: B2
+    skill: speaking
+    interaction_type: explain
+    use_cases: []
+    can_do_en: "Can explain a complicated situation in order, separating facts from guesses, so the other person can decide what to do."
+    can_do_es: "Puedo explicar una situación complicada en orden, separando lo que sé de lo que supongo, para que la otra persona pueda decidir qué hacer."
+    character: "a person who has to make a decision and keeps interrupting with questions"
+    objective: "Explain what happened, why you think it happened and what the options are, then let them decide."
+    obstacle: "They interrupt to ask whose fault it was and want a simple yes-or-no answer."
+    scenario_hint: "Something went wrong in a way that affects someone else, and you explain it so they can decide the next step. Set it in today's topic."
+    chunks:
+      - {id: gen-13-c1, position: 1, text: "let me start from the beginning", example: "Let me start from the beginning, because it's a bit complicated."}
+      - {id: gen-13-c2, position: 2, text: "what happened was", example: "What happened was that the confirmation never arrived."}
+      - {id: gen-13-c3, position: 3, text: "as far as I know", example: "As far as I know, nobody was told about the change."}
+      - {id: gen-13-c4, position: 4, text: "on top of that", example: "On top of that, the office was closed on Monday."}
+      - {id: gen-13-c5, position: 5, text: "the way I see it", example: "The way I see it, we have two options."}
+
+  - id: gen-14
+    order_no: 14
+    cefr: B2
+    skill: speaking
+    interaction_type: disagree
+    use_cases: []
+    can_do_en: "Can disagree with someone's opinion in a discussion, acknowledge their point and defend mine with reasons."
+    can_do_es: "Puedo estar en desacuerdo con la opinión de alguien en una conversación, reconocer su punto y defender el mío con argumentos."
+    character: "a person with strong opinions who enjoys a good argument"
+    objective: "Defend your view with two reasons, accept the part of their view that is fair, and end the discussion on good terms."
+    obstacle: "They answer with an example from their own life and say you are being naive."
+    scenario_hint: "A conversation turns into a debate about the best way to do something, and you see it differently. Set it in today's topic."
+    chunks:
+      - {id: gen-14-c1, position: 1, text: "I get where you're coming from", example: "I get where you're coming from, but I see it differently."}
+      - {id: gen-14-c2, position: 2, text: "that may be true, but", example: "That may be true, but it doesn't work for everyone."}
+      - {id: gen-14-c3, position: 3, text: "in my experience", example: "In my experience, the cheaper option ends up costing more."}
+      - {id: gen-14-c4, position: 4, text: "you have a point there", example: "Okay, you have a point there."}
+      - {id: gen-14-c5, position: 5, text: "we'll have to agree to disagree", example: "Well, I guess we'll have to agree to disagree."}
+
+  - id: gen-15
+    order_no: 15
+    cefr: B2
+    skill: speaking
+    interaction_type: small_talk
+    use_cases: []
+    can_do_en: "Can join a conversation that has already started, add something interesting and keep it flowing naturally."
+    can_do_es: "Puedo unirme a una conversación que ya empezó, aportar algo interesante y mantenerla de forma natural."
+    character: "two or three people who already know each other and are in the middle of a conversation"
+    objective: "Join the conversation, share a short story of your own and ask a question that keeps everyone talking."
+    obstacle: "Someone makes a joke or a reference you don't understand, and everyone looks at you."
+    scenario_hint: "You arrive where a few people are already chatting, and you want to be part of the conversation. Set it in today's topic."
+    chunks:
+      - {id: gen-15-c1, position: 1, text: "mind if I join you", example: "Hi, mind if I join you?"}
+      - {id: gen-15-c2, position: 2, text: "I couldn't help overhearing", example: "Sorry, I couldn't help overhearing, are you talking about the new rules?"}
+      - {id: gen-15-c3, position: 3, text: "that reminds me of", example: "That reminds me of something that happened to me last year."}
+      - {id: gen-15-c4, position: 4, text: "I didn't catch that", example: "Sorry, I didn't catch that, who are you talking about?"}
+      - {id: gen-15-c5, position: 5, text: "what about you guys", example: "What about you guys, have you ever tried it?"}
+
+  - id: gen-16
+    order_no: 16
+    cefr: B2
+    skill: speaking
+    interaction_type: negotiate
+    use_cases: []
+    can_do_en: "Can negotiate better conditions, such as a price, a date or an extra, by offering something in return."
+    can_do_es: "Puedo negociar mejores condiciones, como un precio, una fecha o algo adicional, ofreciendo algo a cambio."
+    character: "a person who has some room to decide but says the rules are the rules"
+    objective: "Get a better deal on one thing that matters to you, and agree on exactly what each side will do."
+    obstacle: "They say they can't make exceptions and that everyone else gets the same conditions."
+    scenario_hint: "You want better conditions than the standard ones, such as a discount, more time or a different date. Set it in today's topic."
+    chunks:
+      - {id: gen-16-c1, position: 1, text: "I was hoping we could", example: "I was hoping we could talk about the price."}
+      - {id: gen-16-c2, position: 2, text: "is there anything you can do about", example: "Is there anything you can do about the late fee?"}
+      - {id: gen-16-c3, position: 3, text: "if I agree to", example: "If I agree to pay today, could you include the delivery?"}
+      - {id: gen-16-c4, position: 4, text: "could we meet halfway", example: "Could we meet halfway, say fifty dollars?"}
+      - {id: gen-16-c5, position: 5, text: "just so we're clear", example: "Just so we're clear, the price includes delivery?"}
+
+  - id: gen-17
+    order_no: 17
+    cefr: B2
+    skill: writing
+    interaction_type: ask_for_help
+    use_cases: []
+    can_do_en: "Can write a polite but firm follow-up when I have not received an answer, making the next step clear."
+    can_do_es: "Puedo escribir un seguimiento cortés pero firme cuando no me han respondido, dejando claro el siguiente paso."
+    character: "a person who promised to help you but has not answered your last two messages"
+    objective: "Write a follow-up that gets a reply and a firm date, without sounding rude."
+    obstacle: "They answer that they never got your message and ask you to send everything again."
+    scenario_hint: "You asked someone for something important a while ago, and you are still waiting for an answer. Set it in today's topic."
+    chunks:
+      - {id: gen-17-c1, position: 1, text: "I'm following up on", example: "I'm following up on my message from last Tuesday."}
+      - {id: gen-17-c2, position: 2, text: "just checking in to see if", example: "Just checking in to see if you had a chance to look at it."}
+      - {id: gen-17-c3, position: 3, text: "I've attached it again", example: "No problem, I've attached it again below."}
+      - {id: gen-17-c4, position: 4, text: "it's quite urgent because", example: "It's quite urgent because the deadline is on Friday."}
+      - {id: gen-17-c5, position: 5, text: "could you let me know by", example: "Could you let me know by Thursday?"}
+
+  - id: gen-18
+    order_no: 18
+    cefr: B2
+    skill: speaking
+    interaction_type: give_feedback
+    use_cases: []
+    can_do_en: "Can give honest, constructive feedback on something that didn't go well, with a concrete example and a proposal."
+    can_do_es: "Puedo dar retroalimentación honesta y constructiva sobre algo que no salió bien, con un ejemplo concreto y una propuesta."
+    character: "a person who worked hard on something for you and is proud of it"
+    objective: "Recognize their effort, explain clearly what didn't work with one example, and agree on what will change."
+    obstacle: "They take it personally and say you never explained what you wanted at the start."
+    scenario_hint: "Someone did something for you or with you, and the result was not what you needed. Set it in today's topic."
+    chunks:
+      - {id: gen-18-c1, position: 1, text: "I can tell you put a lot of work into", example: "I can tell you put a lot of work into this."}
+      - {id: gen-18-c2, position: 2, text: "to be honest", example: "To be honest, it's not quite what I needed."}
+      - {id: gen-18-c3, position: 3, text: "what didn't work for me was", example: "What didn't work for me was the timing."}
+      - {id: gen-18-c4, position: 4, text: "that's on me", example: "You're right, that's on me, I should have been clearer."}
+      - {id: gen-18-c5, position: 5, text: "going forward", example: "Going forward, could we check in halfway through?"}
+
+  - id: gen-19
+    order_no: 19
+    cefr: B2
+    skill: writing
+    interaction_type: disagree
+    use_cases: []
+    can_do_en: "Can write a firm, polite complaint that explains what went wrong, what I expect and what I will do if it is not solved."
+    can_do_es: "Puedo escribir una queja firme y educada que explique qué salió mal, qué espero y qué haré si no se resuelve."
+    character: "a person in charge who answers with a standard reply that does not solve anything"
+    objective: "Write a complaint that gets a real answer and a concrete solution by a specific date."
+    obstacle: "The reply says they are sorry for the inconvenience but that it is not their responsibility."
+    scenario_hint: "Something went wrong, you already asked once, and the answer you got did not solve it. Set it in today's topic."
+    chunks:
+      - {id: gen-19-c1, position: 1, text: "I'm writing regarding", example: "I'm writing regarding the problem I reported on May 3."}
+      - {id: gen-19-c2, position: 2, text: "as I mentioned in my last message", example: "As I mentioned in my last message, the issue is still not solved."}
+      - {id: gen-19-c3, position: 3, text: "I'm still waiting for", example: "Two weeks later, I'm still waiting for a solution."}
+      - {id: gen-19-c4, position: 4, text: "I would expect", example: "I would expect a full refund or a replacement."}
+      - {id: gen-19-c5, position: 5, text: "if this isn't resolved by", example: "If this isn't resolved by Friday, I'll have to take it further."}
+
+  - id: gen-20
+    order_no: 20
+    cefr: B2
+    skill: speaking
+    interaction_type: small_talk
+    use_cases: []
+    can_do_en: "Can keep a relaxed conversation with someone I want to get along with, and steer away from an awkward topic gracefully."
+    can_do_es: "Puedo mantener una conversación relajada con alguien con quien quiero llevarme bien y desviar un tema incómodo con tacto."
+    character: "a person you will see again and want to get along with, who is polite but hard to read"
+    objective: "Keep the conversation pleasant for a few minutes, handle an awkward topic gracefully and leave a good impression."
+    obstacle: "They bring up a sensitive subject, like money or politics, and ask what you think."
+    scenario_hint: "You are chatting with someone you want to get along with, and the conversation drifts into an awkward subject. Set it in today's topic."
+    chunks:
+      - {id: gen-20-c1, position: 1, text: "I've heard great things about", example: "I've heard great things about this place."}
+      - {id: gen-20-c2, position: 2, text: "that's a tough one", example: "Hmm, that's a tough one."}
+      - {id: gen-20-c3, position: 3, text: "I try to stay out of", example: "Honestly, I try to stay out of politics."}
+      - {id: gen-20-c4, position: 4, text: "on a lighter note", example: "On a lighter note, did you see the game last night?"}
+      - {id: gen-20-c5, position: 5, text: "it's been a pleasure", example: "It's been a pleasure talking with you."}
+
+  - id: gen-21
+    order_no: 21
+    cefr: B2
+    skill: speaking
+    interaction_type: explain
+    use_cases: []
+    can_do_en: "Can explain and justify a decision I made, compare it with the other options and answer doubts calmly."
+    can_do_es: "Puedo explicar y justificar una decisión que tomé, compararla con las otras opciones y responder dudas con calma."
+    character: "a person affected by your decision who was not consulted and has doubts"
+    objective: "Explain why you decided what you did, what the alternatives were and what it means for them."
+    obstacle: "They say the other option was obviously better and ask why nobody asked them."
+    scenario_hint: "You made a decision that affects someone else, and now you have to explain it to them. Set it in today's topic."
+    chunks:
+      - {id: gen-21-c1, position: 1, text: "the main reason I decided to", example: "The main reason I decided to change it was the price."}
+      - {id: gen-21-c2, position: 2, text: "compared to", example: "Compared to the first option, this one is more flexible."}
+      - {id: gen-21-c3, position: 3, text: "the downside is", example: "The downside is that it takes a bit longer."}
+      - {id: gen-21-c4, position: 4, text: "in hindsight", example: "In hindsight, I should have asked you first."}
+      - {id: gen-21-c5, position: 5, text: "all things considered", example: "All things considered, I still think it was the right call."}
+
+  - id: gen-22
+    order_no: 22
+    cefr: B2
+    skill: speaking
+    interaction_type: negotiate
+    use_cases: []
+    can_do_en: "Can negotiate how to share tasks or costs fairly with someone, find a compromise and confirm who does what."
+    can_do_es: "Puedo negociar cómo repartir tareas o gastos de forma justa con alguien, llegar a un acuerdo y confirmar quién hace qué."
+    character: "a person who shares a responsibility with you and keeps choosing the easiest part"
+    objective: "Agree on a fair split of the work or the costs, and confirm who does what and by when."
+    obstacle: "They say they are too busy right now and offer to 'help a little' instead of doing their share."
+    scenario_hint: "You and someone else have to share the work or the cost of something, and the split is not fair yet. Set it in today's topic."
+    chunks:
+      - {id: gen-22-c1, position: 1, text: "how should we divide", example: "So, how should we divide the work?"}
+      - {id: gen-22-c2, position: 2, text: "to be fair", example: "To be fair, I did most of it last time."}
+      - {id: gen-22-c3, position: 3, text: "I'm happy to do", example: "I'm happy to do the shopping if you handle the bookings."}
+      - {id: gen-22-c4, position: 4, text: "here's what I suggest", example: "Here's what I suggest: we take turns every week."}
+      - {id: gen-22-c5, position: 5, text: "so, to sum up", example: "So, to sum up, you book the tickets and I pay for the hotel."}
+
+  - id: gen-23
+    order_no: 23
+    cefr: B2
+    skill: speaking
+    interaction_type: ask_for_help
+    use_cases: []
+    can_do_en: "Can keep asking for help politely when the first answer is no, ask for alternatives and get a clear next step."
+    can_do_es: "Puedo seguir pidiendo ayuda con cortesía cuando la primera respuesta es no, preguntar por alternativas y conseguir un siguiente paso claro."
+    character: "someone who could help you but answers 'there's nothing I can do'"
+    objective: "Get a solution, the name of someone who can solve it, or a clear next step with a date."
+    obstacle: "They repeat that it's not possible and start to sound annoyed."
+    scenario_hint: "You have an urgent problem, and the first person you ask says they can't help. Set it in today's topic."
+    chunks:
+      - {id: gen-23-c1, position: 1, text: "I understand it's not your fault, but", example: "I understand it's not your fault, but I really need a solution today."}
+      - {id: gen-23-c2, position: 2, text: "is there anyone else who", example: "Is there anyone else who could help me with this?"}
+      - {id: gen-23-c3, position: 3, text: "what would you do in my position", example: "What would you do in my position?"}
+      - {id: gen-23-c4, position: 4, text: "is there any way", example: "Is there any way to speed this up?"}
+      - {id: gen-23-c5, position: 5, text: "what's the next step", example: "Okay, so what's the next step?"}
+
+  - id: gen-24
+    order_no: 24
+    cefr: B2
+    skill: speaking
+    interaction_type: give_feedback
+    use_cases: []
+    can_do_en: "Can give honest feedback to someone with more authority than me, tactfully, with an example and a clear request."
+    can_do_es: "Puedo darle retroalimentación honesta a alguien con más autoridad que yo, con tacto, con un ejemplo y una petición clara."
+    character: "a person with more authority than you who is used to doing things their way"
+    objective: "Explain how their way of doing things affects you, give one example and agree on one change."
+    obstacle: "They say nobody else has a problem with it and that this is how it has always worked."
+    scenario_hint: "Someone with more authority than you keeps doing something that causes you problems, and you decide to tell them. Set it in today's topic."
+    chunks:
+      - {id: gen-24-c1, position: 1, text: "can I be honest with you", example: "Can I be honest with you about something?"}
+      - {id: gen-24-c2, position: 2, text: "I'm not sure you're aware, but", example: "I'm not sure you're aware, but the instructions changed three times."}
+      - {id: gen-24-c3, position: 3, text: "it makes it hard for me to", example: "It makes it hard for me to plan ahead."}
+      - {id: gen-24-c4, position: 4, text: "I'm sure it's not intentional", example: "I'm sure it's not intentional, but it happens a lot."}
+      - {id: gen-24-c5, position: 5, text: "would you be open to", example: "Would you be open to trying it a different way?"}
