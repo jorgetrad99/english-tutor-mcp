@@ -133,3 +133,10 @@ def test_uvicorn_error_log_loses_exception_text_even_after_uvicorn_configures_lo
     assert "Exception in ASGI application" in output
     assert "SECRET-CODE" not in output
     assert "Traceback" not in output
+
+
+def test_authlib_debug_logs_stay_off(tutor_logger: logging.Logger) -> None:
+    # Authlib logs the PKCE code_verifier at DEBUG.
+    logging.getLogger("authlib").setLevel(logging.DEBUG)
+    entry.configure_logging()
+    assert logging.getLogger("authlib").getEffectiveLevel() == logging.WARNING

@@ -14,7 +14,7 @@ from tutor.web.memory import FakeBilling, FakeGoogle, FixedClock, MemoryBackend,
 
 NOW = datetime(2027, 1, 12, 18, 0, tzinfo=UTC)  # 12:00 in Mexico City, a Tuesday
 TODAY = date(2027, 1, 12)
-BASE = "https://testserver"
+BASE = "https://localhost"
 
 
 @pytest.fixture

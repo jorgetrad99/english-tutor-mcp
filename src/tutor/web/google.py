@@ -13,11 +13,22 @@ from starlette.responses import Response
 from tutor.web.ports import GoogleIdentity, LoginFailed
 
 GOOGLE_METADATA = "https://accounts.google.com/.well-known/openid-configuration"
+GOOGLE_ISSUERS = ["https://accounts.google.com", "accounts.google.com"]
 log = logging.getLogger("tutor.web")
+
+
+def claims_options(client_id: str) -> dict[str, dict[str, Any]]:
+    """ID-token checks: issuer and audience are mandatory. A fresh dict per call, because
+    Authlib pops keys out of the options it is given."""
+    return {
+        "iss": {"essential": True, "values": list(GOOGLE_ISSUERS)},
+        "aud": {"essential": True, "value": client_id},
+    }
 
 
 class GoogleOidcLogin:
     def __init__(self, client_id: str, client_secret: str) -> None:
+        self._client_id = client_id
         self._oauth = OAuth()
         self._oauth.register(
             "google",
@@ -37,9 +48,14 @@ class GoogleOidcLogin:
 
     async def identity(self, request: Request) -> GoogleIdentity:
         try:
-            token = await self.client.authorize_access_token(request)
+            token = await self.client.authorize_access_token(
+                request, claims_options=claims_options(self._client_id)
+            )
         except OAuthError as exc:
-            raise LoginFailed(exc.error or "oauth_error") from None
+            # Fixed codes only: the provider's `error` text is attacker-controlled.
+            raise LoginFailed(
+                "access_denied" if exc.error == "access_denied" else "oauth_error"
+            ) from None
         except Exception as exc:  # network, JWT or metadata failure: fail closed
             # Class name only: messages and tokens must never reach the logs.
             log.warning("google login failed exc=%s", type(exc).__name__)

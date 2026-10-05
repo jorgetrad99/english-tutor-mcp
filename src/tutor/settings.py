@@ -36,7 +36,7 @@ def _is_fernet_key(value: str) -> bool:
     return True
 
 
-def _base_url(raw: str) -> str | None:
+def parse_base_url(raw: str) -> str | None:
     """Normalised origin, or None. https unless the host is loopback."""
     try:
         parts = urlsplit(raw.strip())
@@ -50,12 +50,12 @@ def _base_url(raw: str) -> str | None:
         return None
     if parts.query or parts.fragment or parts.path not in ("", "/"):
         return None
-    if parts.scheme == "http" and not _is_loopback(host):
+    if parts.scheme == "http" and not is_loopback(host):
         return None
     return f"{parts.scheme}://{parts.netloc}"
 
 
-def _is_loopback(host: str) -> bool:
+def is_loopback(host: str) -> bool:
     if host == "localhost":
         return True
     try:
@@ -95,7 +95,7 @@ class Settings:
         tutor_env = env.get("TUTOR_ENV", "dev").strip()
         if tutor_env not in ENVS:
             problems.append("TUTOR_ENV must be dev, test or prod")
-        base_url = _base_url(env["TUTOR_BASE_URL"])
+        base_url = parse_base_url(env["TUTOR_BASE_URL"])
         if base_url is None:
             problems.append(
                 "TUTOR_BASE_URL must be an https URL (http only for localhost) "

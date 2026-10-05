@@ -11,7 +11,13 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from tutor.domain.dashboard.types import Lang, User
 from tutor.web.config import WebConfig
-from tutor.web.deps import APP_ROUTER_DEPS, current_user, get_config, get_deps
+from tutor.web.deps import (
+    APP_ROUTER_DEPS,
+    current_user,
+    get_config,
+    get_deps,
+    require_csrf_if_session,
+)
 from tutor.web.ports import LoginFailed
 from tutor.web.security import safe_next
 from tutor.web.views import render
@@ -45,7 +51,8 @@ async def google_callback(request: Request) -> Response:
     return RedirectResponse(target, status_code=303)
 
 
-@app_router.post("/auth/logout")
+# CSRF-checked only when a session exists: logging out a dead session must still clear the cookie.
+@router.post("/auth/logout", dependencies=[Depends(require_csrf_if_session)])
 async def logout(request: Request) -> Response:
     request.state.web.logout()  # deletes the row and sends the Max-Age=0 cookie
     return RedirectResponse(

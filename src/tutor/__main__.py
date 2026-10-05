@@ -38,6 +38,8 @@ def configure_logging() -> None:
         logger.addHandler(handler)
     logger.setLevel(logging.INFO)
     logger.propagate = False
+    # Authlib logs the PKCE code_verifier at DEBUG; keep that out of any handler.
+    logging.getLogger("authlib").setLevel(logging.WARNING)
 
 
 def main() -> None:

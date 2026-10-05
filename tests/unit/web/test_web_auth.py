@@ -1,5 +1,7 @@
 from collections.abc import Callable
 from dataclasses import replace
+from datetime import timedelta
+from typing import Any
 from uuid import UUID
 
 import pytest
@@ -11,8 +13,8 @@ from tutor.web.app import create_app
 from tutor.web.config import WebConfig
 from tutor.web.demo import DemoUsers
 from tutor.web.memory import FakeGoogle, FixedClock, MemoryBackend, memory_deps
-from tutor.web.ports import GoogleIdentity
-from tutor.web.sessions import COOKIE
+from tutor.web.ports import GoogleIdentity, WebSession
+from tutor.web.sessions import COOKIE, hash_token
 
 from .conftest import BASE, NOW, csrf_of
 
@@ -148,3 +150,39 @@ def test_test_login_does_not_exist_outside_test_env(
         assert c.get("/auth/test-login").status_code == 404
         assert c.post("/auth/test-login", data={"user_id": str(demo.ana)}).status_code in (403, 404)
         assert COOKIE not in c.cookies
+
+
+def _assert_logged_out_response(response: Any) -> None:
+    assert response.status_code == 303 and response.headers["location"] == "/login"
+    assert response.headers["clear-site-data"] == '"cache", "cookies", "storage"'
+    cookie = response.headers["set-cookie"]
+    assert cookie.startswith(f"{COOKIE}=;")
+    for attr in ("Max-Age=0", "Path=/", "Secure", "HttpOnly", "SameSite=Lax"):
+        assert attr in cookie
+
+
+def test_logout_without_cookie_needs_no_csrf_and_clears_the_cookie(client: TestClient) -> None:
+    _assert_logged_out_response(client.post("/auth/logout"))
+
+
+def test_logout_with_purged_or_expired_session_clears_the_cookie(
+    client: TestClient, backend: MemoryBackend, demo: DemoUsers
+) -> None:
+    client.cookies.set(COOKIE, "never-stored")  # purged: no row
+    _assert_logged_out_response(client.post("/auth/logout"))
+    token = "e" * 43
+    old = NOW - timedelta(days=20)
+    backend.create_session(WebSession(hash_token(token), demo.ana, "c", old, old))
+    client.cookies.set(COOKIE, token)  # idle for 20 days: expired
+    _assert_logged_out_response(client.post("/auth/logout"))
+    assert hash_token(token) not in backend.web_sessions
+
+
+def test_logout_with_valid_session_and_bad_csrf_is_forbidden(
+    login: Callable[[UUID], TestClient], demo: DemoUsers, backend: MemoryBackend
+) -> None:
+    c = login(demo.ana)
+    assert c.post("/auth/logout", data={"csrf_token": "nope"}).status_code == 403
+    assert len(backend.web_sessions) == 1
+    _assert_logged_out_response(c.post("/auth/logout", data={"csrf_token": csrf_of(c)}))
+    assert backend.web_sessions == {}

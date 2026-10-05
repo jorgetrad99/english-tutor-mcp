@@ -5,8 +5,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal, cast
+from urllib.parse import urlsplit
 
-from tutor.settings import _base_url
+from tutor.settings import is_loopback, parse_base_url
 
 _ENVS = ("dev", "test", "prod")
 
@@ -26,13 +27,15 @@ class WebConfig:
             raise ValueError(f"TUTOR_ENV must be one of {_ENVS}")
         if self.test_login and self.env != "test":
             raise ValueError("test login is only allowed with TUTOR_ENV=test")
+        if self.test_login and not is_loopback(urlsplit(self.base_url).hostname or ""):
+            raise ValueError("test login is only allowed on a loopback TUTOR_BASE_URL")
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str]) -> WebConfig:
         env = environ.get("TUTOR_ENV", "dev")
         if env not in _ENVS:
             raise ValueError(f"TUTOR_ENV must be one of {_ENVS}")
-        base_url = _base_url(environ["TUTOR_BASE_URL"])
+        base_url = parse_base_url(environ["TUTOR_BASE_URL"])
         if base_url is None:
             raise ValueError("TUTOR_BASE_URL must be an https origin (http only on loopback)")
         return cls(

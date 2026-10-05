@@ -84,7 +84,7 @@ def _boom_client(app: FastAPI, probe: str) -> TestClient:
     async def boom() -> None:
         raise ValueError(probe)
 
-    return TestClient(app, base_url="https://testserver", raise_server_exceptions=False)
+    return TestClient(app, base_url="https://localhost", raise_server_exceptions=False)
 
 
 def test_unhandled_error_is_guarded_headed_and_logged_safely(
@@ -171,7 +171,7 @@ def test_http_error_keeps_headers_and_validation_error_does_not_echo(app: FastAP
     async def needs_int(n: int) -> None:
         return None
 
-    with TestClient(app, base_url="https://testserver", follow_redirects=False) as c:
+    with TestClient(app, base_url="https://localhost", follow_redirects=False) as c:
         not_allowed = c.post("/login")
         assert not_allowed.status_code == 405 and "GET" in not_allowed.headers["allow"]
         invalid = c.get("/needs-int?n=SECRET-input")
@@ -262,3 +262,8 @@ def test_error_guard_suppresses_a_failing_error_page_without_chaining(
     asyncio.run(run())  # must not raise
     assert "PROBE" not in caplog.text
     assert "error page not sent" in caplog.text
+
+
+def test_safe_next_is_bounded() -> None:
+    assert safe_next("/" + "a" * 511) == "/" + "a" * 511
+    assert safe_next("/" + "a" * 512) == "/app/"

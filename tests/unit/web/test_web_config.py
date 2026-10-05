@@ -22,7 +22,13 @@ def test_test_login_is_refused_outside_test_env() -> None:
 
 
 def test_test_login_allowed_in_test_env() -> None:
-    assert WebConfig.from_env({**ENV, "TUTOR_ENV": "test", "TUTOR_TEST_LOGIN": "1"}).test_login
+    env = {
+        **ENV,
+        "TUTOR_ENV": "test",
+        "TUTOR_TEST_LOGIN": "1",
+        "TUTOR_BASE_URL": "http://localhost",
+    }
+    assert WebConfig.from_env(env).test_login
 
 
 def test_unknown_env_is_refused() -> None:
@@ -51,3 +57,10 @@ def test_bad_base_url_is_refused_naming_only_the_key(url: str) -> None:
 def test_http_is_allowed_on_loopback() -> None:
     config = WebConfig.from_env({**ENV, "TUTOR_BASE_URL": "http://localhost:8780/"})
     assert config.base_url == "http://localhost:8780"
+
+
+def test_test_login_requires_a_loopback_base_url() -> None:
+    env = {**ENV, "TUTOR_ENV": "test", "TUTOR_TEST_LOGIN": "1"}
+    with pytest.raises(ValueError, match="loopback"):
+        WebConfig.from_env(env)  # https://tutor.example.com
+    assert WebConfig.from_env({**env, "TUTOR_BASE_URL": "http://127.0.0.1:8780"}).test_login

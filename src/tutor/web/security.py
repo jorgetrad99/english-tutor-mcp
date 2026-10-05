@@ -15,6 +15,7 @@ CSP = (
     "form-action 'self' https://checkout.stripe.com https://billing.stripe.com "
     "https://accounts.google.com; frame-ancestors 'none'; base-uri 'none'; object-src 'none'"
 )
+MAX_NEXT_LENGTH = 512  # bounds what an anonymous login session can store
 _HSTS = "max-age=31536000; includeSubDomains"
 
 
@@ -65,7 +66,11 @@ class SecurityHeadersMiddleware:
 
 def safe_next(value: str | None) -> str:
     """Only same-site absolute paths survive; anything else goes to the dashboard."""
-    if not value or any(ord(c) < 0x20 or ord(c) == 0x7F or c == "\\" for c in value):
+    if (
+        not value
+        or len(value) > MAX_NEXT_LENGTH
+        or any(ord(c) < 0x20 or ord(c) == 0x7F or c == "\\" for c in value)
+    ):
         return "/app/"
     if value.startswith("//"):
         return "/app/"

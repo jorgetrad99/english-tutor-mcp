@@ -80,7 +80,16 @@ async def require_csrf(request: Request) -> None:
         raise HTTPException(status_code=403)
 
 
+async def require_csrf_if_session(request: Request) -> None:
+    """For logout: with no valid session there is nothing to forge, so no token is needed."""
+    holder = getattr(request.state, "web", None)
+    if getattr(holder, "session", None) is None:
+        return
+    await require_csrf(request)
+
+
 APP_ROUTER_DEPS = [Depends(require_csrf)]
+_CSRF_GUARDS = (require_csrf, require_csrf_if_session)
 
 
 def _depends_on(dependant: Dependant, call: object) -> bool:
@@ -98,8 +107,8 @@ def assert_csrf_everywhere(app: FastAPI, config: WebConfig) -> None:
     for route in app.routes:
         if not isinstance(route, APIRoute) or route.path in exempt:
             continue
-        if ((route.methods or set()) - _SAFE_METHODS) and not _depends_on(
-            route.dependant, require_csrf
+        if ((route.methods or set()) - _SAFE_METHODS) and not any(
+            _depends_on(route.dependant, guard) for guard in _CSRF_GUARDS
         ):
             raise RuntimeError(f"route {route.path} accepts unsafe methods without require_csrf")
 
