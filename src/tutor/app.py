@@ -27,7 +27,7 @@ from tutor.db.uow import PgIdentity, pg_uow_factory
 from tutor.mcp.observe import user_hash
 from tutor.mcp.server import build_mcp
 from tutor.services.context import Services
-from tutor.settings import Settings
+from tutor.settings import Settings, is_loopback
 from tutor.web.app import create_app
 from tutor.web.config import MCP_PATH, WebConfig
 from tutor.web.pg import (
@@ -132,9 +132,25 @@ def route_label(scope: Scope) -> str:
     return path if path in MCP_PATHS else "unmatched"
 
 
+# The image HEALTHCHECK (deploy/Dockerfile) GETs this from loopback every 30 s.
+HEALTHCHECK_PATH = "/.well-known/oauth-authorization-server"
+
+
+def _is_health_probe(scope: Scope) -> bool:
+    """The container's own probe; the same path from any other client is OAuth discovery."""
+    client = scope.get("client")
+    return (
+        scope.get("path") == HEALTHCHECK_PATH
+        and scope.get("method") == "GET"
+        and client is not None
+        and is_loopback(str(client[0]))
+    )
+
+
 class RequestLog:
     """One JSON line on `tutor.http` per HTTP request of the website and of the OAuth and
-    well-known routes (uvicorn's access log is off; spec 13).
+    well-known routes (uvicorn's access log is off; spec 13), except the container health
+    probe.
 
     A line carries the route label, the method, the status, the latency and the learner's
     hash when the web session knows the user; never the query string (authorization codes
@@ -146,7 +162,7 @@ class RequestLog:
         self._clock = clock
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or scope.get("path") == MCP_PATH:
+        if scope["type"] != "http" or scope.get("path") == MCP_PATH or _is_health_probe(scope):
             await self.app(scope, receive, send)
             return
         status = 500
