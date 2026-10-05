@@ -1,7 +1,8 @@
 """Alembic environment.
 
 The connection comes from, in order: Config.attributes["connection"] (tests), `-x url=...`,
-or the DATABASE_URL environment variable. Migrations run as the database owner.
+MIGRATION_DATABASE_URL, or DATABASE_URL. Migrations run as the database owner; the running
+app should use a separate non-superuser login (member of tutor_app) in DATABASE_URL.
 """
 
 import os
@@ -11,16 +12,21 @@ from sqlalchemy import Connection, create_engine, pool
 
 from alembic import context
 from tutor.db.engine import psycopg_url
-from tutor.db.tables import metadata
 
 config = context.config
-target_metadata = metadata
+# Autogenerate is not used: tables.py holds no FKs, constraints or policies, so a diff against
+# it would draft drops. Migrations are written by hand.
+target_metadata = None
 
 
 def _database_url() -> str:
-    url = context.get_x_argument(as_dictionary=True).get("url") or os.environ.get("DATABASE_URL")
+    url = (
+        context.get_x_argument(as_dictionary=True).get("url")
+        or os.environ.get("MIGRATION_DATABASE_URL")
+        or os.environ.get("DATABASE_URL")
+    )
     if not url:
-        raise SystemExit("Set DATABASE_URL or pass -x url=postgresql://...")
+        raise SystemExit("Set MIGRATION_DATABASE_URL, DATABASE_URL or pass -x url=postgresql://...")
     return psycopg_url(url)
 
 

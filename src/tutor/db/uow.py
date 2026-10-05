@@ -126,6 +126,8 @@ class PgIdentity(IdentityResolver):
     def resolve(
         self, google_sub: str, email: str | None, display_name: str | None, now: datetime
     ) -> ResolvedUser:
+        if not google_sub or not google_sub.strip():
+            raise ValueError("google_sub must not be blank")
         by_sub = select(users.c.id).where(users.c.google_sub == google_sub)
         with scoped_connection(self._engine, google_sub=google_sub) as conn:
             found = conn.execute(by_sub).scalar_one_or_none()

@@ -1,6 +1,7 @@
 """Postgres fixtures for integration tests (db-test on port 5433, TEST_DATABASE_URL in CI)."""
 
 import os
+import secrets
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -10,6 +11,7 @@ from uuid import UUID
 import pytest
 from alembic.config import Config
 from sqlalchemy import Engine, text
+from sqlalchemy.engine import make_url
 
 from alembic import command
 from tutor.db.engine import make_engine
@@ -18,6 +20,7 @@ from tutor.db.uow import PgIdentity, pg_uow_factory
 from tutor.services.ports import IdentityResolver, UowFactory
 
 ROOT = Path(__file__).resolve().parents[2]
+LOGIN_ROLE = "tutor_login_test"
 DEFAULT_URL = "postgresql://tutor:tutor@localhost:5433/tutor_test"
 NOW = datetime(2026, 10, 14, 15, 0, tzinfo=UTC)  # a Wednesday
 
@@ -45,6 +48,30 @@ def engine() -> Iterator[Engine]:
     run_alembic(eng, "upgrade", "head")
     yield eng
     eng.dispose()
+
+
+def _drop_login_role(engine: Engine) -> None:
+    with engine.begin() as conn:
+        conn.execute(text(f"DROP ROLE IF EXISTS {LOGIN_ROLE}"))
+
+
+@pytest.fixture(scope="session")
+def login_engine(engine: Engine) -> Iterator[Engine]:
+    """An engine connected as a non-superuser LOGIN role that only reaches tables via tutor_app."""
+    password = secrets.token_hex(16)  # exists only for this test session
+    _drop_login_role(engine)
+    with engine.begin() as conn:
+        conn.execute(
+            text(f"CREATE ROLE {LOGIN_ROLE} LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD '{password}'")
+        )
+        conn.execute(text(f"GRANT tutor_app TO {LOGIN_ROLE}"))
+    url = make_url(os.environ.get("TEST_DATABASE_URL", DEFAULT_URL)).set(
+        username=LOGIN_ROLE, password=password
+    )
+    eng = make_engine(url.render_as_string(hide_password=False))
+    yield eng
+    eng.dispose()
+    _drop_login_role(engine)
 
 
 @pytest.fixture(autouse=True)
