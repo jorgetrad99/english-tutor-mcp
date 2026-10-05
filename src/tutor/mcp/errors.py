@@ -11,8 +11,16 @@ import re
 from collections.abc import Sequence
 from typing import Any
 
-from fastmcp.exceptions import ToolError, ValidationError
+from fastmcp.exceptions import (
+    AuthorizationError,
+    DisabledError,
+    NotFoundError,
+    ToolError,
+    ValidationError,
+)
 from fastmcp.server.middleware import Middleware, MiddlewareContext
+from mcp.shared.exceptions import MCPError
+from mcp.types import INVALID_PARAMS, INVALID_REQUEST
 from pydantic import ValidationError as PydanticValidationError
 
 from tutor.mcp.rules import McpErrorCode, error_rules
@@ -86,14 +94,29 @@ def validation_fields(exc: BaseException) -> tuple[str, ...]:
     return tuple(paths)
 
 
+def protocol_error(exc: Exception) -> MCPError:
+    """A fixed JSON-RPC error for a framework failure: never the tool name or the text.
+
+    Unknown or disabled tools, failed authorization and deliberate MCPErrors (for example a
+    missing client capability) stay protocol errors instead of becoming tool results.
+    """
+    if isinstance(exc, NotFoundError | DisabledError):
+        return MCPError(code=INVALID_PARAMS, message="Unknown tool")
+    if isinstance(exc, AuthorizationError):
+        return MCPError(code=INVALID_REQUEST, message="Not authorized")
+    code = exc.error.code if isinstance(exc, MCPError) else INVALID_REQUEST
+    return MCPError(code=code, message="Request failed")
+
+
 class ValidationErrorMiddleware(Middleware):
-    """Every failure leaves as {code, fields, response_rules}; no exception text gets out.
+    """Every tool failure leaves as {code, fields, response_rules}; no exception text gets out.
 
     Argument-schema failures become validation_failed with field paths (pydantic's own text
     holds the values). A ServiceError, raw or as the cause of FastMCP's wrapping ToolError,
-    maps by its code. Anything else (a foreign ToolError, a pydantic error raised inside a tool
-    body, any Exception) becomes internal_error. The original is never chained and nothing is
-    logged here.
+    maps by its code. Framework failures (unknown tool, authorization, MCPError) stay
+    protocol errors with fixed text. Anything else (a foreign ToolError, a pydantic error
+    raised inside a tool body, any Exception) becomes internal_error. The original is never
+    chained and nothing is logged here.
     """
 
     async def on_call_tool(self, context: MiddlewareContext[Any], call_next: Any) -> Any:
@@ -102,6 +125,8 @@ class ValidationErrorMiddleware(Middleware):
             return await call_next(context)
         except TutorToolError:
             raise
+        except (NotFoundError, DisabledError, AuthorizationError, MCPError) as exc:
+            raise protocol_error(exc) from None
         except ValidationError as exc:
             raise TutorToolError(
                 error_text("validation_failed", validation_fields(exc), tool)

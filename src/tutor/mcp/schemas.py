@@ -500,14 +500,19 @@ OptionValue = Literal[
     "incident",
     "one_on_one",
     "async_writing",
-    "15",
-    "20",
-    "30",
+    15,
+    20,
+    30,
 ]
 
 
+def _option_value(field: str, value: str) -> str | int:
+    """The value exactly as save_profile takes it: minutes_per_day is an integer there."""
+    return int(value) if field == "minutes_per_day" else value
+
+
 class OptionOut(BaseModel):
-    value: OptionValue = out("Value", "The value to send back for this option.")
+    value: OptionValue = out("Value", "The value to send back unchanged for this option.")
     label_en: str = out("Label (English)", "Short option label in English.")
     label_es: str = out("Label (Spanish)", "Short option label in Spanish.")
     description_en: str = out("Description (English)", "One-line explanation in English.")
@@ -535,7 +540,7 @@ def onboarding_questions() -> list[QuestionOut]:
             options=[
                 OptionOut.model_validate(
                     dict(
-                        value=o.value,
+                        value=_option_value(q.fields[0], o.value),
                         label_en=o.label_en,
                         label_es=o.label_es,
                         description_en=o.description_en,

@@ -63,8 +63,8 @@ RECORD_REVIEW = (
 SAVE_GLOSSARY = (
     "Confirm in one sentence what was saved; never read the JSON.\n"
     "Do not retry rejected items.\n"
-    "If this was the feedback step, call end_session next; otherwise continue with today's "
-    "goal and the warm-up."
+    "If this was the feedback step, save the other status if any, then call end_session; "
+    "otherwise continue with today's goal and the warm-up."
 )
 END_SESSION: dict[SessionOutcome, str] = {
     "closed": (
@@ -102,8 +102,7 @@ ERRORS: dict[McpErrorCode, str] = {
         "If it fails again, tell the learner in one sentence and stop retrying."
     ),
     "payload_too_large": (
-        "Drop the cefr evidence and the oldest errors first, then retry once; never shorten "
-        "or paraphrase user_turns.\n"
+        "Send fewer or shorter items and retry once.\n"
         "Do not mention this to the learner unless it fails again."
     ),
     "internal_error": (
@@ -111,6 +110,12 @@ ERRORS: dict[McpErrorCode, str] = {
         "Do not retry more than once; if it fails again, continue the lesson without this tool."
     ),
 }
+# Only end_session sends evidence, so only its payload rule names the evidence fields.
+PAYLOAD_TOO_LARGE_END_SESSION = (
+    "Drop the cefr evidence and the oldest errors first, then retry once; never shorten "
+    "or paraphrase user_turns.\n"
+    "Do not mention this to the learner unless it fails again."
+)
 # Only start_lesson may offer a new session after session_not_found.
 SESSION_NOT_FOUND_START = (
     "Do not mention this to the learner.\n"
@@ -142,4 +147,6 @@ def end_session_rules(status: SessionOutcome, *, already_closed: bool) -> str:
 def error_rules(code: McpErrorCode, tool: str | None = None) -> str:
     if code == "session_not_found" and tool == "start_lesson":
         return SESSION_NOT_FOUND_START
+    if code == "payload_too_large" and tool == "end_session":
+        return PAYLOAD_TOO_LARGE_END_SESSION
     return ERRORS[code]

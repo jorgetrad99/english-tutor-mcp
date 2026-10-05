@@ -43,6 +43,7 @@ def all_rules() -> list[str]:
     found += [rules.end_session_rules(s, already_closed=True) for s in get_args(SessionOutcome)]
     found += [rules.error_rules(c) for c in (*get_args(ErrorCode), "internal_error")]
     found.append(rules.error_rules("session_not_found", "start_lesson"))
+    found.append(rules.error_rules("payload_too_large", "end_session"))
     return found
 
 
@@ -153,11 +154,24 @@ def test_scenario_and_close_rules_carry_the_section_12_exceptions() -> None:
 
 
 def test_save_glossary_rules_name_the_next_action() -> None:
-    assert "call end_session next" in rules.SAVE_GLOSSARY
+    assert "save the other status if any, then call end_session" in rules.SAVE_GLOSSARY
     assert "warm-up" in rules.SAVE_GLOSSARY
 
 
+def test_turn_length_and_spanish_limits_apply_to_the_conversation_only() -> None:
+    assert "In the conversation phase" in INSTRUCTIONS
+    assert "Feedback and onboarding are exempt" in INSTRUCTIONS
+    assert "a warm-up drill cue may use Spanish" in INSTRUCTIONS
+
+
+def test_payload_too_large_rule_names_evidence_only_for_end_session() -> None:
+    for tool in (None, "save_glossary", "start_lesson"):
+        generic = rules.error_rules("payload_too_large", tool)
+        assert "user_turns" not in generic and "cefr" not in generic
+        assert "retry" in generic
+
+
 def test_payload_too_large_never_shortens_user_turns() -> None:
-    text = rules.error_rules("payload_too_large")
+    text = rules.error_rules("payload_too_large", "end_session")
     assert "never shorten or paraphrase user_turns" in text
     assert "cefr evidence" in text

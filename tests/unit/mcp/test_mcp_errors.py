@@ -3,7 +3,16 @@ from typing import Annotated, Any, Literal
 
 import pytest
 from fastmcp import Client, FastMCP
-from fastmcp.exceptions import ToolError
+from fastmcp.exceptions import (
+    AuthorizationError,
+    DisabledError,
+    InsufficientScopeError,
+    NotFoundError,
+    ToolError,
+)
+from fastmcp.server.middleware import Middleware, MiddlewareContext
+from mcp.shared.exceptions import MCPError
+from mcp.types import INVALID_PARAMS, INVALID_REQUEST
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic import ValidationError as PydanticValidationError
 
@@ -178,10 +187,45 @@ def test_pydantic_validation_error_is_not_a_service_error() -> None:
 
 
 @pytest.mark.asyncio
-async def test_unknown_tool_does_not_echo_the_name() -> None:
-    result, text = await call(PROBE, {})
-    assert result.is_error
-    assert "ZQX" not in text
+async def test_unknown_tool_is_a_fixed_protocol_error_without_the_name() -> None:
+    with pytest.raises(MCPError) as caught:
+        await call(PROBE, {})
+    assert (caught.value.error.code, caught.value.error.message) == (INVALID_PARAMS, "Unknown tool")
+    assert "ZQX" not in str(caught.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("exc", "code", "message"),
+    [
+        (NotFoundError(f"gone {PROBE}"), INVALID_PARAMS, "Unknown tool"),
+        (DisabledError(f"off {PROBE}"), INVALID_PARAMS, "Unknown tool"),
+        (AuthorizationError(f"denied {PROBE}"), INVALID_REQUEST, "Not authorized"),
+        (InsufficientScopeError([PROBE]), INVALID_REQUEST, "Not authorized"),
+        (MCPError(code=-32021, message=f"capability {PROBE}"), -32021, "Request failed"),
+    ],
+)
+async def test_framework_errors_stay_protocol_errors_without_text(
+    exc: Exception, code: int, message: str
+) -> None:
+    mcp = FastMCP("framework")
+
+    class Raise(Middleware):
+        async def on_call_tool(self, context: MiddlewareContext[Any], call_next: Any) -> Any:
+            raise exc
+
+    mcp.add_middleware(ValidationErrorMiddleware())
+    mcp.add_middleware(Raise())
+
+    @mcp.tool
+    def ping() -> dict[str, Any]:
+        return {}
+
+    async with Client(mcp) as client:
+        with pytest.raises(MCPError) as caught:
+            await client.call_tool("ping", {}, raise_on_error=False)
+    assert (caught.value.error.code, caught.value.error.message) == (code, message)
+    assert "ZQX" not in str(caught.value) and "ping" not in str(caught.value)
 
 
 @pytest.mark.asyncio
