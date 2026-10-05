@@ -1,12 +1,17 @@
-"""Unit-suite speedups that do not change what any test asserts."""
+"""Unit-suite speedups that do not change what any test asserts.
+
+A conftest fixture applies only to tests under this directory, and both patches below are function
+scoped and undone after every test, so integration tests never run with them in any ordering.
+"""
 
 from collections.abc import Callable, Iterator
-from functools import lru_cache
 from typing import Any
 
+import fastmcp
 import pytest
 from fastmcp.server.auth.oauth_proxy import proxy as oauth_proxy
 from jinja2 import Environment
+from jinja2.utils import _PassArg
 
 _COMPILE_SETTINGS = (
     "block_start_string",
@@ -26,21 +31,19 @@ _COMPILE_SETTINGS = (
     "newstyle_gettext",
 )
 
+_JWT_CACHE: dict[tuple[Any, ...], bytes] = {}
+_COMPILE_CACHE: dict[tuple[Any, ...], Any] = {}
 
-@pytest.fixture(scope="session", autouse=True)
-def _memoized_jwt_key_derivation() -> Iterator[None]:
-    """FastMCP derives the JWT signing key with PBKDF2 at 1,000,000 iterations (about 0.5 s) every
-    time a Google provider is built, and each unit test builds its own provider.
 
-    The derivation is a pure function of its keyword arguments, so memoizing it returns the same
-    key for the same inputs; a different secret or salt still derives afresh. No test asserts on
-    the iteration count, and the integration suite (a separate directory) is not affected.
+def _callables(table: dict[str, Any]) -> tuple[Any, ...]:
+    """Name and pass-argument marker: all the compiler reads (it never embeds the function).
+
+    The function objects are deliberately not part of the key: the website builds fresh closures per
+    environment, so keying on them would never hit. Two functions with the same name and marker
+    compile to identical code.
     """
-    original: Callable[..., bytes] = oauth_proxy.derive_jwt_key
-    cached: Any = lru_cache(maxsize=None)(original)
-    with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(oauth_proxy, "derive_jwt_key", cached)
-        yield
+    entries = ((name, _PassArg.from_obj(fn)) for name, fn in table.items())
+    return tuple(sorted(entries, key=lambda entry: entry[0]))
 
 
 def _compile_key(env: Environment) -> tuple[Any, ...]:
@@ -50,23 +53,47 @@ def _compile_key(env: Environment) -> tuple[Any, ...]:
     return (
         type(env),
         *(getattr(env, name, None) for name in _COMPILE_SETTINGS),
-        id(env.autoescape),
-        id(env.finalize),
+        env.autoescape,
+        env.finalize,
         tuple(extensions),
+        _callables(env.filters),
+        _callables(env.tests),
     )
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(autouse=True)
+def _memoized_jwt_key_derivation() -> Iterator[None]:
+    """FastMCP derives the JWT signing key with PBKDF2 at 1,000,000 iterations (about 0.5 s) every
+    time a Google provider is built, and each unit test builds its own provider.
+
+    The derivation is a pure function of its keyword arguments and of `fastmcp.settings.test_mode`
+    (which picks the low-entropy iteration count), so all of those are in the memo key: a different
+    secret, salt or mode derives afresh.
+    """
+    original: Callable[..., bytes] = oauth_proxy.derive_jwt_key
+
+    def memoized(**kwargs: Any) -> bytes:
+        key = (fastmcp.settings.test_mode, *sorted(kwargs.items()))
+        if key not in _JWT_CACHE:
+            _JWT_CACHE[key] = original(**kwargs)
+        return _JWT_CACHE[key]
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(oauth_proxy, "derive_jwt_key", memoized)
+        yield
+
+
+@pytest.fixture(autouse=True)
 def _shared_template_compilation() -> Iterator[None]:
     """Every test that builds the website builds fresh Jinja environments, and each environment
     recompiles every template it renders (about 680 compilations per run).
 
-    Compiling is a pure function of the template source and the compile-time environment settings,
-    and its result is an immutable code object, so it is cached on exactly those inputs. Rendering,
-    globals, filters and translations stay per environment, so no test state is shared.
+    Compiling is a pure function of the template source and the compile-time environment state
+    (settings, extensions, autoescape, finalize, and the filters and tests with their pass-argument
+    markers, which the compiler reads), and its result is an immutable code object, so it is cached
+    on exactly those inputs. Rendering, globals and translations stay per environment.
     """
     original = Environment.compile
-    cache: dict[tuple[Any, ...], Any] = {}
 
     def compile_cached(
         self: Environment,
@@ -79,9 +106,9 @@ def _shared_template_compilation() -> Iterator[None]:
         if not isinstance(source, str):
             return original(self, source, name, filename, raw, defer_init)  # type: ignore[call-overload]
         key = (_compile_key(self), source, name, filename, raw, defer_init)
-        if key not in cache:
-            cache[key] = original(self, source, name, filename, raw, defer_init)  # type: ignore[call-overload]
-        return cache[key]
+        if key not in _COMPILE_CACHE:
+            _COMPILE_CACHE[key] = original(self, source, name, filename, raw, defer_init)  # type: ignore[call-overload]
+        return _COMPILE_CACHE[key]
 
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(Environment, "compile", compile_cached)
