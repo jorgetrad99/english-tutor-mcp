@@ -71,12 +71,18 @@ def record_review(
         if bad:
             raise ServiceError("validation_failed", bad)
         tz = user_zone(uow)
+        today = local_date(now, tz)
         views: list[ReviewResultView] = []
         for item_id, rating in results:
             before = uow.reviews.state(item_id)
             if before is None:
                 before = new_state(now)
-            if uow.reviews.log(session_id, item_id, rating, now, before):
+            if before.last_review is not None and local_date(before.last_review, tz) == today:
+                # Already graded earlier today (any session): FSRS gets one attempt per day.
+                views.append(
+                    ReviewResultView(item_id, local_date(before.due, tz), "already_recorded")
+                )
+            elif uow.reviews.log(session_id, item_id, rating, now, before):
                 after = review(before, rating, now)
                 uow.reviews.save_state(item_id, after)
                 views.append(ReviewResultView(item_id, local_date(after.due, tz), "recorded"))

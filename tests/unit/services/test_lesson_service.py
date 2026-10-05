@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
@@ -17,7 +20,7 @@ from tutor.services.context import Services
 from tutor.services.errors import ServiceError
 from tutor.services.lesson import record_review, start_lesson
 from tutor.services.memory import MemoryStore
-from tutor.services.ports import OpenSessionExists, ReviewLogRow
+from tutor.services.ports import OpenSessionExists, ReviewLogRow, UnitOfWork
 from tutor.services.views import LessonStart, ReviewResultView, StartLessonRequest
 
 from .conftest import MEXICO_CITY, NEW_YORK, NOW, FixedClock, onboard
@@ -221,6 +224,22 @@ def test_variant_follows_the_last_three_closed_sessions(
     assert text_lesson(svc, user_id).variant == expected
 
 
+def test_prep_fallback_session_is_off_plan(svc: Services, user_id: UUID, now: datetime) -> None:
+    onboard(svc, user_id)
+    with svc.uow(user_id) as uow:
+        plan = present(uow.plans.active())
+        track = {t.id: t for t in uow.track.items("it")}
+        session = start_session(uow, first_item(uow), now - timedelta(hours=1))
+        for item in plan.items:
+            if "incident" in track[item.track_item_id].use_cases:
+                uow.plans.mark_done(item.id, session.id)
+    lesson = text_lesson(svc, user_id, prep="Outage call", prep_use_case="incident")
+    assert "incident" in lesson.item.use_cases
+    assert not lesson.plan_exhausted
+    with svc.uow(user_id) as uow:
+        assert present(uow.sessions.get(lesson.session_id)).plan_item_id is None
+
+
 def test_exhausted_plan_returns_the_last_item(svc: Services, user_id: UUID, now: datetime) -> None:
     onboard(svc, user_id)
     with svc.uow(user_id) as uow:
@@ -232,6 +251,8 @@ def test_exhausted_plan_returns_the_last_item(svc: Services, user_id: UUID, now:
     last = max(plan.items, key=lambda i: (i.week_no, i.order_no))
     assert lesson.plan_exhausted
     assert lesson.item.id == last.track_item_id
+    with svc.uow(user_id) as uow:
+        assert present(uow.sessions.get(lesson.session_id)).plan_item_id is None
 
 
 def test_ten_starts_per_local_day_in_mexico_city(
@@ -295,23 +316,44 @@ def test_ten_starts_per_local_day_in_new_york_across_dst(
 
 
 def test_start_retries_once_when_a_concurrent_start_wins(
-    svc: Services, store: MemoryStore, user_id: UUID
+    svc: Services, store: MemoryStore, user_id: UUID, now: datetime
 ) -> None:
     # Review Focus 5
     onboard(svc, user_id)
     attempts: list[int] = []
+    winners: list[UUID] = []
+    inserting_winner = False
 
     def lose_the_first_race() -> None:
+        if inserting_winner:
+            return
         attempts.append(1)
         if len(attempts) == 1:
             raise OpenSessionExists()
 
+    @contextmanager
+    def racing_uow(uid: UUID) -> Iterator[UnitOfWork]:
+        try:
+            with svc.uow(uid) as uow:
+                yield uow
+        except OpenSessionExists:
+            # The rolled-back attempt lost to a request that committed its own session.
+            nonlocal inserting_winner
+            inserting_winner = True
+            with svc.uow(uid) as other:
+                winners.append(start_session(other, first_item(other), now).id)
+            inserting_winner = False
+            raise
+
     store.before_session_create = lose_the_first_race
-    lesson = text_lesson(svc, user_id)
+    lesson = start_lesson(replace(svc, uow=racing_uow), user_id, StartLessonRequest(mode="text"))
     assert len(attempts) == 2
+    assert lesson.replaced_session
+    assert lesson.session_id != winners[0]
     with svc.uow(user_id) as uow:
         assert present(uow.sessions.open_session()).id == lesson.session_id
-        assert uow.sessions.count_started_since(NOW - timedelta(days=1)) == 1
+        assert present(uow.sessions.get(winners[0])).status == "incomplete"
+        assert uow.sessions.count_started_since(NOW - timedelta(days=1)) == 2
 
 
 def test_start_gives_up_after_a_second_conflict(
@@ -451,3 +493,37 @@ def test_record_review_validates_the_results_list(
         with pytest.raises(ServiceError) as info:
             record_review(svc, user_id, lesson.session_id, results)
         assert (info.value.code, info.value.fields) == ("validation_failed", fields)
+
+
+def test_record_review_grades_an_item_once_per_local_day(
+    svc: Services, clock: FixedClock, user_id: UUID
+) -> None:
+    onboard(svc, user_id)
+    clock.now = datetime(2026, 10, 14, 5, 0, tzinfo=UTC)  # 23:00 on the 13th in Mexico City
+    session_a = text_lesson(svc, user_id)
+    with svc.uow(user_id) as uow:
+        item_id = insert_glossary(
+            uow, session_a.session_id, "roll back", clock.now, kind="chunk", first_due=clock.now
+        ).id
+    (first,) = record_review(svc, user_id, session_a.session_id, [(item_id, 3)])
+    assert first.outcome == "recorded"
+    with svc.uow(user_id) as uow:
+        after = present(uow.reviews.state(item_id))
+
+    clock.now = datetime(2026, 10, 14, 5, 50, tzinfo=UTC)  # 23:50 local, same day, new UTC date
+    session_b = text_lesson(svc, user_id)
+    (again,) = record_review(svc, user_id, session_b.session_id, [(item_id, 1)])
+    assert again == ReviewResultView(
+        item_id=item_id, next_due=first.next_due, outcome="already_recorded"
+    )
+    with svc.uow(user_id) as uow:
+        assert uow.reviews.state(item_id) == after
+        assert uow.reviews.session_logs(session_b.session_id) == ()
+
+    clock.now = datetime(2026, 10, 14, 6, 10, tzinfo=UTC)  # 00:10 local on the 14th
+    session_c = text_lesson(svc, user_id)
+    (next_day,) = record_review(svc, user_id, session_c.session_id, [(item_id, 3)])
+    assert next_day.outcome == "recorded"
+    with svc.uow(user_id) as uow:
+        assert uow.reviews.state(item_id) == review(after, 3, clock.now)
+        assert len(uow.reviews.session_logs(session_c.session_id)) == 1
