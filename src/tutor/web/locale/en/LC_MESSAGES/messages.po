@@ -219,3 +219,9 @@ msgstr "Tap “Add”. English Tutor will appear next to your apps."
 
 msgid "Ahora no"
 msgstr "Not now"
+
+msgid "Copiado"
+msgstr "Copied"
+
+msgid "No se pudo copiar; selecciona el texto."
+msgstr "Couldn't copy; select the text instead."
