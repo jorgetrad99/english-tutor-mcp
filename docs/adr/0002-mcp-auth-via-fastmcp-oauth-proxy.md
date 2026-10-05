@@ -25,7 +25,7 @@ v0 serves about four users and is built by one part-time developer. An own autho
 v0 authorizes MCP clients with FastMCP's `GoogleProvider`, configured for production as the FastMCP docs require:
 
 - a dedicated `jwt_signing_key` from the environment;
-- `client_storage` = `FernetEncryptionWrapper(DiskStore(<named Docker volume>), Fernet(OAUTH_STORAGE_ENCRYPTION_KEY))`;
+- `client_storage` = `FernetEncryptionWrapper(FileTreeStore(<named Docker volume>), Fernet(TUTOR_OAUTH_STORAGE_KEY))`, the library's own default store type. `DiskStore` was dropped: its `diskcache` dependency has an advisory with no fixed release (CVE-2025-69872) that fails `pip-audit`. A wrong or rotated key reads as a cache miss, so clients register again;
 - `allowed_client_redirect_uris` limited to the Claude callback;
 - scopes `openid` and email only.
 
@@ -35,20 +35,20 @@ The website keeps its own Authlib Google login with a server-side session cookie
 
 ## Compliance with requirements section 5
 
-The planning step fills the "Verified" column from Context7 and the FastMCP source for the pinned version. Any "no" stays here as an accepted v0 gap with its mitigation.
+Verified on 2026-10-05 against the installed source of fastmcp 4.0.11 and mcp 2.3.0 (paths relative to `site-packages`) and by the tests named below. Any "no" stays here as an accepted v0 gap with its mitigation.
 
 | Section 5 rule | Who meets it | Verified |
 | --- | --- | --- |
-| Discovery metadata (RFC 9728 / RFC 8414) | Library (`get_well_known_routes` at root) | pending |
-| Dynamic registration or pre-registered client; client metadata documents | Library (spike-proven with Claude) | pending |
-| PKCE S256 mandatory | Library | pending |
-| Users linked by Google `sub`, never email alone | Ours (`tutor.auth`) | by design |
-| Access token JWT, 60 min | Library (FastMCP JWT; lifetime follows upstream unless configured) | pending |
-| Rotating refresh token, 30 days, single use | Library | pending |
-| Token bound to the MCP resource (audience) | Library | pending |
-| Every MCP request carries a Bearer token for one user | Library + ours (every tool resolves `sub`) | by design |
-| Audit of login and token issuance | Partly ours: `user_created`, `mcp_client_seen`; token issuance inside the library is not audited in v0 | gap, accepted for v0 |
-| Secrets never logged | Ours (log policy, tests) | by design |
+| Discovery metadata (RFC 9728 / RFC 8414) | Library (`mcp.http_app` serves both at the root) | Yes. `/.well-known/oauth-authorization-server` and `/.well-known/oauth-protected-resource/mcp` come from `auth.get_routes` (`fastmcp/server/http.py:601-605`); the PRM `resource` is `base_url + "/mcp"` (`tests/unit/app/test_app_http.py`) |
+| Dynamic registration or pre-registered client; client metadata documents | Library (spike-proven with Claude) | Yes. `/register` (`fastmcp/server/auth/oauth_proxy/proxy.py:977+`; https, non-loopback redirect URIs only, 1033-1038); CIMD on by default (proxy.py:699-702, 941-948); client redirect URIs limited to `CLAUDE_REDIRECT_URIS` |
+| PKCE S256 mandatory | Library | Yes. `code_challenge` is required and `code_challenge_method` is `Literal["S256"]` (`mcp/server/auth/handlers/authorize.py:32-33`); metadata advertises `["S256"]` (`mcp/server/auth/routes.py:185`); the proxy uses its own S256 pair with Google (proxy.py:869-902) |
+| Users linked by Google `sub`, never email alone | Ours (`tutor.auth.identity`) | By design; `tests/unit/auth/test_auth_identity.py` |
+| Access token JWT, 60 min | Library (FastMCP JWT; lifetime follows upstream) | Yes. The JWT lifetime mirrors Google's `expires_in`, 3600 s (proxy.py:1355-1356); fallback 1 h (`oauth_proxy/models.py:28`) |
+| Rotating refresh token, 30 days, single use | Library + our configuration | Yes. Each refresh issues a new refresh JWT and deletes the old JTI, "one-time use" (proxy.py:1767+, ~1990); a reused token gets `invalid_grant` (proxy.py:1731-1750). 30 days through `fallback_refresh_token_expiry_seconds=REFRESH_TOKEN_SECONDS`; the library default is 1 year (models.py:32, proxy.py:1404-1412). Gap accepted for v0: no reuse detection or token-family revocation |
+| Token bound to the MCP resource (audience) | Library | Yes. `aud` = `base_url + "/mcp"` (proxy.py:766-790, `fastmcp/server/auth/jwt_issuer.py:141-142`), checked on every request (jwt_issuer.py:285); the JWT is a reference token whose Google token is re-validated with tokeninfo (proxy.py:2152-2230) |
+| Every MCP request carries a Bearer token for one user | Library + ours (every tool resolves `sub`) | Yes. `/mcp` without a token is 401 with `resource_metadata` (`tests/unit/app/test_app_http.py`); `IdentityMiddleware` resolves `sub` on every tool call |
+| Audit of login and token issuance | Partly ours: `user_created`, `mcp_first_use` (plan ruling 3); token issuance inside the library is not audited in v0 | Gap, accepted for v0 |
+| Secrets never logged | Ours (log policy, tests) | By design: uvicorn runs without its access log (it would print `/oauth/callback?code=…`); the call log holds only `user_hash`, tool, outcome and latency (`tests/unit/mcp/test_mcp_server.py`) |
 
 ## Consequences
 
