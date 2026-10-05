@@ -41,7 +41,7 @@ def test_app_waits_for_migrate_and_publishes_nothing() -> None:
 
 def _nets(name: str) -> set[str]:
     nets = _compose()[name]["networks"]
-    return set(nets)  # list or mapping of names
+    return set(nets)  # type: ignore[call-overload]  # list or mapping of names
 
 
 def test_network_split_isolates_the_database() -> None:
@@ -61,7 +61,7 @@ def test_forwarded_allow_ips_is_cloudflareds_fixed_edge_address() -> None:
     ipam = doc["networks"]["edge"]["ipam"]["config"][0]
     assert fixed in ip_network(ipam["subnet"])
     assert fixed not in ip_network(ipam["ip_range"])  # dynamic addresses can never take it
-    assert ip_network(ipam["ip_range"]).subnet_of(ip_network(ipam["subnet"]))
+    assert ip_network(ipam["ip_range"]).subnet_of(ip_network(ipam["subnet"]))  # type: ignore[arg-type]
     allowed = dict(
         line.split("=", 1)
         for line in (DEPLOY / "tutor.env.example").read_text(encoding="utf-8").splitlines()
@@ -81,7 +81,7 @@ def test_images_are_pinned_by_digest() -> None:
 def test_db_drops_capabilities_to_what_postgres_needs() -> None:
     db = _compose()["db"]
     assert db["cap_drop"] == ["ALL"]
-    assert set(db["cap_add"]) == {"CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"}
+    assert set(db["cap_add"]) == {"CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"}  # type: ignore[call-overload]
 
 
 def test_hardening_flags() -> None:
