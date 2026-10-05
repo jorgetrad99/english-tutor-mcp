@@ -5,6 +5,9 @@ scoped and undone after every test, so integration tests never run with them in 
 """
 
 from collections.abc import Callable, Iterator
+from enum import Enum
+from functools import partial
+from types import FunctionType
 from typing import Any
 
 import fastmcp
@@ -35,14 +38,53 @@ _JWT_CACHE: dict[tuple[Any, ...], bytes] = {}
 _COMPILE_CACHE: dict[tuple[Any, ...], Any] = {}
 
 
-def _callables(table: dict[str, Any]) -> tuple[Any, ...]:
-    """Name and pass-argument marker: all the compiler reads (it never embeds the function).
+_IMMUTABLE = (str, int, float, bool, bytes, type(None), Enum)
 
-    The function objects are deliberately not part of the key: the website builds fresh closures per
-    environment, so keying on them would never hit. Two functions with the same name and marker
-    compile to identical code.
+
+def _immutable(value: Any) -> bool:
+    if isinstance(value, tuple | frozenset):
+        return all(_immutable(item) for item in value)
+    return isinstance(value, _IMMUTABLE)
+
+
+def _function_key(fn: Any) -> Any:
+    """What decides a filter or test's behaviour, for constant folding at compile time.
+
+    Jinja calls filters and tests on constant input while compiling and embeds the result, so the
+    compiled code depends on the function's behaviour. A plain function, a lambda or a closure is
+    keyed on its code object, defaults and closure cell contents; a `functools.partial` on its
+    target, arguments and keywords. That key is used only when every captured value is immutable
+    (str, number, bytes, None, Enum, or tuples of those) and any global the code reads is module
+    state shared by all copies. Anything else is keyed on the object itself, which never shares.
     """
-    entries = ((name, _PassArg.from_obj(fn)) for name, fn in table.items())
+    if isinstance(fn, partial):
+        inner = _function_key(fn.func)
+        values = (*fn.args, *fn.keywords.values())
+        if inner is not fn.func and _immutable(values):
+            return ("partial", inner, fn.args, tuple(sorted(fn.keywords.items())))
+        return fn
+    code = getattr(fn, "__code__", None)
+    if code is None or type(fn) is not FunctionType:
+        return fn
+    try:
+        cells = tuple(cell.cell_contents for cell in fn.__closure__ or ())
+    except ValueError:  # an empty cell
+        return fn
+    captured = (*cells, *(fn.__defaults__ or ()), *(fn.__kwdefaults__ or {}).values())
+    if not _immutable(captured):
+        return fn
+    return (
+        "function",
+        code,
+        cells,
+        fn.__defaults__,
+        tuple(sorted((fn.__kwdefaults__ or {}).items())),
+    )
+
+
+def _callables(table: dict[str, Any]) -> tuple[Any, ...]:
+    """Name, pass-argument marker and the function's behaviour key."""
+    entries = ((name, _PassArg.from_obj(fn), _function_key(fn)) for name, fn in table.items())
     return tuple(sorted(entries, key=lambda entry: entry[0]))
 
 
@@ -89,9 +131,10 @@ def _shared_template_compilation() -> Iterator[None]:
     recompiles every template it renders (about 680 compilations per run).
 
     Compiling is a pure function of the template source and the compile-time environment state
-    (settings, extensions, autoescape, finalize, and the filters and tests with their pass-argument
-    markers, which the compiler reads), and its result is an immutable code object, so it is cached
-    on exactly those inputs. Rendering, globals and translations stay per environment.
+    (settings, extensions, autoescape, finalize, and the filters and tests: names, pass-argument
+    markers and behaviour, because the compiler checks them and constant-folds calls to them), and
+    its result is an immutable code object, so it is cached on exactly those inputs. Rendering,
+    globals and translations stay per environment.
     """
     original = Environment.compile
 

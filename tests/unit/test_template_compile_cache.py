@@ -37,3 +37,42 @@ def test_a_missing_filter_still_fails_after_another_environment_compiled_it() ->
     assert render(shout=plain) == "X"
     with pytest.raises(TemplateAssertionError):
         render()
+
+
+def test_constant_folded_filters_with_different_behaviour_do_not_share_code() -> None:
+    def build(fn: Any) -> str:
+        env = Environment(autoescape=True)
+        env.filters["s"] = fn
+        return env.from_string("{{ 'X'|s }}").render()
+
+    assert build(str.upper) == "X"
+    assert build(lambda v: v.lower() + "?") == "x?"
+    assert build(str.upper) == "X"
+
+
+def make_suffix(suffix: str) -> Any:
+    def add(value: str) -> str:
+        return value + suffix
+
+    return add
+
+
+def test_closures_differing_only_in_captured_values_do_not_share_code() -> None:
+    def build(fn: Any) -> str:
+        env = Environment(autoescape=True)
+        env.filters["s"] = fn
+        return env.from_string("{{ 'X'|s }}").render()
+
+    assert build(make_suffix("!")) == "X!"
+    assert build(make_suffix("?")) == "X?"
+    assert build(make_suffix("!")) == "X!"
+
+
+def test_closures_with_mutable_captures_never_share_code() -> None:
+    def build(box: list[str]) -> str:
+        env = Environment(autoescape=True)
+        env.filters["s"] = lambda v: v + box[0]
+        return env.from_string("{{ 'X'|s }}").render()
+
+    assert build(["1"]) == "X1"
+    assert build(["2"]) == "X2"
