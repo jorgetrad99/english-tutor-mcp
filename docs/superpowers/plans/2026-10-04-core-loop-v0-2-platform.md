@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-04-core-loop-v0-design.md` (approved 2026-10-04). Track content: `docs/content/track-it-v0.yaml`. ADR: `docs/adr/0002-mcp-auth-via-fastmcp-oauth-proxy.md`.
 
+**Execution:** subagent-driven (chosen by the author on 2026-10-04).
+
 **Status:** waiting for the go decision. The build starts 2026-10-12 only if ADR 0001 (Oct 11) says go. If ADR 0001 changes the voice or `end_session` wording (spec section 16), apply it to Task 19's `rules.py` before dispatching Task 19.
 
 **Plan files:** this plan has three files with the same header and contract.
