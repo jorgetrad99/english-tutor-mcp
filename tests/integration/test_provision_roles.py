@@ -81,3 +81,32 @@ def test_owner_cannot_be_the_app_login(owner_url: str) -> None:
     env["APP_DB_USER"] = make_url(owner_url).username or "tutor"
     with pytest.raises(SystemExit):
         main(env)
+
+
+def test_the_app_check_refuses_a_login_that_owns_an_object_or_joins_another_role(
+    engine: Engine, owner_url: str
+) -> None:
+    pw = secrets.token_hex(24)
+    assert main(_env(owner_url, pw, secrets.token_hex(24))) == 0
+    login_url = make_url(owner_url).set(username=LOGIN, password=pw).render_as_string(False)
+    with engine.begin() as conn:
+        conn.execute(text(f"GRANT pg_monitor TO {LOGIN}"))
+    login = make_engine(login_url)
+    try:
+        with pytest.raises(SystemExit, match="roles other than tutor_app"):
+            check_app_role(login)
+    finally:
+        login.dispose()
+    with engine.begin() as conn:
+        conn.execute(text(f"REVOKE pg_monitor FROM {LOGIN}"))
+        conn.execute(text(f"CREATE SCHEMA owned_by_login AUTHORIZATION {LOGIN}"))
+    login = make_engine(login_url)
+    try:
+        with pytest.raises(SystemExit, match="owns database objects"):
+            check_app_role(login)
+        with pytest.raises(SystemExit):  # provisioning itself refuses the same state
+            main(_env(owner_url, pw, secrets.token_hex(24)))
+    finally:
+        login.dispose()
+        with engine.begin() as conn:
+            conn.execute(text("DROP SCHEMA owned_by_login"))

@@ -149,3 +149,17 @@ async def test_internal_errors_carry_the_exception_class_only() -> None:
     assert "error_class" not in await _log_line(ok)
     for failing in (noted, raw):
         assert "ZQX" not in str(await _log_line(failing))
+
+
+def test_scrub_filter_keeps_numbers_so_percent_d_formats() -> None:
+    record = logging.LogRecord(
+        "uvicorn.error",
+        logging.INFO,
+        __file__,
+        1,
+        "run on %s://%s:%d",
+        ("http", "0.0.0.0", 8000),  # noqa: S104
+        None,
+    )
+    ScrubFilter().filter(record)
+    assert record.getMessage() == f"run on {REDACTED}://{REDACTED}:8000"

@@ -111,7 +111,8 @@ class ScrubFilter(logging.Filter):
             record.msg = REDACTED
             record.args = None
         elif record.args:
-            record.args = tuple(REDACTED for _ in record.args)
+            # Numbers cannot carry learner text and %d/%f templates need them; redact the rest.
+            record.args = tuple(a if isinstance(a, int | float) else REDACTED for a in record.args)
         record.exc_info = None
         record.exc_text = None
         record.stack_info = None

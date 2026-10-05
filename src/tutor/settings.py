@@ -22,6 +22,8 @@ REQUIRED = (
     "TUTOR_OAUTH_STORAGE_KEY",
     "TUTOR_WEB_SESSION_SECRET",
 )
+# Credentials of other roles (migration owner, gate report): the production app never holds them.
+OWNER_ONLY_KEYS = ("MIGRATION_DATABASE_URL", "GATE_REPORT_DATABASE_URL")
 MIN_SIGNING_KEY_CHARS = 32
 MIN_WEB_SECRET_CHARS = 32
 DEFAULT_OAUTH_STORAGE_DIR = "data/oauth"
@@ -128,6 +130,12 @@ class Settings:
             ("postgresql:", "postgresql+", "postgres:")
         ):
             problems.append("DATABASE_URL must be a PostgreSQL URL when TUTOR_ENV is prod")
+        if tutor_env == "prod":
+            held = [k for k in OWNER_ONLY_KEYS if env.get(k, "").strip()]
+            if held:
+                problems.append(
+                    f"{', '.join(held)} must not be set in the app env when TUTOR_ENV is prod"
+                )
         port = _port(env.get("TUTOR_PORT", str(DEFAULT_PORT)).strip())
         if port is None:
             problems.append("TUTOR_PORT must be a number from 1 to 65535")

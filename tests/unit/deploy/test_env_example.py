@@ -9,7 +9,7 @@ from cryptography.fernet import Fernet
 from tutor.__main__ import run_kwargs
 from tutor.ops.provision_roles import KEYS as MIGRATE_KEYS
 from tutor.ops.provision_roles import check_inputs
-from tutor.settings import Settings
+from tutor.settings import OWNER_ONLY_KEYS, Settings
 from tutor.web.config import WebConfig
 
 pytestmark = pytest.mark.unit
@@ -17,7 +17,7 @@ pytestmark = pytest.mark.unit
 DEPLOY = Path(__file__).resolve().parents[3] / "deploy"
 SUFFIX = ".env.example"
 # The app never gets the owner URL (Settings reads it only for local tooling).
-OWNER_ONLY = {"MIGRATION_DATABASE_URL"}
+OWNER_ONLY = set(OWNER_ONLY_KEYS)
 FULL = {
     "TUTOR_ENV": "prod",
     "TUTOR_BASE_URL": "https://tutor.example.com",
@@ -33,7 +33,6 @@ FULL = {
     "TUTOR_PORT": "8000",
     "TUTOR_HOST": "0.0.0.0",  # noqa: S104 - the container listens on its own network only
     "FORWARDED_ALLOW_IPS": "172.30.10.3",
-    "MIGRATION_DATABASE_URL": "postgresql://owner:x@db:5432/tutor",
 }
 
 

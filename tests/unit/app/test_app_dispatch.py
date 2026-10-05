@@ -188,3 +188,18 @@ async def test_a_disconnect_while_buffering_never_reaches_the_app() -> None:
 
     await BodySizeGuard(inner)(http("/mcp", "POST"), receive, send)
     assert (sent, inner.seen) == ([], [])
+
+
+def test_role_problems_flag_extra_memberships_and_owned_objects() -> None:
+    from tutor.db.engine import role_problems
+
+    base = {
+        "superuser": False,
+        "bypassrls": False,
+        "reaches_privileged": False,
+        "owned_tables": [],
+        "in_tutor_app": True,
+    }
+    assert role_problems(**base) == []  # type: ignore[arg-type]
+    assert len(role_problems(**base, other_memberships=["pg_monitor"])) == 1  # type: ignore[arg-type]
+    assert len(role_problems(**base, owned_objects=["function"])) == 1  # type: ignore[arg-type]

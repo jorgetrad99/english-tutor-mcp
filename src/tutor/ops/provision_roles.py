@@ -8,8 +8,10 @@ Run by the one-shot `migrate` service after `alembic upgrade head`, as the migra
                             tutor.ops.report_role)
 The app role is NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE and a member of `tutor_app` WITH
 INHERIT FALSE, SET TRUE (the app does SET LOCAL ROLE tutor_app per transaction, so the login
-itself holds no table privileges). Passwords are set as SQL literals inside the transaction; they
-are never printed, and errors report the exception class only. Needs PostgreSQL 16 or later.
+itself holds no table privileges). Passwords are sent as SCRAM-SHA-256 verifiers computed client
+side (the
+server never sees plaintext) and are never printed; errors report the exception class only.
+Needs PostgreSQL 16 or later.
 """
 
 from __future__ import annotations
@@ -51,13 +53,21 @@ def check_inputs(env: Mapping[str, str]) -> list[str]:
     return problems
 
 
+def _verifier(conn: psycopg.Connection, user: str, password: str) -> str:
+    """SCRAM-SHA-256 verifier computed client side: the server never sees the plaintext."""
+    return conn.pgconn.encrypt_password(password.encode(), user.encode(), b"scram-sha-256").decode()
+
+
 def _set_login_role(conn: psycopg.Connection, user: str, password: str) -> None:
     name = sql.Identifier(user)
     exists = conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (user,)).fetchone()
     verb = sql.SQL("ALTER ROLE") if exists else sql.SQL("CREATE ROLE")
     conn.execute(
         sql.SQL("{verb} {name} {attrs} PASSWORD {pw}").format(
-            verb=verb, name=name, attrs=_LOGIN_ATTRS, pw=sql.Literal(password)
+            verb=verb,
+            name=name,
+            attrs=_LOGIN_ATTRS,
+            pw=sql.Literal(_verifier(conn, user, password)),
         )
     )
     conn.execute(
@@ -68,18 +78,26 @@ def _set_login_role(conn: psycopg.Connection, user: str, password: str) -> None:
 
 
 def _assert_unprivileged(conn: psycopg.Connection, user: str) -> None:
-    """The login must not reach a superuser, BYPASSRLS or table-owning role by membership."""
-    row = conn.execute(
-        "SELECT EXISTS (SELECT 1 FROM pg_roles p WHERE (p.rolsuper OR p.rolbypassrls) "
-        "AND pg_has_role(%(u)s, p.oid, 'MEMBER')), "
-        "EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
-        "WHERE n.nspname = current_schema() AND c.relkind = 'r' "
-        "AND pg_has_role(%(u)s, c.relowner, 'MEMBER'))",
+    """The login is a member of tutor_app only and owns no object at all."""
+    memberships = {
+        row[0]
+        for row in conn.execute(
+            "SELECT g.rolname FROM pg_auth_members m JOIN pg_roles g ON g.oid = m.roleid "
+            "JOIN pg_roles u ON u.oid = m.member WHERE u.rolname = %s",
+            (user,),
+        )
+    }
+    owned = conn.execute(
+        "SELECT (SELECT count(*) FROM pg_class c JOIN pg_roles r ON r.oid = c.relowner "
+        "WHERE r.rolname = %(u)s) + (SELECT count(*) FROM pg_proc p JOIN pg_roles r "
+        "ON r.oid = p.proowner WHERE r.rolname = %(u)s) + (SELECT count(*) FROM pg_namespace n "
+        "JOIN pg_roles r ON r.oid = n.nspowner WHERE r.rolname = %(u)s)",
         {"u": user},
     ).fetchone()
-    if row is None or row[0] or row[1]:
+    if memberships != {APP_ROLE} or owned is None or owned[0]:
         raise SystemExit(
-            "APP_DB_USER reaches a privileged or table-owning role; use a dedicated role name"
+            "APP_DB_USER must be a member of tutor_app only and own nothing; "
+            "use a dedicated role name"
         )
 
 
@@ -95,7 +113,8 @@ def provision(
     conn.execute(REPORT_ROLE_SQL.encode())
     conn.execute(
         sql.SQL("ALTER ROLE {name} PASSWORD {pw}").format(
-            name=sql.Identifier(REPORT_ROLE), pw=sql.Literal(report_password)
+            name=sql.Identifier(REPORT_ROLE),
+            pw=sql.Literal(_verifier(conn, REPORT_ROLE, report_password)),
         )
     )
 

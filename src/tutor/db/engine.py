@@ -32,6 +32,8 @@ def role_problems(
     reaches_privileged: bool,
     owned_tables: Sequence[str],
     in_tutor_app: bool,
+    other_memberships: Sequence[str] = (),
+    owned_objects: Sequence[str] = (),
 ) -> list[str]:
     """What is wrong with the app's login role; empty when it is safe to serve with."""
     problems: list[str] = []
@@ -45,6 +47,10 @@ def role_problems(
         problems.append("the login role owns user tables, directly or through a role")
     if not in_tutor_app:
         problems.append("the login role is not a member of tutor_app")
+    if other_memberships:
+        problems.append("the login role is a member of roles other than tutor_app")
+    if owned_objects:
+        problems.append("the login role owns database objects")
     return problems
 
 
@@ -79,12 +85,42 @@ def check_app_role(engine: Engine) -> None:
             .scalars()
             .all()
         )
+    with engine.connect() as conn:
+        others = (
+            conn.execute(
+                text(
+                    "SELECT g.rolname FROM pg_auth_members m "
+                    "JOIN pg_roles g ON g.oid = m.roleid "
+                    "JOIN pg_roles u ON u.oid = m.member "
+                    "WHERE u.rolname = session_user AND g.rolname <> 'tutor_app'"
+                )
+            )
+            .scalars()
+            .all()
+        )
+        objects = (
+            conn.execute(
+                text(
+                    "SELECT 'relation' FROM pg_class c JOIN pg_roles r ON r.oid = c.relowner "
+                    "WHERE r.rolname = session_user "
+                    "UNION ALL SELECT 'function' FROM pg_proc p "
+                    "JOIN pg_roles r ON r.oid = p.proowner "
+                    "WHERE r.rolname = session_user "
+                    "UNION ALL SELECT 'schema' FROM pg_namespace n JOIN pg_roles r "
+                    "ON r.oid = n.nspowner WHERE r.rolname = session_user"
+                )
+            )
+            .scalars()
+            .all()
+        )
     problems = role_problems(
         superuser=row[0],
         bypassrls=row[1],
         reaches_privileged=row[2],
         owned_tables=owned,
         in_tutor_app=row[3],
+        other_memberships=others,
+        owned_objects=objects,
     )
     if problems:
         raise SystemExit(

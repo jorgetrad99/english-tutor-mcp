@@ -154,3 +154,12 @@ def test_prod_requires_a_postgres_database_url(url: str) -> None:
         Settings.from_env(env(TUTOR_ENV="prod", DATABASE_URL=url))
     assert url not in str(info.value)
     assert Settings.from_env(env(DATABASE_URL=url)).env == "dev"
+
+
+@pytest.mark.parametrize("key", ["MIGRATION_DATABASE_URL", "GATE_REPORT_DATABASE_URL"])
+def test_prod_refuses_other_roles_credentials(key: str) -> None:
+    with pytest.raises(SystemExit) as exc:
+        Settings.from_env(env(TUTOR_ENV="prod", **{key: "postgresql://owner:hunter2@db/x"}))
+    assert key in str(exc.value)
+    assert "hunter2" not in str(exc.value)
+    assert Settings.from_env(env(**{key: "postgresql://owner:x@db/x"})).env == "dev"
