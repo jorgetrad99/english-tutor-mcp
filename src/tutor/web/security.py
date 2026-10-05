@@ -67,7 +67,12 @@ def safe_next(value: str | None) -> str:
     """Only same-site absolute paths survive; anything else goes to the dashboard."""
     if not value or any(ord(c) < 0x20 or ord(c) == 0x7F or c == "\\" for c in value):
         return "/app/"
-    parts = urlsplit(value)
-    if parts.scheme or parts.netloc or not parts.path.startswith("/") or value.startswith("//"):
+    if value.startswith("//"):
+        return "/app/"
+    try:
+        parts = urlsplit(value)
+    except ValueError:  # e.g. an unbalanced "[" in the host part
+        return "/app/"
+    if parts.scheme or parts.netloc or not parts.path.startswith("/"):
         return "/app/"
     return value

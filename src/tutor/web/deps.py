@@ -1,0 +1,84 @@
+"""FastAPI dependencies shared by every page."""
+
+from __future__ import annotations
+
+import secrets
+from typing import Annotated
+from urllib.parse import quote
+
+from fastapi import Depends, HTTPException, Request
+
+from tutor.domain.dashboard.types import Role, User
+from tutor.web.config import WebConfig
+from tutor.web.ports import WebDeps
+from tutor.web.security import safe_next
+
+CSRF_HEADER = "x-csrf-token"
+CSRF_FIELD = "csrf_token"
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+class NotAuthenticated(Exception):
+    def __init__(self, next_path: str) -> None:
+        super().__init__(next_path)
+        self.next_path = next_path
+
+
+def get_deps(request: Request) -> WebDeps:
+    deps: WebDeps = request.app.state.deps
+    return deps
+
+
+def get_config(request: Request) -> WebConfig:
+    config: WebConfig = request.app.state.config
+    return config
+
+
+def optional_user(request: Request) -> User | None:
+    holder = getattr(request.state, "web", None)
+    session = getattr(holder, "session", None)
+    if session is None or session.user_id is None:
+        return None
+    user = get_deps(request).users.find_user(session.user_id)
+    if user is None or user.deletion_requested_at is not None:
+        return None
+    request.state.user = user
+    return user
+
+
+def current_user(request: Request) -> User:
+    user = optional_user(request)
+    if user is None:
+        target = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+        raise NotAuthenticated(target)
+    return user
+
+
+def require_admin(user: Annotated[User, Depends(current_user)]) -> User:
+    if user.role is not Role.ADMIN:
+        raise HTTPException(status_code=404)
+    return user
+
+
+async def require_csrf(request: Request) -> None:
+    if request.method in _SAFE_METHODS:
+        return
+    holder = getattr(request.state, "web", None)
+    session = getattr(holder, "session", None)
+    expected = session.csrf_token if session is not None else None
+    sent = request.headers.get(CSRF_HEADER)
+    if sent is None and request.headers.get("content-type", "").startswith(
+        ("application/x-www-form-urlencoded", "multipart/form-data")
+    ):
+        field = (await request.form()).get(CSRF_FIELD)
+        sent = field if isinstance(field, str) else None
+    if not expected or not sent or not secrets.compare_digest(sent, expected):
+        raise HTTPException(status_code=403)
+
+
+APP_ROUTER_DEPS = [Depends(require_csrf)]
+
+
+def login_redirect_target(next_path: str) -> str:
+    """The login URL for a return path. The path is validated here, not by callers."""
+    return f"/login?next={quote(safe_next(next_path), safe='')}"

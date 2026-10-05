@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -17,9 +17,11 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from tutor.web.assets import AssetManifest
 from tutor.web.config import WebConfig
+from tutor.web.deps import NotAuthenticated, login_redirect_target
 from tutor.web.ports import WebDeps
 from tutor.web.routes import all_routers
 from tutor.web.security import SecurityHeadersMiddleware
+from tutor.web.sessions import ServerSessionMiddleware
 from tutor.web.views import Views, is_htmx, render
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -37,6 +39,7 @@ def create_app(deps: WebDeps, config: WebConfig) -> FastAPI:
         app.include_router(router)
     _install_error_handlers(app)
     # Added first = innermost. Security headers are outermost so even error pages get them.
+    app.add_middleware(ServerSessionMiddleware, deps=deps, config=config)
     app.add_middleware(ErrorGuardMiddleware)
     host = urlsplit(config.base_url).hostname or "localhost"
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=[host])
@@ -74,6 +77,7 @@ class ErrorGuardMiddleware:
 
         try:
             await self.app(scope, receive, tracking_send)
+            return
         except Exception as exc:
             ref = uuid.uuid4().hex[:8]
             # Never log the traceback, message or args: they can carry learner text or secrets.
@@ -83,20 +87,34 @@ class ErrorGuardMiddleware:
                 _route_label(scope),
                 type(exc).__name__,
             )
-            if started:
-                return
-            request = Request(scope, receive)
-            try:
-                template = "partials/error.html" if is_htmx(request) else "pages/error.html"
-                response: Response = render(
-                    request, template, {"status": 500, "ref": ref}, status_code=500
-                )
-            except Exception:  # rendering itself failed; never leak details
-                response = HTMLResponse(f"Error {ref}", status_code=500)
-            await response(scope, receive, send)
+        if started:  # too late for a 500 page; the connection is cut by the server
+            return
+        # Outside the except block on purpose: a failure below must not chain the original.
+        try:
+            await self._error_page(scope, receive, send, ref)
+        except Exception as exc:
+            log.error("error page not sent ref=%s exc=%s", ref, type(exc).__name__)
+
+    async def _error_page(self, scope: Scope, receive: Receive, send: Send, ref: str) -> None:
+        request = Request(scope, receive)
+        try:
+            template = "partials/error.html" if is_htmx(request) else "pages/error.html"
+            response: Response = render(
+                request, template, {"status": 500, "ref": ref}, status_code=500
+            )
+        except Exception:  # rendering itself failed; never leak details
+            response = HTMLResponse(f"Error {ref}", status_code=500)
+        await response(scope, receive, send)
 
 
 def _install_error_handlers(app: FastAPI) -> None:
+    @app.exception_handler(NotAuthenticated)
+    async def not_authenticated(request: Request, exc: NotAuthenticated) -> Response:
+        target = login_redirect_target(exc.next_path)  # validated by safe_next
+        if is_htmx(request):
+            return Response(status_code=401, headers={"HX-Redirect": target})
+        return RedirectResponse(target, status_code=303)
+
     @app.exception_handler(StarletteHTTPException)
     async def http_error(request: Request, exc: StarletteHTTPException) -> Response:
         template = "partials/error.html" if is_htmx(request) else "pages/error.html"

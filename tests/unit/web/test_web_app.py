@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 from datetime import UTC, datetime
@@ -7,9 +8,11 @@ from uuid import uuid4
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from tutor.domain.dashboard.types import Lang, Role, User
 from tutor.web import i18n
+from tutor.web.app import ErrorGuardMiddleware
 from tutor.web.security import CSP, safe_next
 
 
@@ -137,6 +140,8 @@ def test_language_link_never_leaves_the_origin(client: TestClient) -> None:
         "/\\evil",
         "https://evil",
         "//evil",
+        "//[x",
+        "",
     ],
 )
 def test_safe_next_rejects_control_and_scheme_tricks(bad: str) -> None:
@@ -184,3 +189,76 @@ def test_missing_translations_detects_untranslated_template(
     )
     monkeypatch.setattr(i18n, "TEMPLATES_DIR", templates)
     assert i18n.missing_translations() == ["Texto sin traducir zzz"]
+
+
+def test_safe_next_survives_unparseable_input(client: TestClient) -> None:
+    assert safe_next("//[x") == "/app/"
+    assert client.get("/login?next=//[x").status_code == 200
+    assert client.get("/login?next=/a[b").status_code == 200
+
+
+async def _run_asgi(app: ASGIApp) -> list[Message]:
+    sent: list[Message] = []
+
+    async def receive() -> Message:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    scope: Scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/x",
+        "raw_path": b"/x",
+        "query_string": b"",
+        "headers": [],
+        "state": {},
+    }
+    await app(scope, receive, send)
+    return sent
+
+
+def test_error_guard_after_response_started_sends_nothing_more(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def half_sent(scope: Scope, receive: Receive, send: Send) -> None:
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        raise ValueError("PROBE-late")
+
+    caplog.set_level(logging.DEBUG)
+    sent = asyncio.run(_run_asgi(ErrorGuardMiddleware(half_sent)))
+    assert [m["type"] for m in sent] == ["http.response.start"]
+    assert sent[0]["status"] == 200
+    assert "PROBE-late" not in caplog.text
+
+
+def test_error_guard_suppresses_a_failing_error_page_without_chaining(
+    app: FastAPI, caplog: pytest.LogCaptureFixture
+) -> None:
+    async def broken(scope: Scope, receive: Receive, send: Send) -> None:
+        raise ValueError("PROBE-original")
+
+    async def run() -> None:
+        async def receive() -> Message:
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def dead_send(message: Message) -> None:
+            raise OSError("PROBE-disconnected")
+
+        scope: Scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/x",
+            "raw_path": b"/x",
+            "query_string": b"",
+            "headers": [],
+            "app": app,
+            "state": {},
+        }
+        await ErrorGuardMiddleware(broken)(scope, receive, dead_send)
+
+    caplog.set_level(logging.DEBUG)
+    asyncio.run(run())  # must not raise
+    assert "PROBE" not in caplog.text
+    assert "error page not sent" in caplog.text
