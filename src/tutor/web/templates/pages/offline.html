@@ -1,0 +1,9 @@
+{% extends "layouts/public.html" %}
+{% block title %}{{ _("Sin conexión") }} · English Tutor{% endblock %}
+{% block content %}
+<section class="card card--narrow empty">
+  <h1>{{ _("Sin conexión") }}</h1>
+  <p>{{ _("Sin conexión. Tu progreso está a salvo en el servidor.") }}</p>
+  <a class="btn btn--primary" href="/app/">{{ _("Reintentar") }}</a>
+</section>
+{% endblock %}

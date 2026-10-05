@@ -192,3 +192,30 @@ msgstr "We received your request. We'll delete all your data within 24 hours."
 
 msgid "Si fue un error, escríbenos hoy a %(email)s."
 msgstr "If this was a mistake, write to us today at %(email)s."
+
+msgid "Sin conexión"
+msgstr "Offline"
+
+msgid "Sin conexión. Tu progreso está a salvo en el servidor."
+msgstr "You're offline. Your progress is safe on the server."
+
+msgid "Instala English Tutor"
+msgstr "Install English Tutor"
+
+msgid "Ábrelo desde tu pantalla de inicio, como una app. No necesitas tienda de apps."
+msgstr "Open it from your home screen, like an app. No app store needed."
+
+msgid "Instalar"
+msgstr "Install"
+
+msgid "Toca Compartir en la barra de Safari."
+msgstr "Tap Share in Safari's toolbar."
+
+msgid "Elige «Agregar a pantalla de inicio»."
+msgstr "Choose “Add to Home Screen”."
+
+msgid "Toca «Agregar». English Tutor aparecerá junto a tus apps."
+msgstr "Tap “Add”. English Tutor will appear next to your apps."
+
+msgid "Ahora no"
+msgstr "Not now"

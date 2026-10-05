@@ -450,6 +450,12 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
 .vt-last-session { view-transition-name: vt-last-session; }
 ::view-transition-group(*) { animation-duration: 0.3s; animation-timing-function: var(--ease-out); }
 
+/* ---- install card (Task 14) ------------------------------------------ */
+
+.install-card { display: flex; flex-direction: column; gap: 12px; }
+.install-card .steps > li { display: flex; align-items: center; gap: 12px; }
+.ios-step { width: 48px; height: 48px; flex: none; color: var(--ink); }
+
 /* ---- keyframes: transform, opacity and stroke-dashoffset only ------ */
 
 @keyframes trail-march { to { stroke-dashoffset: -28; } }
