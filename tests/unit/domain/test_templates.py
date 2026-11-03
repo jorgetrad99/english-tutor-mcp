@@ -23,6 +23,7 @@ from tutor.domain.templates import (
     MAX_TEMPLATE_PARAMS,
     PARAM_TYPES,
     PROMPT_TEXT_MAX,
+    SEQUENCE_MIN_ITEMS,
     TEMPLATE_GUIDE_VERSION,
     ChoiceAnswer,
     Draw,
@@ -116,6 +117,7 @@ NUMERIC = template(
 )
 TIMELINE = template("exact_sequence", POOL, pool_draw="ordered", pool_count=4)
 STEPS = template("exact_sequence", param("steps", "text_list", "answer_key"))
+TIMELINE3 = template("exact_sequence", POOL, pool_draw="ordered", pool_count=3)
 SET = template("exact_set", param("question", "text"), param("parts", "text_list", "answer_key"))
 SELF = template(
     "self_report", param("task", "text"), param("tempo", "integer", required=False, min=20)
@@ -295,6 +297,7 @@ def test_names_and_labels_are_collapsed() -> None:
         (dataclasses.replace(CHOICE_POOL, pool_count=9), "pool_count"),
         (dataclasses.replace(CHOICE_POOL, pool_count=1), "pool_count"),
         (dataclasses.replace(TIMELINE, pool_count=13), "pool_count"),
+        (dataclasses.replace(TIMELINE, pool_count=2), "pool_count"),
         (dataclasses.replace(FLASHCARD, pool_count=2), "pool_count"),
         (dataclasses.replace(SET, numeric_tolerance=0.5), "numeric_tolerance"),
         (dataclasses.replace(NUMERIC, numeric_tolerance=-1), "numeric_tolerance"),
@@ -612,10 +615,11 @@ def test_choice_key_must_index_the_options() -> None:
     assert params_ok(spec, *choice_params())["right"] == 1
 
 
-def test_authored_sequence_needs_two_to_twelve_distinct_items() -> None:
+def test_authored_sequence_needs_three_to_twelve_distinct_items() -> None:
+    # Security review P3: two items shown never in the right order give the answer away.
     spec = ok(STEPS)
-    assert params_ok(spec, ParamPair("steps", "text_list", ["a", "b"]))
-    for items in (["a"], ["a", "A "], [f"s{i}" for i in range(12)] + []):
+    assert params_ok(spec, ParamPair("steps", "text_list", ["a", "b", "c"]))
+    for items in (["a"], ["a", "b"], ["a", "b", "A "], [f"s{i}" for i in range(12)] + []):
         if len(items) == 12:
             assert params_ok(spec, ParamPair("steps", "text_list", items))
             continue
@@ -722,10 +726,30 @@ def test_draws_are_deterministic_distinct_and_never_in_the_right_order(seed: int
     assert isinstance(deck, list)
     orders = [deck[shown.entries[k]]["order"] for k in shown.order]
     assert orders != sorted(orders)  # never the sorted order
-    steps = params_ok(ok(STEPS), ParamPair("steps", "text_list", ["a", "b"]))
-    assert draw(ok(STEPS), steps, seed).order == (1, 0)  # never the key order
+    steps = params_ok(ok(STEPS), ParamPair("steps", "text_list", ["a", "b", "c"]))
+    assert draw(ok(STEPS), steps, seed).order != (0, 1, 2)  # never the key order
     flash = params_ok(ok(FLASHCARD), ParamPair("deck", "pool", entries(3)))
     assert 0 <= draw(ok(FLASHCARD), flash, seed).entries[0] < 3
+
+
+@given(st.integers(min_value=-(2**63), max_value=2**63 - 1))
+def test_a_shown_order_never_gives_the_answer_away(seed: int) -> None:
+    # Security review P3: with at least three items, the one order never shown still leaves
+    # several wrong orders, so the shown order does not reveal the right one.
+    steps = params_ok(ok(STEPS), ParamPair("steps", "text_list", ["a", "b", "c"]))
+    order = draw(ok(STEPS), steps, seed).order
+    assert sorted(order) == [0, 1, 2] and order != (0, 1, 2)
+    timeline = params_ok(ok(TIMELINE3), ParamPair("deck", "pool", entries(3, ordered=True)))
+    shown = draw(ok(TIMELINE3), timeline, seed)
+    deck = timeline["deck"]
+    assert isinstance(deck, list)
+    orders = [deck[shown.entries[k]]["order"] for k in shown.order]
+    assert len(orders) == 3 and orders != sorted(orders)
+
+
+def test_sequence_minimum_is_three() -> None:
+    assert SEQUENCE_MIN_ITEMS == 3
+    assert contract_constants()["pool_count_ranges"]["ordered"] == [3, 12]
 
 
 def test_choices_draw_skips_entries_with_the_same_answer() -> None:
@@ -896,9 +920,11 @@ def test_render_text_for_pools_and_sequences() -> None:
     flash = params_ok(ok(FLASHCARD), ParamPair("deck", "pool", entries(3)))
     text = render_text(ok(FLASHCARD), flash, Draw(entries=(2,)), "Traduce.")
     assert text == "Traduce.\nPista: cue 2\nResponde con una palabra o frase corta."
-    steps = params_ok(ok(STEPS), ParamPair("steps", "text_list", ["a", "b"]))
-    text = render_text(ok(STEPS), steps, Draw(order=(1, 0)), "Ordena.")
-    assert text == "Ordena.\n- b\n- a\nResponde con los elementos en orden, separados por comas."
+    steps = params_ok(ok(STEPS), ParamPair("steps", "text_list", ["a", "b", "c"]))
+    text = render_text(ok(STEPS), steps, Draw(order=(1, 2, 0)), "Ordena.")
+    assert text == (
+        "Ordena.\n- b\n- c\n- a\nResponde con los elementos en orden, separados por comas."
+    )
 
 
 def test_render_text_never_shows_the_cue_when_the_view_is_needed() -> None:

@@ -110,7 +110,7 @@ ANSWER_KINDS: tuple[AnswerKind, ...] = (
 # recomputes it (tutor.services.template_files.guide_sha256); change both together (plan
 # rulings 21 and 31).
 TEMPLATE_GUIDE_VERSION = 2
-TEMPLATE_CONTRACT_SHA256 = "f9f24b54e3da9e020a8c1118e5c8ddcc0fba5aacc86c672bae2ae87914ce1d43"
+TEMPLATE_CONTRACT_SHA256 = "82d2bf59500551f8fc9ac4d66e06c1887fca630eeec5873ea86508ec8617af36"
 
 # Caps (plan ruling 24; spec 15.3, 15.4). The MCP schemas and migration 0006 restate them.
 NAME_MAX = 80
@@ -141,7 +141,9 @@ POOL_CUE_MAX = 200
 POOL_ANSWER_MAX = 200
 POOL_ACCEPT_MAX = 6
 POOL_EXPLAIN_MAX = 300
-SEQUENCE_MIN_ITEMS = 2
+# Three, not two: a sequence is never shown in the right order, so two items shown would be
+# the reverse of the answer (security review P3, plan ruling 34).
+SEQUENCE_MIN_ITEMS = 3
 SEQUENCE_MAX_ITEMS = 12
 ANSWER_VALUE_MAX = 200
 ANSWER_VALUES_MAX = 24
@@ -168,7 +170,7 @@ POOL_DRAW_FOR: Mapping[GradingKind, PoolDraw] = {
 }
 POOL_COUNT_RANGES: Mapping[PoolDraw, tuple[int, int]] = {
     "one_of_choices": (2, 8),
-    "ordered": (2, 12),
+    "ordered": (SEQUENCE_MIN_ITEMS, SEQUENCE_MAX_ITEMS),
 }
 # grading kind -> the answer_key types it takes without a pool
 ANSWER_KEY_TYPES: Mapping[GradingKind, tuple[ParamType, ...]] = {
@@ -1285,7 +1287,8 @@ class _SplitMix64:
 
 
 def _not(order: list[int], forbidden: tuple[int, ...]) -> tuple[int, ...]:
-    """The order, rotated by one if it equals the forbidden one (both have >= 2 items)."""
+    """The order, rotated by one if it equals the forbidden one (both have at least
+    SEQUENCE_MIN_ITEMS items, so the shown order never gives the right one away)."""
     if tuple(order) == forbidden:
         order = order[1:] + order[:1]
     return tuple(order)

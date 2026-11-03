@@ -93,6 +93,7 @@ from tutor.domain.templates import (
     PARAM_NAME_PATTERN,
     POOL_ACCEPT_MAX,
     POOL_ANSWER_MAX,
+    POOL_COUNT_RANGES,
     POOL_CUE_MAX,
     POOL_EXPLAIN_MAX,
     PROMPT_TEXT_MAX,
@@ -1653,13 +1654,16 @@ PoolDrawField = Annotated[
     PoolDraw,
     Field(title="Pool draw", description="How the server draws from the pool; 'none' without."),
 ]
+_CHOICES_COUNT = POOL_COUNT_RANGES["one_of_choices"]
+_ORDERED_COUNT = POOL_COUNT_RANGES["ordered"]
 PoolCount = Annotated[
     int | None,
     Field(
         title="Pool count",
-        description="Options shown for one_of_choices (2-8), entries shown for ordered (2-12).",
-        ge=1,
-        le=12,
+        description=f"Options shown for one_of_choices ({_CHOICES_COUNT[0]}-{_CHOICES_COUNT[1]}), "
+        f"entries shown for ordered ({_ORDERED_COUNT[0]}-{_ORDERED_COUNT[1]}).",
+        ge=min(_CHOICES_COUNT[0], _ORDERED_COUNT[0]),
+        le=max(_CHOICES_COUNT[1], _ORDERED_COUNT[1]),
     ),
 ]
 NeedsView = Annotated[

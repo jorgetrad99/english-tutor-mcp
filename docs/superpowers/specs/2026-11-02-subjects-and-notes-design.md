@@ -348,7 +348,7 @@ An instance is shown many times over weeks; that is why grading needs a showing 
 | `text_match` | `fold_all` (default), `keep_accents`, `exact_case`; only for `exact_text`, `exact_set`, `exact_sequence` (15.8) |
 | `numeric_tolerance` | number 0–1,000,000, default 0, absolute; only for `numeric` |
 | `pool_draw` | `none` (default), `one`, `one_of_choices`, `ordered`: how the server draws a showing from the template's `pool` parameter (15.4.1) |
-| `pool_count` | `one_of_choices`: options shown, 2–8; `ordered`: entries shown, 2–12; absent otherwise |
+| `pool_count` | `one_of_choices`: options shown, 2–8; `ordered`: entries shown, 3–12 (two would always show the reverse of the answer; slice A plan ruling 34); absent otherwise |
 | `needs_view` | boolean, default `false`: `true` when an item cannot be done from text (it plays a sound, or the answer is clicked on a drawing). Such items are never drawn in text mode, their text rendering never shows a cue, and in the app they are shown only through the nested frame (15.7) |
 | `practice_kind` | **derived by the server, not an input:** `drill` when `pool_draw` is not `none`, `exercise` when the grading kind is `self_report`, `quiz` for any other exercise, absent for a display. The values are the subject's `exercise_kinds` |
 | `params` | 1–8 parameter specs (below) |
@@ -383,7 +383,7 @@ A **parameter spec** is `{name, param_type, param_role, required, label, min_ite
 | `choice_index` | exactly one `answer_key` of type `integer`, and `options_param` names a prompt `text_list` | `one_of_choices`; no `answer_key` parameter |
 | `exact_text` | exactly one `answer_key` of type `text` or `text_list` (accepted answers) | `one`; no `answer_key` parameter |
 | `exact_set` | exactly one `answer_key` of type `text_list` | not allowed in v0 |
-| `exact_sequence` | exactly one `answer_key` of type `text_list`, the items in the right order (2–12); the server sends them shuffled | `ordered`; no `answer_key` parameter |
+| `exact_sequence` | exactly one `answer_key` of type `text_list`, the items in the right order (3–12); the server sends them shuffled | `ordered`; no `answer_key` parameter |
 | `numeric` | exactly one `answer_key` of type `number` | not allowed in v0 |
 | `self_report` | no `answer_key` | not allowed |
 
@@ -399,7 +399,7 @@ A **parameter spec** is `{name, param_type, param_role, required, label, min_ite
 | `note_id` | optional; set by `save_notes` (with `seq`) or by `create_instance(note_id)` |
 | `template_id` | required |
 | `template_purpose`, `practice_kind`, `grading_kind` | copied from the template at creation |
-| `params` | validated against the spec by `validate_params`: unknown names, wrong types, caps and missing required parameters are `validation_failed` on the parameter's path; defaults filled; stored canonical (keys sorted) and complete, answer key, reveal and pool included; ≤ 32,768 bytes as JSON in all, and the public payload (prompt parameters plus the largest possible draw) ≤ 8,192 bytes. `choice_index`: the key must index the options. `exact_sequence` without a pool: 2–12 items, distinct after normalisation |
+| `params` | validated against the spec by `validate_params`: unknown names, wrong types, caps and missing required parameters are `validation_failed` on the parameter's path; defaults filled; stored canonical (keys sorted) and complete, answer key, reveal and pool included; ≤ 32,768 bytes as JSON in all, and the public payload (prompt parameters plus the largest possible draw) ≤ 8,192 bytes. `choice_index`: the key must index the options. `exact_sequence` without a pool: 3–12 items, distinct after normalisation |
 | `prompt_text` | 1–500, data: the item in words, in the learner's language (the task; for a display, a caption that stands in for the view in text) |
 | `concept` | optional concept name, resolved in the subject |
 | `origin` | `ingest` (from `save_notes`), `class` (from `create_instance`) |
