@@ -7,12 +7,15 @@ as dev-reset's `down` is, resolves the project name (directory, COMPOSE_PROJECT_
 and the `pgdata` volume's name, so a worktree or a renamed checkout names its own volume, never the
 main checkout's. Only `pgdata` is ever removed (db-test is tmpfs). The config output can inline
 deploy/dev.env when a profile is active, so it is parsed in memory and never printed.
+--remove refuses while COMPOSE_PROJECT_NAME is set (non-blank) in the shell: a value left over from
+the main checkout would make a worktree's compose resolve to the main checkout's project and volume.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -22,6 +25,11 @@ from typing import Any, TextIO
 
 ROOT = Path(__file__).resolve().parents[1]
 VOLUME_KEY = "pgdata"
+PROJECT_ENV = "COMPOSE_PROJECT_NAME"
+PROJECT_ENV_REFUSAL = (
+    f"{PROJECT_ENV} is set in this shell, so compose may name another checkout's project; "
+    f"unset it and run dev-reset again"
+)
 
 Runner = Callable[..., "subprocess.CompletedProcess[str]"]
 
@@ -73,12 +81,17 @@ def main(
     docker: str | None = None,
     out: TextIO = sys.stdout,
     err: TextIO = sys.stderr,
+    environ: Mapping[str, str] | None = None,
 ) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
     parser.add_argument(
         "--remove", action="store_true", help="remove the volume (dev-reset, after CONFIRM=1)"
     )
     args = parser.parse_args(argv)
+    environ = os.environ if environ is None else environ
+    if args.remove and environ.get(PROJECT_ENV, "").strip():
+        print(f"dev_pgdata: {PROJECT_ENV_REFUSAL}", file=err)
+        return 2
     docker = docker or shutil.which("docker")
     if docker is None:
         print("dev_pgdata: docker is not on PATH", file=err)

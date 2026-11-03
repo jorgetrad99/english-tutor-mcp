@@ -56,9 +56,11 @@ class FakeDocker:
         return subprocess.CompletedProcess(args, 0, "", "")
 
 
-def _run(argv: list[str], fake: FakeDocker) -> tuple[int, str, str]:
+def _run(
+    argv: list[str], fake: FakeDocker, environ: dict[str, str] | None = None
+) -> tuple[int, str, str]:
     out, err = io.StringIO(), io.StringIO()
-    code = _script().main(argv, run=fake, docker="docker", out=out, err=err)
+    code = _script().main(argv, run=fake, docker="docker", out=out, err=err, environ=environ or {})
     return code, out.getvalue(), err.getvalue()
 
 
@@ -112,6 +114,40 @@ def test_a_failing_compose_config_removes_nothing_and_echoes_none_of_its_output(
     assert code == 2 and "compose config failed" in err
     assert MARKER not in out + err
     assert len(fake.calls) == 1
+
+
+@pytest.mark.parametrize("value", ["english-tutor-mcp", "agent-abc", " x "])
+def test_remove_refuses_while_compose_project_name_is_set_and_removes_nothing(value: str) -> None:
+    # A COMPOSE_PROJECT_NAME left in the shell would make a worktree's compose resolve to the main
+    # checkout's project, so dev-reset there would delete the main checkout's pgdata.
+    fake = FakeDocker(_config(value.strip()))
+    code, out, err = _run(["--remove"], fake, {"COMPOSE_PROJECT_NAME": value})
+    assert code == 2
+    assert "COMPOSE_PROJECT_NAME" in err and "unset" in err
+    assert out == ""
+    assert all(call[1] != "volume" for call in fake.calls)
+
+
+@pytest.mark.parametrize("value", ["", "   "])
+def test_a_blank_compose_project_name_does_not_block_remove(value: str) -> None:
+    fake = FakeDocker(_config("agent-abc"))
+    code, _, _ = _run(["--remove"], fake, {"COMPOSE_PROJECT_NAME": value})
+    assert code == 0
+    assert fake.calls[-1] == ["docker", "volume", "rm", "agent-abc_pgdata"]
+
+
+def test_print_mode_still_shows_the_name_with_compose_project_name_set() -> None:
+    fake = FakeDocker(_config("english-tutor-mcp"))
+    code, out, _ = _run([], fake, {"COMPOSE_PROJECT_NAME": "english-tutor-mcp"})
+    assert (code, out) == (0, "english-tutor-mcp_pgdata\n")
+
+
+def test_main_reads_the_process_environment_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COMPOSE_PROJECT_NAME", "english-tutor-mcp")
+    fake = FakeDocker(_config("english-tutor-mcp"))
+    out, err = io.StringIO(), io.StringIO()
+    assert _script().main(["--remove"], run=fake, docker="docker", out=out, err=err) == 2
+    assert all(call[1] != "volume" for call in fake.calls)
 
 
 def _recipe(name: str) -> list[str]:
