@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import Connection, func, select, update
+from sqlalchemy import Connection, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import RowMapping
 
@@ -29,6 +29,9 @@ from tutor.domain.templates import (
 from tutor.services.ports import InstanceRow, TemplateRow
 
 _LISTED = [c for c in exercise_templates.c if c.name != "html"]
+# The partial unique indexes' predicate as a literal: a bound parameter cannot be matched to the
+# index once psycopg prepares the statement (after a few runs), which fails ON CONFLICT inference.
+ACTIVE = text("status = 'active'")
 
 
 def _spec(m: RowMapping) -> TemplateSpec:
@@ -186,7 +189,7 @@ class PgTemplateRepo:
                 # The partial unique index on active names: a taken name inserts nothing.
                 .on_conflict_do_nothing(
                     index_elements=["user_id", "subject_id", "name_norm"],
-                    index_where=exercise_templates.c.status == "active",
+                    index_where=ACTIVE,
                 )
                 .returning(exercise_templates)
             )
@@ -364,7 +367,7 @@ class PgInstanceRepo:
             # A concurrent identical call wins the partial unique key: no violation, no row.
             .on_conflict_do_nothing(
                 index_elements=["user_id", "content_key"],
-                index_where=template_instances.c.status == "active",
+                index_where=ACTIVE,
             )
             .returning(template_instances.c.id)
         ).scalar_one_or_none()
