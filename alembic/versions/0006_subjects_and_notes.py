@@ -5,7 +5,9 @@ Subjects spec section 8.1 (slice A) as amended by section 15.10. Extensions `una
 `pg_trgm` (trusted, no superuser needed); text search configurations `tutor_es` and `tutor_en`
 with `unaccent` before the stemmer; every table with `user_id` (CASCADE), forced row-level
 security, an own-rows policy, a CHECK per closed enum and per cap, `UNIQUE (id, user_id)` on
-every parent and composite `(col, user_id)` foreign keys on every child (0002 pattern).
+every parent and composite `(col, user_id)` foreign keys on every child (0002 pattern); an
+instance's template key also covers the kinds it copies from its template (slice A plan
+ruling 39).
 `raw_text` and its companions are never app-writable (column-level UPDATE grant on `notes`);
 `note_passages` are written once. Templates and instances are never deleted by the app: a
 template is retired (`status`, `retired_at`, `updated_at` are its only updatable columns) and
@@ -127,7 +129,9 @@ TEMPLATE_PARAMS_MAX = 8
 TEMPLATE_BYTES_MAX = 40_000
 NUMERIC_TOLERANCE_MAX = 1_000_000
 CHOICES_POOL_COUNT = (2, 8)
-ORDERED_POOL_COUNT = (2, 12)
+# Three or more: an ordering is never shown in its right order, so two would show the reverse
+# of the answer (SEQUENCE_MIN_ITEMS, slice A plan ruling 34).
+ORDERED_POOL_COUNT = (3, 12)
 PARAM_NAME_PATTERN = "^[a-z][a-z0-9_]{0,31}$"
 # An instance's parameters as JSON text, pool included (MAX_PARAMS_JSON_BYTES).
 PARAMS_JSON_MAX = 32_768
@@ -420,6 +424,11 @@ def _create_template_tables() -> None:
         _ts("updated_at"),
         _ts("retired_at", nullable=True),
         _pair_key(t),
+        # Targets of an instance's template key (plan ruling 39): the kinds an instance copies.
+        sa.UniqueConstraint(
+            "id", "user_id", "template_purpose", "grading_kind", name=f"{t}_id_user_id_kinds_key"
+        ),
+        sa.UniqueConstraint("id", "user_id", "practice_kind", name=f"{t}_id_user_id_practice_key"),
         _child_fk(t, "subject_id", "subjects"),
         _len_between(t, "name", 1, TEMPLATE_NAME_MAX),
         sa.CheckConstraint("char_length(name_norm) >= 1", name=f"ck_{t}_name_norm"),
@@ -474,6 +483,10 @@ def _create_template_tables() -> None:
             name=f"ck_{t}_pool_draw_kind",
         ),
         sa.CheckConstraint(
+            "(options_param IS NOT NULL) = (grading_kind = 'choice_index' AND pool_draw = 'none')",
+            name=f"ck_{t}_options_param_kind",
+        ),
+        sa.CheckConstraint(
             "CASE pool_draw"
             " WHEN 'one_of_choices' THEN"
             f" coalesce(pool_count BETWEEN {choices_low} AND {choices_high}, false)"
@@ -506,9 +519,33 @@ def _create_template_tables() -> None:
         _ts("retired_at", nullable=True),
         _pair_key(i),
         _child_fk(i, "subject_id", "subjects"),
-        # NO ACTION is checked at the end of the statement, so a subject or user cascade that
-        # removes both the template and its instances succeeds; nothing else deletes a template.
-        _child_fk(i, "template_id", "exercise_templates", ondelete=None),
+        # The template key covers the kinds the instance copies, so an instance cannot be
+        # stored with another purpose, grading kind or practice kind than its template's (plan
+        # ruling 39). The first key has no nullable column, so it always applies; the second
+        # applies whenever practice_kind is set (MATCH SIMPLE). A display's null practice kind
+        # follows from the first key: the template is a display, and both tables' CHECKs tie a
+        # display to a null practice kind. NO ACTION is checked at the end of the statement,
+        # so a subject or user cascade that removes both the template and its instances
+        # succeeds; nothing else deletes a template.
+        sa.ForeignKeyConstraint(
+            ["template_id", "user_id", "template_purpose", "grading_kind"],
+            [
+                "exercise_templates.id",
+                "exercise_templates.user_id",
+                "exercise_templates.template_purpose",
+                "exercise_templates.grading_kind",
+            ],
+            name=f"{i}_template_id_user_id_kinds_fkey",
+        ),
+        sa.ForeignKeyConstraint(
+            ["template_id", "user_id", "practice_kind"],
+            [
+                "exercise_templates.id",
+                "exercise_templates.user_id",
+                "exercise_templates.practice_kind",
+            ],
+            name=f"{i}_template_id_user_id_practice_kind_fkey",
+        ),
         sa.UniqueConstraint("note_id", "seq", name=f"{i}_note_seq_key"),
         _one_of(i, "template_purpose", TEMPLATE_PURPOSES),
         _one_of(i, "practice_kind", PRACTICE_KINDS),

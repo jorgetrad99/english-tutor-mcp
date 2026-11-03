@@ -20,13 +20,20 @@ pytestmark = pytest.mark.integration
 TRACK_ID = "zz-rls-01"
 # Composite (col, user_id) foreign keys: 7 from 0002 (plan_items.plan_id, sessions.plan_item_id,
 # session_metrics.session_id, session_errors.session_id, review_states.glossary_item_id,
-# review_logs.glossary_item_id, review_logs.session_id) plus 17 from 0006 (sources.subject_id,
+# review_logs.glossary_item_id, review_logs.session_id) plus 16 from 0006 (sources.subject_id,
 # notes.subject_id, notes.source_id, notes.supersedes_note_id, note_passages.note_id,
 # concepts.subject_id, note_concepts.note_id, note_concepts.concept_id, concept_links.from_id,
 # concept_links.to_id, exercise_templates.subject_id, exercise_templates.supersedes_template_id,
-# template_instances.subject_id, template_instances.template_id, template_instances.note_id,
-# template_instances.concept_id, template_instances.supersedes_instance_id).
-COMPOSITE_FKS = 24
+# template_instances.subject_id, template_instances.note_id, template_instances.concept_id,
+# template_instances.supersedes_instance_id).
+COMPOSITE_FKS = 23
+# template_instances.template_id is wider (plan ruling 39): (template_id, user_id,
+# template_purpose, grading_kind) always, and (template_id, user_id, practice_kind) when the
+# practice kind is not null.
+TEMPLATE_KIND_FKS = {
+    "template_instances_template_id_user_id_kinds_fkey": 4,
+    "template_instances_template_id_user_id_practice_kind_fkey": 3,
+}
 
 # One row in every user table for one user, inserted as the owner (superuser bypasses RLS).
 _SEED_SQL = (
@@ -442,8 +449,21 @@ def test_migration_0002_round_trip(engine: Engine) -> None:
             )
             return {r[0] for r in rows}
 
+    def kind_fks() -> dict[str, int]:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT conname, array_length(conkey, 1) FROM pg_constraint"
+                    " WHERE contype = 'f' AND conrelid = 'template_instances'::regclass"
+                    " AND conname LIKE 'template_instances_template_id_%'"
+                )
+            )
+            return {r[0]: r[1] for r in rows}
+
     assert len(composite_fks()) == COMPOSITE_FKS
+    assert kind_fks() == TEMPLATE_KIND_FKS
     run_alembic(engine, "downgrade", "0001")
     assert composite_fks() == set()
     run_alembic(engine, "upgrade", "head")
     assert len(composite_fks()) == COMPOSITE_FKS
+    assert kind_fks() == TEMPLATE_KIND_FKS

@@ -9,7 +9,12 @@ from uuid import UUID, uuid4
 
 import pytest
 from alembic.config import Config
-from psycopg.errors import CheckViolation, InsufficientPrivilege
+from psycopg.errors import (
+    CheckViolation,
+    ForeignKeyViolation,
+    InsufficientPrivilege,
+    LockNotAvailable,
+)
 from repo_contract import add_note, long_paragraph, sample_subject, valid_note
 from sqlalchemy import Engine, inspect, text
 from sqlalchemy.exc import DBAPIError
@@ -385,6 +390,26 @@ def _insert_template(engine: Engine, user_id: UUID, subject_id: UUID, **changes:
         {"status": "retired"},  # without retired_at
         {"options_param": "Bad name"},
         {"grading_kind": "essay"},
+        # options_param exactly for choice_index without a pool (security review P3).
+        {"options_param": "opts"},
+        {"grading_kind": "choice_index", "numeric_tolerance": None},
+        {
+            "grading_kind": "choice_index",
+            "numeric_tolerance": None,
+            "pool_draw": "one_of_choices",
+            "practice_kind": "drill",
+            "pool_count": 4,
+            "options_param": "opts",
+        },
+        # An ordering shows at least three entries (plan ruling 34).
+        {
+            "grading_kind": "exact_sequence",
+            "numeric_tolerance": None,
+            "text_match": "fold_all",
+            "pool_draw": "ordered",
+            "practice_kind": "drill",
+            "pool_count": 2,
+        },
     ],
     ids=lambda changes: ",".join(f"{k}={str(v)[:12]}" for k, v in changes.items()),
 )
@@ -480,3 +505,81 @@ def test_templates_and_instances_are_isolated_between_users(
         ).scalar_one()
         assert status == "active"
     assert template_id
+
+
+_INSTANCE_SQL = (
+    "INSERT INTO template_instances (id, user_id, subject_id, template_id, template_purpose,"
+    " practice_kind, grading_kind, params, prompt_text, origin, content_key, status, created_at)"
+    " VALUES (gen_random_uuid(), :uid, :sid, :tid, :purpose, :practice, :grading, '{}', 'p',"
+    " 'class', :key, 'active', now())"
+)
+
+
+@pytest.mark.parametrize(
+    ("purpose", "practice", "grading"),
+    [
+        ("exercise", "quiz", "exact_text"),  # another grading kind
+        ("display", None, "none"),  # another purpose
+        ("exercise", "drill", "numeric"),  # another practice kind
+        ("exercise", "exercise", "numeric"),
+    ],
+)
+def test_an_instance_copies_its_templates_kinds(
+    engine: Engine,
+    uow_factory: UowFactory,
+    user_id: UUID,
+    now: datetime,
+    purpose: str,
+    practice: str | None,
+    grading: str,
+) -> None:
+    # Security review P3: the copied purpose, grading and practice kinds are foreign-keyed to
+    # the template's own, so a buggy repository cannot store an instance graded another way.
+    subject_id, _, template_id, _ = _seed_template(uow_factory, user_id, now)
+    ids = {"uid": user_id, "sid": subject_id, "tid": template_id}
+    with engine.begin() as conn:  # the template's own kinds are accepted
+        conn.execute(
+            text(_INSTANCE_SQL),
+            {
+                **ids,
+                "purpose": "exercise",
+                "practice": "quiz",
+                "grading": "numeric",
+                "key": "c" * 64,
+            },
+        )
+    with pytest.raises(DBAPIError) as err, engine.begin() as conn:
+        conn.execute(
+            text(_INSTANCE_SQL),
+            {**ids, "purpose": purpose, "practice": practice, "grading": grading, "key": "e" * 64},
+        )
+    assert isinstance(err.value.orig, ForeignKeyViolation)
+
+
+def test_inserting_an_instance_on_a_note_locks_the_note(
+    engine: Engine, uow_factory: UowFactory, user_id: UUID, now: datetime
+) -> None:
+    # Security review P3: seq is max(seq) + 1 per note, so two inserts on one note serialise
+    # on the note row. FOR NO KEY UPDATE conflicts with FOR UPDATE, not with the foreign
+    # key's own FOR KEY SHARE, so it sees exactly the repository's lock.
+    subject_id, note_id, template_id, _ = _seed_template(uow_factory, user_id, now)
+    with uow_factory(user_id) as uow:
+        template = uow.templates.get(template_id)
+        assert template is not None
+        uow.instances.insert(
+            subject_id=subject_id,
+            note_id=note_id,
+            template=template,
+            params={"problem": "3 + 3", KEY_NAME: 6.0, REVEAL_NAME: "r"},
+            prompt_text="Suma otra vez.",
+            concept_id=None,
+            origin="class",
+            key="f" * 64,
+            now=now,
+        )
+        with pytest.raises(DBAPIError) as err, engine.begin() as other:
+            other.execute(
+                text("SELECT id FROM notes WHERE id = :id FOR NO KEY UPDATE NOWAIT"),
+                {"id": note_id},
+            )
+        assert isinstance(err.value.orig, LockNotAvailable)
