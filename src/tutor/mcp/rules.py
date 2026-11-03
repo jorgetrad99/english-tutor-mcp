@@ -109,6 +109,15 @@ ERRORS: dict[McpErrorCode, str] = {
         "Send fewer or shorter items and retry once.\n"
         "Do not mention this to the learner unless it fails again."
     ),
+    "not_found": (
+        "No row of this learner has that id; check the id against an earlier result and retry "
+        "once; do not mention this.\n"
+        "If it fails again, tell the learner in one sentence that it was not found and continue."
+    ),
+    "limit_exceeded": (
+        "Too many items or characters for one call: split them across calls and retry.\n"
+        "Do not mention this to the learner unless it fails again."
+    ),
     "internal_error": (
         "Apologise to the learner in one sentence.\n"
         "Do not retry more than once; if it fails again, continue the lesson without this tool."

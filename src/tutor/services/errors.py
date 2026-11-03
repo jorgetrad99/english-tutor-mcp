@@ -9,6 +9,8 @@ ErrorCode = Literal[
     "rate_limited",
     "validation_failed",
     "payload_too_large",
+    "not_found",
+    "limit_exceeded",
 ]
 
 
