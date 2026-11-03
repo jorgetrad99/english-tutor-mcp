@@ -43,6 +43,44 @@ _FORBIDDEN_TAGS = frozenset(
 _URL_ATTRS = frozenset(
     {"src", "href", "srcset", "poster", "data", "action", "formaction", "xlink:href"}
 )
+# Elements whose content a browser never runs as a script: inert (template), raw text or
+# escapable raw text, or not rendered (noscript with scripting on). A marker under one of them
+# is not the params element the bridge reads (security re-review P3, plan ruling 43).
+_INERT_TAGS = frozenset(
+    {
+        "template",
+        "noscript",
+        "plaintext",
+        "textarea",
+        "title",
+        "xmp",
+        "noembed",
+        "iframe",
+        "noframes",
+        "style",
+        "script",  # only reachable as `<script/>`, which a browser leaves open
+    }
+)
+# Elements with no end tag; they never become anyone's ancestor.
+_VOID_TAGS = frozenset(
+    {
+        "area",
+        "base",
+        "br",
+        "col",
+        "embed",
+        "hr",
+        "img",
+        "input",
+        "keygen",
+        "link",
+        "meta",
+        "param",
+        "source",
+        "track",
+        "wbr",
+    }
+)
 _CSS_TOKENS = ("url(", "@import", "expression(")
 _ATTR_TOKENS = ("url(", "@import")
 _DOCUMENT_START = re.compile(r"\s*(?:<!doctype\s+html\b|<html\b)", re.IGNORECASE)
@@ -67,6 +105,8 @@ class _Guard(HTMLParser):
         self._style: list[str] | None = None
         self.reserved_ids: list[str] = []  # tutor-params / tutor-bridge elements, in order
         self.params_tags: list[tuple[str, int]] = []  # (start tag text, offset) of tutor-params
+        self.params_inert = False  # some tutor-params element has an open inert ancestor
+        self._open: list[str] = []  # open elements, outermost first
         self._line_starts = [0] + [i + 1 for i, ch in enumerate(html) if ch == "\n"]
 
     def _offset(self) -> int:
@@ -83,6 +123,10 @@ class _Guard(HTMLParser):
         self.reserved_ids += ids
         if "tutor-params" in ids:
             self.params_tags.append((self.get_starttag_text() or "", self._offset()))
+            if _INERT_TAGS.intersection(self._open):
+                self.params_inert = True
+        if tag not in _VOID_TAGS:
+            self._open.append(tag)
         if tag in _FORBIDDEN_TAGS:
             self._add("tag_forbidden", tag)
             return
@@ -95,7 +139,17 @@ class _Guard(HTMLParser):
         if tag == "style":
             self._style = []
 
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        # A browser ignores the slash of `<textarea/>`: a non-void element stays open.
+        self.handle_starttag(tag, attrs)
+        if tag in _VOID_TAGS:
+            self.handle_endtag(tag)
+        elif tag == "style":
+            self._flush_style()  # the parser saw no content; the element stays open
+
     def handle_endtag(self, tag: str) -> None:
+        if tag in self._open:  # close it and whatever it left open; a stray end tag is ignored
+            del self._open[len(self._open) - 1 - self._open[::-1].index(tag) :]
         if tag == "style":
             self._flush_style()
 
@@ -166,11 +220,15 @@ def check_template_html(html: str) -> tuple[HtmlProblem, ...]:
     The marker text must also be the element the parser sees: the one tutor-params start tag
     is exactly `MARKER_START_TAG` and starts where the marker text starts, so a marker inside
     a script string, an attribute or a comment cannot stand in for it (compose_document fills
-    the first marker text)."""
+    the first marker text). It must not sit under an open inert element (`_INERT_TAGS`), where
+    a browser would not parse it as a script."""
     problems, guard = _check(html)
     if guard is None:
         return problems
-    bound = guard.params_tags == [(MARKER_START_TAG, html.find(TEMPLATE_MARKER))]
+    bound = (
+        guard.params_tags == [(MARKER_START_TAG, html.find(TEMPLATE_MARKER))]
+        and not guard.params_inert
+    )
     if (
         html.count(TEMPLATE_MARKER) != 1
         or tuple(guard.reserved_ids) != ("tutor-params",)

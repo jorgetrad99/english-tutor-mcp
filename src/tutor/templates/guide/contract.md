@@ -2,7 +2,7 @@
 
 A template is one complete HTML document (start with `<!doctype html>`), at most {{MAX_TEMPLATE_BYTES}} bytes of UTF-8, plus a parameter schema and a grading kind. Send this guide's version as guide_version to save_template.
 
-**Structure.** Put the empty marker {{MARKER}} exactly once; no other element may have id `tutor-params` or `tutor-bridge`. Read the payload with `JSON.parse(document.getElementById("tutor-params").textContent)`. Payload keys: {{PAYLOAD_KEYS}}. `params` holds prompt parameters only; `drawn` holds the draw (or null); for every `choice_index` template, pool or not, `drawn.options` is the list `option_index` counts in, so show those options; `labels` maps prompt parameter names to labels; use `ui_lang` for your own button texts.
+**Structure.** Put the empty marker {{MARKER}} exactly once, outside any template, noscript, textarea, title or other element whose content never runs; no other element may have id `tutor-params` or `tutor-bridge`. Read the payload with `JSON.parse(document.getElementById("tutor-params").textContent)`. Payload keys: {{PAYLOAD_KEYS}}. `params` holds prompt parameters only; `drawn` holds the draw (or null); for every `choice_index` template, pool or not, `drawn.options` is the list `option_index` counts in, so show those options; `labels` maps prompt parameter names to labels; use `ui_lang` for your own button texts.
 
 **Parameters.** {{LIMITS}}
 

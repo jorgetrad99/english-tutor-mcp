@@ -428,3 +428,73 @@ def test_oversized_template_reports_too_large_alone() -> None:
     fits = MARKED.replace("<p>x</p>", f"<p>{body[:-1]}</p>")
     assert len(fits.encode()) == MAX_TEMPLATE_BYTES
     assert check_template_html(fits) == ()
+
+
+# --- the marker under an inert element (security re-review P3, plan ruling 43) -----------------
+
+INERT = (
+    "template",
+    "noscript",
+    "plaintext",
+    "textarea",
+    "title",
+    "xmp",
+    "noembed",
+    "iframe",
+    "noframes",
+    "style",
+)
+
+
+@pytest.mark.parametrize("tag", INERT)
+def test_marker_inside_an_inert_element_is_refused(tag: str) -> None:
+    # A browser never runs (or never even parses as a script) what sits inside these, so the
+    # marker there would not be the params element the bridge reads.
+    html = MARKED.replace(TEMPLATE_MARKER, f"<{tag}>{TEMPLATE_MARKER}</{tag}>")
+    assert check_template_html(html)[-1] == HtmlProblem("marker_missing", "tutor-params")
+
+
+@pytest.mark.parametrize(
+    "wrapped",
+    [
+        f"<template><div><p>{TEMPLATE_MARKER}</p></div></template>",  # a deeper ancestor
+        f"<TEMPLATE>{TEMPLATE_MARKER}</TEMPLATE>",  # tag names are case-insensitive
+        f"<plaintext>{TEMPLATE_MARKER}",  # plaintext never closes
+        f"<noscript><div></noscript-x>{TEMPLATE_MARKER}</div></noscript>",  # unknown end tag
+        f"<textarea/>{TEMPLATE_MARKER}",  # a browser ignores the slash on a non-void element
+        f"<style/>{TEMPLATE_MARKER}",
+        f"<script/>{TEMPLATE_MARKER}",  # the marker would be the open script's text
+    ],
+    ids=[
+        "nested",
+        "uppercase",
+        "plaintext-open",
+        "unknown-end",
+        "self-closing",
+        "style-self-closing",
+        "script-self-closing",
+    ],
+)
+def test_marker_under_an_open_inert_ancestor_is_refused(wrapped: str) -> None:
+    html = MARKED.replace(TEMPLATE_MARKER, wrapped)
+    assert check_template_html(html)[-1] == HtmlProblem("marker_missing", "tutor-params")
+
+
+@pytest.mark.parametrize(
+    "before",
+    [
+        "<template><p>row</p></template>",
+        "<noscript>Enable scripts</noscript>",
+        "<textarea>notes</textarea>",
+        "<template><div></template>",  # the end tag closes what the template left open
+        "<br/><img alt='x'><input>",  # void elements open nothing
+    ],
+)
+def test_closed_inert_elements_before_the_marker_are_fine(before: str) -> None:
+    html = MARKED.replace("<p>x</p>", f"<p>x</p>{before}")
+    assert check_template_html(html) == ()
+
+
+def test_title_in_the_head_does_not_hide_a_body_marker() -> None:
+    html = doc(f"<p>x</p>{TEMPLATE_MARKER}<script>go()</script>")
+    assert check_template_html(html) == ()
