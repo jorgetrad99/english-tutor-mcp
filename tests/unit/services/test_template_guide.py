@@ -145,6 +145,9 @@ def test_the_contract_requires_the_meta_charset_and_only_once() -> None:
     assert 'each optional, then the required `<meta charset="utf-8">`' in text
     assert "do not write `charset` anywhere after it" in text
     assert "in this order, each optional" not in text  # the version 4 rule
+    # The raw scans: http-equiv and tutor-bridge nowhere, id tutor-params only in the marker.
+    assert "Never write `http-equiv` or `tutor-bridge` anywhere" in text
+    assert "give no element but the marker the id `tutor-params`" in text
 
 
 def test_inline_guide_is_the_decision_path_only_and_fits_the_cap() -> None:

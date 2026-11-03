@@ -627,3 +627,70 @@ def test_the_prefix_meta_alone_is_not_a_second_one() -> None:
 def test_anything_may_follow_the_marker(after: str) -> None:
     html = MARKED.replace("<p>x</p>", f"<p>x</p>{after}")
     assert check_template_html(html) == ()
+
+
+# --- raw scans behind the parser (security re-review P3, amendment A52) ------------------------
+#
+# html.parser reads some comments and CDATA differently from a browser, so markup after the
+# marker could hide from it. A raw, case-insensitive scan of the whole text also refuses
+# `http-equiv` anywhere, `tutor-bridge` anywhere and a second `id=tutor-params`.
+
+DIFFERENTIALS = ("<!-- a --!>", "<!--->", "</ template>", "<![CDATA[")
+DIFFERENTIAL_IDS = ("comment-bang-close", "comment-abrupt-dash", "spaced-end-tag", "cdata-open")
+
+
+def after_differential(differential: str, item: str) -> str:
+    return MARKED.replace("<p>x</p>", f"<p>x</p>{differential}{item}")
+
+
+@pytest.mark.parametrize("differential", DIFFERENTIALS, ids=DIFFERENTIAL_IDS)
+@pytest.mark.parametrize(
+    "item",
+    [
+        '<meta http-equiv="refresh" content="0">',
+        "<META HTTP-EQUIV=Content-Security-Policy content='default-src *'>",
+    ],
+    ids=["refresh", "csp-upper"],
+)
+def test_http_equiv_after_a_parser_differential_is_refused(differential: str, item: str) -> None:
+    html = after_differential(differential, item)
+    assert HtmlProblem("tag_forbidden", "meta[http-equiv]") in check_html(html)
+    assert HtmlProblem("tag_forbidden", "meta[http-equiv]") in check_template_html(html)
+
+
+@pytest.mark.parametrize("differential", DIFFERENTIALS, ids=DIFFERENTIAL_IDS)
+@pytest.mark.parametrize(
+    "item",
+    [
+        '<p id="tutor-bridge">x</p>',
+        "<script id=TUTOR-BRIDGE>window.tutorSubmit = 0;</script>",
+        '<div id="tutor-params"></div>',
+        "<div ID = 'Tutor-Params'></div>",
+        '<div id="tutor&#45;params"></div>',  # a browser decodes the reference
+        '<script type="application/json" id="tutor-params">{"v":0}</script>',
+    ],
+    ids=["bridge", "bridge-upper", "params", "params-spaced", "params-entity", "params-script"],
+)
+def test_reserved_ids_after_a_parser_differential_are_refused(differential: str, item: str) -> None:
+    assert check_template_html(after_differential(differential, item))[-1] == MISSING
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["tutor-bridge", "TUTOR&#45;BRIDGE", "var b = document.getElementById('tutor-bridge');"],
+)
+def test_tutor_bridge_is_refused_anywhere(text: str) -> None:
+    assert check_template_html(MARKED.replace("<p>x</p>", f"<p>{text}</p>"))[-1] == MISSING
+
+
+def test_http_equiv_is_refused_anywhere_even_as_text() -> None:
+    html = MARKED.replace("<p>x</p>", "<p>http-equiv</p>")
+    assert check_html(html) == (HtmlProblem("tag_forbidden", "meta[http-equiv]"),)
+
+
+def test_reading_the_params_element_by_id_is_not_a_second_one() -> None:
+    script = (
+        "<script>var p = JSON.parse(document.getElementById('tutor-params').textContent);"
+        'var q = document.getElementById("tutor-params");</script>'
+    )
+    assert check_template_html(MARKED.replace("<p>x</p>", script)) == ()

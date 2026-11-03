@@ -110,7 +110,7 @@ ANSWER_KINDS: tuple[AnswerKind, ...] = (
 # recomputes it (tutor.services.template_files.guide_sha256); change both together (plan
 # rulings 21 and 31).
 TEMPLATE_GUIDE_VERSION = 5
-TEMPLATE_CONTRACT_SHA256 = "cde1fbec2402a24387ad805aba2f035d585225062e237ab24763029a506eca4a"
+TEMPLATE_CONTRACT_SHA256 = "df07ba4b17f6997f582d86cfdfcdc67a0b81298c7334a353af4b0c1cc366291e"
 
 # Caps (plan ruling 24; spec 15.3, 15.4). The MCP schemas and migration 0006 restate them.
 NAME_MAX = 80

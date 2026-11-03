@@ -4,6 +4,7 @@ Hygiene only: the sandbox (`Content-Security-Policy: sandbox allow-scripts`, `<i
 is the security boundary (spec 10). Problems name the tag or attribute, never the content.
 """
 
+import html as html_lib
 import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
@@ -76,6 +77,20 @@ _MARKER_PREFIX = re.compile(
     ),
     re.ASCII | re.IGNORECASE,
 )
+
+
+# Raw scans behind the parser (amendment A52): html.parser reads some comments and CDATA
+# differently from a browser, so markup after the marker could hide from it. These look at the
+# whole text, in any case and after decoding character references, and refuse what a browser
+# might build: `http-equiv` anywhere, `tutor-bridge` anywhere, an `id=tutor-params` beyond the
+# marker's own. `getElementById("tutor-params")` has no `=` and stays allowed.
+_HTTP_EQUIV = "http-equiv"
+_PARAMS_ID = re.compile(rf"id{_WS}*={_WS}*[\"'`]?tutor-params", re.ASCII | re.IGNORECASE)
+
+
+def _raw_views(html: str) -> tuple[str, str]:
+    """The text and the text with character references decoded, both lowercased."""
+    return html.lower(), html_lib.unescape(html).lower()
 
 
 def _safe(name: str, fallback: str) -> str:
@@ -178,8 +193,9 @@ def check_html(html: str) -> tuple[HtmlProblem, ...]:
     """Every rule of spec 4.4 the document breaks, in document order, without duplicates.
 
     An oversized document is reported alone. `too_large` and `not_document` carry `html` and
-    `doctype`; tag problems carry the tag (`meta[http-equiv]` for a meta refresh); attribute and
-    inline-style problems carry `tag[attr]`; a `<style>` element carries `style`.
+    `doctype`; tag problems carry the tag (`meta[http-equiv]` for a meta refresh, and for the
+    text `http-equiv` anywhere, by raw scan: amendment A52); attribute and inline-style problems
+    carry `tag[attr]`; a `<style>` element carries `style`.
     """
     return _check(html)[0]
 
@@ -192,14 +208,24 @@ def _check(html: str) -> tuple[tuple[HtmlProblem, ...], _Guard | None]:
         guard.problems.append(HtmlProblem("not_document", "doctype"))
     guard.feed(html)
     guard.close()
+    if _HTTP_EQUIV in html.lower():  # the parser's own finding, when it has one, comes first
+        guard._add("tag_forbidden", "meta[http-equiv]")
     return tuple(guard.problems), guard
+
+
+def _reserved_ids_hidden(html: str) -> bool:
+    """True when the raw text names `tutor-bridge` or a second `id=tutor-params`."""
+    return any(
+        "tutor-bridge" in view or len(_PARAMS_ID.findall(view)) > 1 for view in _raw_views(html)
+    )
 
 
 def check_template_html(html: str) -> tuple[HtmlProblem, ...]:
     """`check_html` plus the marker rule (spec 15.5, amendment A51): exactly one empty
     `<script type="application/json" id="tutor-params"></script>`, as the first content of the
     head, and no other element with id `tutor-params` or `tutor-bridge`; otherwise
-    `marker_missing` (detail `tutor-params`).
+    `marker_missing` (detail `tutor-params`). Behind the parser, a raw scan (amendment A52)
+    also gives `marker_missing` for `tutor-bridge` anywhere or a second `id=tutor-params`.
 
     Only `<!doctype html>`, `<html ...>` and `<head>`, then the required
     `<meta charset="utf-8">`, may precede the marker, in that order and with ASCII whitespace
@@ -218,6 +244,7 @@ def check_template_html(html: str) -> tuple[HtmlProblem, ...]:
         start is None
         or html.count(TEMPLATE_MARKER) != 1
         or tuple(guard.reserved_ids) != ("tutor-params",)
+        or _reserved_ids_hidden(html)
     ):
         return (*problems, HtmlProblem("marker_missing", "tutor-params"))
     return problems
