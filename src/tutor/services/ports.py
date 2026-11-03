@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections.abc import Callable, Collection, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal, Protocol
 from uuid import UUID
 
@@ -24,9 +24,19 @@ from tutor.domain.levels import CefrLevel
 from tutor.domain.metrics import SessionMetrics
 from tutor.domain.notes import Origin, SourceKind, ValidNote, ValidSource
 from tutor.domain.plan_lite import PlannedItem, Variant
+from tutor.domain.practice import Candidate, DrawnItem, ItemSource, PracticeMode, PracticeStatus
+from tutor.domain.practice_plan import PlanInputs
 from tutor.domain.profile import Domain, Profile
+from tutor.domain.subject_metrics import (
+    ActivityFacts,
+    ConceptFact,
+    SessionFact,
+    ShowingFact,
+    TemplateFact,
+)
 from tutor.domain.subjects import Subject
 from tutor.domain.templates import (
+    Draw,
     GradingKind,
     InstanceStatus,
     PracticeKind,
@@ -54,7 +64,13 @@ AuditEvent = Literal[
     "notes_saved",
     "template_saved",
     "instance_created",
+    "practice_plan_created",
+    "practice_started",
+    "practice_ended",
+    "practice_incomplete",
+    "notes_searched",
 ]
+PracticePlanStatus = Literal["active", "superseded"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -549,6 +565,184 @@ class InstanceRepo(Protocol):
         """The note's active instances by seq; () for another user's note."""
 
 
+# --- practice and progress (subjects spec 6, 16; slice B plan rulings 28-38, 63-71) ------------
+
+
+@dataclass(frozen=True, slots=True)
+class PracticePlanRow:
+    id: UUID
+    subject_id: UUID
+    version: int
+    status: PracticePlanStatus
+    start_date: date
+    inputs: PlanInputs
+    total_sessions: int | None
+    rationale: Mapping[str, Any]
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class PracticeSessionRow:
+    id: UUID
+    subject_id: UUID
+    plan_id: UUID | None
+    mode: PracticeMode
+    status: PracticeStatus
+    started_at: datetime
+    ended_at: datetime | None
+    self_rating: int | None
+    summary: Mapping[str, Any] | None
+    item_count: int  # the showings drawn at start; show_exercise adds rows beyond it
+
+
+@dataclass(frozen=True, slots=True)
+class PracticeItemRow:
+    """One showing of an instance. `answer` is learner data: never logged, never a metric."""
+
+    id: UUID
+    session_id: UUID
+    seq: int
+    instance_id: UUID
+    draw_seed: int
+    draw: Draw
+    shown_at: datetime | None
+    answer: Mapping[str, Any] | None
+    correct: bool | None
+    score: int | None
+    answered_at: datetime | None
+    source: ItemSource | None
+
+
+class OpenPracticeExists(Exception):
+    """Raised by PracticeRepo.create_session when the user already has an open practice
+    session (the partial unique index of ruling 30)."""
+
+
+class PracticeRepo(Protocol):
+    def active_plan(self, subject_id: UUID) -> PracticePlanRow | None:
+        """The subject's active plan, or None (another user's subject too)."""
+
+    def create_plan(
+        self,
+        subject_id: UUID,
+        inputs: PlanInputs,
+        start_date: date,
+        now: datetime,
+        rationale: Mapping[str, Any],
+    ) -> PracticePlanRow:
+        """Insert the subject's active plan with version = the subject's max + 1 and
+        total_sessions from the domain; the previous active plan becomes superseded in the same
+        call (ruling 29). LookupError when the subject is not the user's; TypeError when
+        `rationale` is not JSON."""
+
+    def completed_count(self, plan_id: UUID) -> int:
+        """Sessions of the plan that count toward attendance: closed `app` and `text` sessions,
+        and `class` sessions of any status with at least one answered item (spec 15.13 D5).
+        0 for another user's plan."""
+
+    def open_session(self) -> PracticeSessionRow | None:
+        """The user's open practice session, or None (independent of English lessons)."""
+
+    def create_session(
+        self,
+        session_id: UUID,
+        *,
+        subject_id: UUID,
+        plan_id: UUID | None,
+        mode: PracticeMode,
+        items: Sequence[DrawnItem],
+        now: datetime,
+    ) -> PracticeSessionRow:
+        """Insert an open session started at `now` with id `session_id`, item_count =
+        len(items), and its items (ids, seq, instance, draw_seed and draw from `items`;
+        shown_at and the answer empty). OpenPracticeExists if the user has an open session;
+        LookupError when the subject, the plan (which must be the subject's) or an instance
+        (an instance of the subject) is not the user's; ValueError on a repeated seq."""
+
+    def session(self, session_id: UUID) -> PracticeSessionRow | None:
+        """The user's practice session, or None."""
+
+    def items(self, session_id: UUID) -> tuple[PracticeItemRow, ...]:
+        """The session's items by seq; () for another user's session."""
+
+    def item(self, item_id: UUID) -> PracticeItemRow | None:
+        """The user's practice item, or None."""
+
+    def add_item(self, session_id: UUID, item: DrawnItem, now: datetime) -> PracticeItemRow:
+        """Append a showing to an open session with shown_at = now (show_exercise, ruling 63).
+        LookupError when the session or the instance (an instance of the session's subject) is
+        not the user's; ValueError when the session is not open or the seq exists."""
+
+    def mark_shown(self, item_id: UUID, now: datetime) -> datetime | None:
+        """Set shown_at = now if it is empty and return the stored value: the first one wins
+        (ruling 63). None for another user's or a missing item."""
+
+    def record(
+        self,
+        item_id: UUID,
+        *,
+        answer: Mapping[str, Any],
+        correct: bool | None,
+        score: int,
+        source: ItemSource,
+        now: datetime,
+    ) -> PracticeItemRow | None:
+        """Store the first answer (answer JSON, correct, score, answered_at = now, source) and
+        return the row; None, with nothing written, when the item is already answered.
+        LookupError for another user's or a missing item; ValueError when it was never shown
+        (the shown-before-answer check)."""
+
+    def mark_incomplete(self, session_id: UUID, now: datetime) -> None:
+        """Open session -> incomplete with ended_at = now; no-op otherwise."""
+
+    def close(
+        self,
+        session_id: UUID,
+        *,
+        summary: Mapping[str, Any],
+        self_rating: int | None,
+        now: datetime,
+    ) -> None:
+        """Open session -> closed with ended_at = now, the summary JSON and self_rating; no-op
+        for another user's session or one that is not open."""
+
+    def candidates(self, subject_id: UUID) -> tuple[Candidate, ...]:
+        """The subject's active exercise instances (displays and retired instances left out)
+        with their template's spec, their params and last_shown_at, the latest shown_at among
+        the user's items of the instance; by instance id. () for another user's subject."""
+
+
+class ProgressRepo(Protocol):
+    """Facts for the subject metrics (ruling 70): ids, enums, numbers, timestamps and concept
+    and template names only; never an answer, a prompt, a parameter or note text. Every
+    method returns nothing for another user's or a missing subject."""
+
+    def showings(self, subject_id: UUID) -> tuple[ShowingFact, ...]:
+        """Answered items of the subject's sessions (any mode, self-reports included) with
+        their instance's template, concept and grading kind; by answered_at, then item id."""
+
+    def practice_days(self, subject_id: UUID, tz_name: str) -> tuple[datetime, ...]:
+        """The earliest answered_at of each local day (in `tz_name`) with an answered item of
+        the subject, ascending."""
+
+    def sessions(self, subject_id: UUID) -> tuple[SessionFact, ...]:
+        """The subject's practice sessions with their latest activity (started_at, or a later
+        shown_at or answered_at of one of their items); by started_at, then id."""
+
+    def activity(self, subject_id: UUID) -> ActivityFacts:
+        """created_at of the subject's notes, templates and instances (any status), and `at` of
+        the user's notes_searched events whose meta subject_id is the subject; each ascending."""
+
+    def concepts(self, subject_id: UUID) -> tuple[ConceptFact, ...]:
+        """The subject's concepts by name_norm, then id."""
+
+    def templates(self, subject_id: UUID) -> tuple[TemplateFact, ...]:
+        """The subject's templates in any status, by name_norm, then id."""
+
+    def unscoped_search_count(self) -> int:
+        """The user's notes_searched events without a subject_id."""
+
+
 class AuditRepo(Protocol):
     def record(self, event: AuditEvent, meta: Mapping[str, Any], now: datetime) -> None:
         """Append an audit entry; meta is JSON and never holds learner text."""
@@ -568,6 +762,8 @@ class UnitOfWork(Protocol):
     notes: NoteRepo
     templates: TemplateRepo
     instances: InstanceRepo
+    practice: PracticeRepo
+    progress: ProgressRepo
 
 
 # Commits when the block exits cleanly; rolls everything back when it raises.

@@ -2,7 +2,8 @@
 
 The store enforces what Postgres enforces: one open session per user, unique (user, text_norm),
 one review log per (session, item), JSON-only JSON columns, one active template per subject and
-name, one active instance per content key, and per-user isolation. A unit of work deep-copies the
+name, one active instance per content key, one open practice session per user, an answer only
+after a showing, and per-user isolation. A unit of work deep-copies the
 tables on enter and restores the copy if the block raises.
 """
 
@@ -12,12 +13,13 @@ import copy
 import hashlib
 import json
 import re
-from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Literal
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo
 
 from tutor.content import load_track
 from tutor.domain.fsrs import FsrsState, new_state
@@ -48,9 +50,18 @@ from tutor.domain.notes import (
     name_norm,
 )
 from tutor.domain.plan_lite import PlannedItem, Variant
+from tutor.domain.practice import Candidate, DrawnItem, ItemSource, PracticeMode, PracticeStatus
+from tutor.domain.practice_plan import PlanInputs, total_sessions
 from tutor.domain.profile import DEFAULT_TIMEZONE, Domain, Profile
+from tutor.domain.subject_metrics import (
+    ActivityFacts,
+    ConceptFact,
+    SessionFact,
+    ShowingFact,
+    TemplateFact,
+)
 from tutor.domain.subjects import Subject
-from tutor.domain.templates import InstanceStatus, TemplateSpec, TemplateStatus, spec_hash
+from tutor.domain.templates import Draw, InstanceStatus, TemplateSpec, TemplateStatus, spec_hash
 from tutor.domain.templates import Origin as InstanceOrigin
 from tutor.domain.track import TrackItem
 from tutor.domain.validation import Category, Evidence, SessionOutcome, ValidError
@@ -68,12 +79,19 @@ from tutor.services.ports import (
     Mode,
     NoteRepo,
     NoteRow,
+    OpenPracticeExists,
     OpenSessionExists,
     PassageRow,
     PlanItemRow,
     PlanItemStatus,
     PlanRepo,
+    PracticeItemRow,
+    PracticePlanRow,
+    PracticePlanStatus,
+    PracticeRepo,
+    PracticeSessionRow,
     ProfileRepo,
+    ProgressRepo,
     ResolvedUser,
     ReviewLogRow,
     ReviewRepo,
@@ -329,6 +347,52 @@ class InstanceRecord:
 
 
 @dataclass(slots=True)
+class PracticePlanRecord:
+    id: UUID
+    user_id: UUID
+    subject_id: UUID
+    version: int
+    status: PracticePlanStatus
+    start_date: date
+    inputs: PlanInputs
+    total_sessions: int | None
+    rationale: dict[str, Any]
+    created_at: datetime
+
+
+@dataclass(slots=True)
+class PracticeSessionRecord:
+    id: UUID
+    user_id: UUID
+    subject_id: UUID
+    plan_id: UUID | None
+    mode: PracticeMode
+    started_at: datetime
+    item_count: int
+    status: PracticeStatus = "open"
+    ended_at: datetime | None = None
+    self_rating: int | None = None
+    summary: dict[str, Any] | None = None
+
+
+@dataclass(slots=True)
+class PracticeItemRecord:
+    id: UUID
+    user_id: UUID
+    session_id: UUID
+    seq: int
+    instance_id: UUID
+    draw_seed: int
+    draw: Draw
+    shown_at: datetime | None = None
+    answer: dict[str, Any] | None = None
+    correct: bool | None = None
+    score: int | None = None
+    answered_at: datetime | None = None
+    source: ItemSource | None = None
+
+
+@dataclass(slots=True)
 class Tables:
     users: dict[UUID, UserRecord] = field(default_factory=dict)
     profiles: dict[UUID, Profile] = field(default_factory=dict)
@@ -350,6 +414,9 @@ class Tables:
     concept_links: list[ConceptLinkRecord] = field(default_factory=list)
     exercise_templates: dict[UUID, TemplateRecord] = field(default_factory=dict)
     template_instances: dict[UUID, InstanceRecord] = field(default_factory=dict)
+    practice_plans: dict[UUID, PracticePlanRecord] = field(default_factory=dict)
+    practice_sessions: dict[UUID, PracticeSessionRecord] = field(default_factory=dict)
+    practice_items: dict[UUID, PracticeItemRecord] = field(default_factory=dict)
 
 
 class MemoryStore:
@@ -1479,6 +1546,411 @@ class MemoryInstanceRepo(_Repo):
         return tuple(self._row(i) for i in rows)
 
 
+def _plan_row(rec: PracticePlanRecord) -> PracticePlanRow:
+    return PracticePlanRow(
+        id=rec.id,
+        subject_id=rec.subject_id,
+        version=rec.version,
+        status=rec.status,
+        start_date=rec.start_date,
+        inputs=rec.inputs,
+        total_sessions=rec.total_sessions,
+        rationale=_json_copy(rec.rationale),
+        created_at=rec.created_at,
+    )
+
+
+def _practice_session_row(rec: PracticeSessionRecord) -> PracticeSessionRow:
+    return PracticeSessionRow(
+        id=rec.id,
+        subject_id=rec.subject_id,
+        plan_id=rec.plan_id,
+        mode=rec.mode,
+        status=rec.status,
+        started_at=rec.started_at,
+        ended_at=rec.ended_at,
+        self_rating=rec.self_rating,
+        summary=_json_copy(rec.summary) if rec.summary is not None else None,
+        item_count=rec.item_count,
+    )
+
+
+def _practice_item_row(rec: PracticeItemRecord) -> PracticeItemRow:
+    return PracticeItemRow(
+        id=rec.id,
+        session_id=rec.session_id,
+        seq=rec.seq,
+        instance_id=rec.instance_id,
+        draw_seed=rec.draw_seed,
+        draw=rec.draw,
+        shown_at=rec.shown_at,
+        answer=_json_copy(rec.answer) if rec.answer is not None else None,
+        correct=rec.correct,
+        score=rec.score,
+        answered_at=rec.answered_at,
+        source=rec.source,
+    )
+
+
+class MemoryPracticeRepo(_Repo):
+    """Practice plans, sessions and items; one open practice session per user (ruling 30)."""
+
+    def _subject(self, subject_id: UUID) -> SubjectRecord:
+        rec = self._t.subjects.get(subject_id)
+        if rec is None or rec.user_id != self._uid:
+            raise LookupError("subject not found")
+        return rec
+
+    def _plans(self, subject_id: UUID) -> list[PracticePlanRecord]:
+        return [
+            p
+            for p in self._t.practice_plans.values()
+            if p.user_id == self._uid and p.subject_id == subject_id
+        ]
+
+    def _session(self, session_id: UUID) -> PracticeSessionRecord | None:
+        rec = self._t.practice_sessions.get(session_id)
+        return rec if rec is not None and rec.user_id == self._uid else None
+
+    def _items_of(self, session_id: UUID) -> list[PracticeItemRecord]:
+        return sorted(
+            (
+                i
+                for i in self._t.practice_items.values()
+                if i.user_id == self._uid and i.session_id == session_id
+            ),
+            key=lambda i: i.seq,
+        )
+
+    def _instance_of(self, subject_id: UUID, instance_id: UUID) -> InstanceRecord:
+        rec = self._t.template_instances.get(instance_id)
+        if rec is None or rec.user_id != self._uid or rec.subject_id != subject_id:
+            raise LookupError("instance not found")
+        return rec
+
+    def active_plan(self, subject_id: UUID) -> PracticePlanRow | None:
+        active = [p for p in self._plans(subject_id) if p.status == "active"]
+        return _plan_row(active[0]) if active else None
+
+    def create_plan(
+        self,
+        subject_id: UUID,
+        inputs: PlanInputs,
+        start_date: date,
+        now: datetime,
+        rationale: Mapping[str, Any],
+    ) -> PracticePlanRow:
+        self._subject(subject_id)
+        stored = _json_copy(rationale)
+        plans = self._plans(subject_id)
+        for plan in plans:
+            plan.status = "superseded"
+        rec = PracticePlanRecord(
+            id=uuid4(),
+            user_id=self._uid,
+            subject_id=subject_id,
+            version=1 + max((p.version for p in plans), default=0),
+            status="active",
+            start_date=start_date,
+            inputs=inputs,
+            total_sessions=total_sessions(inputs, start_date),
+            rationale=stored,
+            created_at=now,
+        )
+        self._t.practice_plans[rec.id] = rec
+        return _plan_row(rec)
+
+    def completed_count(self, plan_id: UUID) -> int:
+        count = 0
+        for rec in self._t.practice_sessions.values():
+            if rec.user_id != self._uid or rec.plan_id != plan_id:
+                continue
+            if rec.mode == "class":
+                count += any(i.answered_at is not None for i in self._items_of(rec.id))
+            else:
+                count += rec.status == "closed"
+        return count
+
+    def open_session(self) -> PracticeSessionRow | None:
+        for rec in self._t.practice_sessions.values():
+            if rec.user_id == self._uid and rec.status == "open":
+                return _practice_session_row(rec)
+        return None
+
+    def create_session(
+        self,
+        session_id: UUID,
+        *,
+        subject_id: UUID,
+        plan_id: UUID | None,
+        mode: PracticeMode,
+        items: Sequence[DrawnItem],
+        now: datetime,
+    ) -> PracticeSessionRow:
+        self._subject(subject_id)
+        if plan_id is not None:
+            plan = self._t.practice_plans.get(plan_id)
+            if plan is None or plan.user_id != self._uid or plan.subject_id != subject_id:
+                raise LookupError("plan not found")
+        for item in items:
+            self._instance_of(subject_id, item.instance_id)
+        if len({item.seq for item in items}) != len(items):
+            raise ValueError("duplicate seq in the session")
+        if self.open_session() is not None:
+            raise OpenPracticeExists
+        rec = PracticeSessionRecord(
+            id=session_id,
+            user_id=self._uid,
+            subject_id=subject_id,
+            plan_id=plan_id,
+            mode=mode,
+            started_at=now,
+            item_count=len(items),
+        )
+        self._t.practice_sessions[rec.id] = rec
+        for item in items:
+            self._insert_item(session_id, item, shown_at=None)
+        return _practice_session_row(rec)
+
+    def _insert_item(
+        self, session_id: UUID, item: DrawnItem, *, shown_at: datetime | None
+    ) -> PracticeItemRecord:
+        rec = PracticeItemRecord(
+            id=item.item_id,
+            user_id=self._uid,
+            session_id=session_id,
+            seq=item.seq,
+            instance_id=item.instance_id,
+            draw_seed=item.draw_seed,
+            draw=item.draw,
+            shown_at=shown_at,
+        )
+        self._t.practice_items[rec.id] = rec
+        return rec
+
+    def session(self, session_id: UUID) -> PracticeSessionRow | None:
+        rec = self._session(session_id)
+        return _practice_session_row(rec) if rec is not None else None
+
+    def items(self, session_id: UUID) -> tuple[PracticeItemRow, ...]:
+        return tuple(_practice_item_row(i) for i in self._items_of(session_id))
+
+    def item(self, item_id: UUID) -> PracticeItemRow | None:
+        rec = self._t.practice_items.get(item_id)
+        return _practice_item_row(rec) if rec is not None and rec.user_id == self._uid else None
+
+    def add_item(self, session_id: UUID, item: DrawnItem, now: datetime) -> PracticeItemRow:
+        session = self._session(session_id)
+        if session is None:
+            raise LookupError("session not found")
+        self._instance_of(session.subject_id, item.instance_id)
+        if session.status != "open":
+            raise ValueError("the session is not open")
+        if any(i.seq == item.seq for i in self._items_of(session_id)):
+            raise ValueError("duplicate seq in the session")
+        return _practice_item_row(self._insert_item(session_id, item, shown_at=now))
+
+    def mark_shown(self, item_id: UUID, now: datetime) -> datetime | None:
+        rec = self._t.practice_items.get(item_id)
+        if rec is None or rec.user_id != self._uid:
+            return None
+        if rec.shown_at is None:
+            rec.shown_at = now
+        return rec.shown_at
+
+    def record(
+        self,
+        item_id: UUID,
+        *,
+        answer: Mapping[str, Any],
+        correct: bool | None,
+        score: int,
+        source: ItemSource,
+        now: datetime,
+    ) -> PracticeItemRow | None:
+        rec = self._t.practice_items.get(item_id)
+        if rec is None or rec.user_id != self._uid:
+            raise LookupError("item not found")
+        if rec.answered_at is not None:
+            return None
+        if rec.shown_at is None or now < rec.shown_at:
+            raise ValueError("an item is answered only after it was shown")
+        rec.answer = _json_copy(answer)
+        rec.correct, rec.score, rec.answered_at, rec.source = correct, score, now, source
+        return _practice_item_row(rec)
+
+    def mark_incomplete(self, session_id: UUID, now: datetime) -> None:
+        rec = self._session(session_id)
+        if rec is not None and rec.status == "open":
+            rec.status, rec.ended_at = "incomplete", now
+
+    def close(
+        self,
+        session_id: UUID,
+        *,
+        summary: Mapping[str, Any],
+        self_rating: int | None,
+        now: datetime,
+    ) -> None:
+        rec = self._session(session_id)
+        if rec is not None and rec.status == "open":
+            rec.summary = _json_copy(summary)
+            rec.status, rec.ended_at, rec.self_rating = "closed", now, self_rating
+
+    def candidates(self, subject_id: UUID) -> tuple[Candidate, ...]:
+        last: dict[UUID, datetime] = {}
+        for item in self._t.practice_items.values():
+            if item.user_id == self._uid and item.shown_at is not None:
+                seen = last.get(item.instance_id)
+                last[item.instance_id] = max(seen, item.shown_at) if seen else item.shown_at
+        found = []
+        for rec in self._t.template_instances.values():
+            if (
+                rec.user_id == self._uid
+                and rec.subject_id == subject_id
+                and rec.status == "active"
+                and rec.template.purpose == "exercise"
+            ):
+                template = self._t.exercise_templates[rec.template_id]
+                found.append(
+                    Candidate(
+                        instance_id=rec.id,
+                        spec=template.spec,
+                        params=_json_copy(rec.params),
+                        last_shown_at=last.get(rec.id),
+                    )
+                )
+        return tuple(sorted(found, key=lambda c: c.instance_id))
+
+
+class MemoryProgressRepo(_Repo):
+    """The metric facts over the memory tables, as PgProgressRepo reads them (ruling 70)."""
+
+    def _subject_ok(self, subject_id: UUID) -> bool:
+        rec = self._t.subjects.get(subject_id)
+        return rec is not None and rec.user_id == self._uid
+
+    def _sessions(self, subject_id: UUID) -> list[PracticeSessionRecord]:
+        return [
+            s
+            for s in self._t.practice_sessions.values()
+            if s.user_id == self._uid and s.subject_id == subject_id
+        ]
+
+    def _answered(self, subject_id: UUID) -> list[PracticeItemRecord]:
+        sessions = {s.id for s in self._sessions(subject_id)}
+        found = [
+            (i.answered_at, i.id, i)
+            for i in self._t.practice_items.values()
+            if i.user_id == self._uid and i.session_id in sessions and i.answered_at is not None
+        ]
+        return [i for _, _, i in sorted(found, key=lambda e: (e[0], e[1]))]
+
+    def showings(self, subject_id: UUID) -> tuple[ShowingFact, ...]:
+        facts: list[ShowingFact] = []
+        for item in self._answered(subject_id):
+            instance = self._t.template_instances[item.instance_id]
+            if item.shown_at is None or item.answered_at is None or item.score is None:
+                continue  # pragma: no cover - record() needs a showing and stores a score
+            facts.append(
+                ShowingFact(
+                    instance_id=instance.id,
+                    template_id=instance.template_id,
+                    concept_id=instance.concept_id,
+                    grading_kind=instance.template.grading_kind,
+                    correct=item.correct,
+                    score=item.score,
+                    shown_at=item.shown_at,
+                    answered_at=item.answered_at,
+                )
+            )
+        return tuple(facts)
+
+    def practice_days(self, subject_id: UUID, tz_name: str) -> tuple[datetime, ...]:
+        zone = ZoneInfo(tz_name)
+        first: dict[date, datetime] = {}
+        for item in self._answered(subject_id):
+            if item.answered_at is None:
+                continue  # pragma: no cover - _answered keeps answered items only
+            day = item.answered_at.astimezone(zone).date()
+            if day not in first or item.answered_at < first[day]:
+                first[day] = item.answered_at
+        return tuple(sorted(first.values()))
+
+    def sessions(self, subject_id: UUID) -> tuple[SessionFact, ...]:
+        facts: list[tuple[datetime, UUID, SessionFact]] = []
+        for rec in self._sessions(subject_id):
+            moments = [rec.started_at]
+            for item in self._t.practice_items.values():
+                if item.user_id == self._uid and item.session_id == rec.id:
+                    moments += [m for m in (item.shown_at, item.answered_at) if m is not None]
+            fact = SessionFact(
+                started_at=rec.started_at, status=rec.status, last_activity_at=max(moments)
+            )
+            facts.append((rec.started_at, rec.id, fact))
+        return tuple(f for _, _, f in sorted(facts, key=lambda e: (e[0], e[1])))
+
+    def activity(self, subject_id: UUID) -> ActivityFacts:
+        if not self._subject_ok(subject_id):
+            return ActivityFacts((), (), (), ())
+
+        def mine(rows: Iterable[Any]) -> tuple[datetime, ...]:
+            return tuple(
+                sorted(
+                    r.created_at
+                    for r in rows
+                    if r.user_id == self._uid and r.subject_id == subject_id
+                )
+            )
+
+        searches = tuple(
+            sorted(
+                a.at
+                for a in self._t.audit
+                if a.user_id == self._uid
+                and a.event == "notes_searched"
+                and a.meta.get("subject_id") == str(subject_id)
+            )
+        )
+        return ActivityFacts(
+            notes=mine(self._t.notes.values()),
+            templates=mine(self._t.exercise_templates.values()),
+            instances=mine(self._t.template_instances.values()),
+            searches=searches,
+        )
+
+    def concepts(self, subject_id: UUID) -> tuple[ConceptFact, ...]:
+        rows = sorted(
+            (
+                c
+                for c in self._t.concepts.values()
+                if c.user_id == self._uid and c.subject_id == subject_id
+            ),
+            key=lambda c: (c.name_norm, c.id),
+        )
+        return tuple(ConceptFact(c.id, c.name, c.name_norm) for c in rows)
+
+    def templates(self, subject_id: UUID) -> tuple[TemplateFact, ...]:
+        rows = sorted(
+            (
+                t
+                for t in self._t.exercise_templates.values()
+                if t.user_id == self._uid and t.subject_id == subject_id
+            ),
+            key=lambda t: (t.name_norm, t.id),
+        )
+        return tuple(TemplateFact(t.id, t.spec.name, t.spec.grading_kind, t.status) for t in rows)
+
+    def unscoped_search_count(self) -> int:
+        return sum(
+            1
+            for a in self._t.audit
+            if a.user_id == self._uid
+            and a.event == "notes_searched"
+            and a.meta.get("subject_id") is None
+        )
+
+
 class MemoryAuditRepo(_Repo):
     def record(self, event: AuditEvent, meta: Mapping[str, Any], now: datetime) -> None:
         self._t.audit.append(
@@ -1501,6 +1973,8 @@ class MemoryUnitOfWork:
         self.notes: NoteRepo = MemoryNoteRepo(store, user_id)
         self.templates: TemplateRepo = MemoryTemplateRepo(store, user_id)
         self.instances: InstanceRepo = MemoryInstanceRepo(store, user_id)
+        self.practice: PracticeRepo = MemoryPracticeRepo(store, user_id)
+        self.progress: ProgressRepo = MemoryProgressRepo(store, user_id)
 
 
 def memory_uow(store: MemoryStore) -> UowFactory:

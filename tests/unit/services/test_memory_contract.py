@@ -8,6 +8,7 @@ from uuid import UUID
 
 import pytest
 from repo_contract import (
+    PracticeContract,
     RepoContract,
     add_closed_session,
     add_note,
@@ -38,8 +39,8 @@ from .conftest import FixedClock
 pytestmark = pytest.mark.unit
 
 
-class TestMemoryRepos(RepoContract):
-    """Every RepoContract test on the in-memory store."""
+class TestMemoryRepos(RepoContract, PracticeContract):
+    """Every RepoContract and PracticeContract test on the in-memory store."""
 
 
 def test_duplicate_text_norm_for_one_user_raises(

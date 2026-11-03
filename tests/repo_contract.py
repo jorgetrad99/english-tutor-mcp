@@ -11,8 +11,8 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
-from dataclasses import replace
-from datetime import date, datetime, timedelta
+from dataclasses import dataclass, replace
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
@@ -25,7 +25,10 @@ from template_fixtures import (
     NUMERIC,
     REVEAL_NAME,
     TABLE,
+    flashcard_params,
+    numeric_params,
     spec,
+    table_params,
 )
 
 from tutor.content import load_track
@@ -56,9 +59,19 @@ from tutor.domain.notes import (
     validate_notes,
 )
 from tutor.domain.plan_lite import PlannedItem
+from tutor.domain.practice import DrawnItem, PracticeMode
+from tutor.domain.practice_plan import PlanInputs
 from tutor.domain.profile import DEFAULT_TIMEZONE, Profile
+from tutor.domain.subject_metrics import ActivityFacts, ConceptFact, SessionFact, ShowingFact
 from tutor.domain.subjects import Subject, SubjectStatus
-from tutor.domain.templates import content_key, spec_hash
+from tutor.domain.templates import (
+    Draw,
+    ParamPair,
+    content_key,
+    seed_for,
+    spec_hash,
+    validate_params,
+)
 from tutor.domain.text import normalize
 from tutor.domain.track import TrackItem
 from tutor.domain.validation import Evidence, ReportedError, SessionOutcome, ValidError
@@ -67,8 +80,12 @@ from tutor.services.ports import (
     IdentityResolver,
     InstanceRow,
     NoteRow,
+    OpenPracticeExists,
     OpenSessionExists,
     PassageRow,
+    PracticeItemRow,
+    PracticePlanRow,
+    PracticeSessionRow,
     ReviewLogRow,
     SessionRow,
     TemplateRow,
@@ -2138,3 +2155,606 @@ class RepoContract:
         with uow_factory(user_id) as uow:
             assert [h.note_id for h in uow.notes.search("power chord", None, 10)] == [mine.id]
             assert uow.notes.search("power chord", uuid4(), 10) == ()
+
+
+# --- practice and progress (slice B plan rulings 28-38, 63-71) ---------------------------------
+
+PLAN = PlanInputs(minutes_per_session=30, sessions_per_week=3, target_date=date(2026, 11, 11))
+
+
+@dataclass(frozen=True)
+class PracticeWorld:
+    """One subject with a note (concept "Suma"), a numeric template with two instances (one with
+    the concept), a pool template with one instance, a display, a retired instance, and a
+    second subject with its own instance."""
+
+    subject_id: UUID
+    other_subject_id: UUID
+    concept_id: UUID
+    numeric: TemplateRow
+    flash: TemplateRow
+    quiz: InstanceRow
+    loose_quiz: InstanceRow
+    pool: InstanceRow
+    display: InstanceRow
+    retired: InstanceRow
+    replacement: InstanceRow
+    foreign: InstanceRow
+
+
+def checked_params(template: TemplateRow, pairs: Sequence[ParamPair]) -> dict[str, Any]:
+    result = validate_params(template.spec, pairs, path="params")
+    assert isinstance(result, dict), result
+    return result
+
+
+def new_instance(
+    uow: UnitOfWork,
+    subject_id: UUID,
+    template: TemplateRow,
+    pairs: Sequence[ParamPair],
+    now: datetime,
+    *,
+    concept_id: UUID | None = None,
+    note_id: UUID | None = None,
+    prompt: str = "Resuelve.",
+    replaces: UUID | None = None,
+) -> InstanceRow:
+    params = checked_params(template, pairs)
+    row, _ = uow.instances.insert(
+        subject_id=subject_id,
+        note_id=note_id,
+        template=template,
+        params=params,
+        prompt_text=prompt,
+        concept_id=concept_id,
+        origin="class",
+        key=content_key(subject_id, template.id, params, prompt, note_id),
+        now=now,
+        replaces=replaces,
+    )
+    return row
+
+
+def practice_world(uow: UnitOfWork, now: datetime) -> PracticeWorld:
+    subject_id = uow.subjects.create(sample_subject(), now).id
+    other = uow.subjects.create(sample_subject("Piano"), now).id
+    note = add_note(
+        uow, subject_id, valid_note("Clase", long_paragraph("uno."), concepts=["Suma"]), now
+    )
+    suma = present(uow.notes.concept_by_norm(subject_id, "suma"))
+    numeric = uow.templates.create(subject_id, spec(NUMERIC), HTML, 1, now)
+    flash = uow.templates.create(subject_id, spec(FLASHCARD), HTML, 1, now)
+    table = uow.templates.create(subject_id, spec(TABLE), HTML, 1, now)
+    quiz = new_instance(
+        uow, subject_id, numeric, numeric_params(4.0), now, concept_id=suma.id, note_id=note.id
+    )
+    loose = new_instance(uow, subject_id, numeric, numeric_params(5.0), now)
+    old = new_instance(uow, subject_id, numeric, numeric_params(6.0), now)
+    replacement = new_instance(uow, subject_id, numeric, numeric_params(7.0), now, replaces=old.id)
+    retired = present(uow.instances.get(old.id))
+    pool = new_instance(uow, subject_id, flash, flashcard_params(4), now)
+    display = new_instance(uow, subject_id, table, table_params(), now)
+    other_numeric = uow.templates.create(other, spec(NUMERIC), HTML, 1, now)
+    foreign = new_instance(uow, other, other_numeric, numeric_params(8.0), now)
+    return PracticeWorld(
+        subject_id=subject_id,
+        other_subject_id=other,
+        concept_id=suma.id,
+        numeric=numeric,
+        flash=flash,
+        quiz=quiz,
+        loose_quiz=loose,
+        pool=pool,
+        display=display,
+        retired=retired,
+        replacement=replacement,
+        foreign=foreign,
+    )
+
+
+def drawn(instance: InstanceRow, seq: int, shown: Draw | None = None) -> DrawnItem:
+    item_id = uuid4()
+    return DrawnItem(
+        item_id=item_id,
+        seq=seq,
+        instance_id=instance.id,
+        practice_kind=instance.practice_kind,
+        grading_kind=instance.grading_kind,
+        draw_seed=seed_for(item_id),
+        draw=shown if shown is not None else Draw(),
+    )
+
+
+def open_practice(
+    uow: UnitOfWork,
+    world: PracticeWorld,
+    now: datetime,
+    *,
+    items: Sequence[DrawnItem] = (),
+    mode: PracticeMode = "text",
+    plan_id: UUID | None = None,
+) -> PracticeSessionRow:
+    return uow.practice.create_session(
+        uuid4(), subject_id=world.subject_id, plan_id=plan_id, mode=mode, items=items, now=now
+    )
+
+
+def answer_item(
+    uow: UnitOfWork, item_id: UUID, now: datetime, *, score: int = 100, shown: bool = True
+) -> PracticeItemRow | None:
+    if shown:
+        uow.practice.mark_shown(item_id, now)
+    return uow.practice.record(
+        item_id,
+        answer={"answer_kind": "number", "value": "4"},
+        correct=score == 100,
+        score=score,
+        source="chat",
+        now=now,
+    )
+
+
+class PracticeContract:
+    """PracticeRepo and ProgressRepo on both backends (Postgres from slice B Task 3)."""
+
+    # Plans (ruling 29)
+
+    def test_create_plan_versions_per_subject_and_supersedes(
+        self, uow_factory: UowFactory, user_id: UUID, other_user_id: UUID, now: datetime
+    ) -> None:
+        later = now + timedelta(days=2)
+        with uow_factory(user_id) as uow:
+            subject_id = uow.subjects.create(sample_subject(), now).id
+            other = uow.subjects.create(sample_subject("Piano"), now).id
+            assert uow.practice.active_plan(subject_id) is None
+            first = uow.practice.create_plan(
+                subject_id, PLAN, date(2026, 10, 14), now, {"reason": "created"}
+            )
+            uow.practice.create_plan(other, PLAN, date(2026, 10, 14), now, {"reason": "created"})
+        assert first == PracticePlanRow(
+            id=first.id,
+            subject_id=subject_id,
+            version=1,
+            status="active",
+            start_date=date(2026, 10, 14),
+            inputs=PLAN,
+            total_sessions=12,  # 10-14 -> 11-11 is 28 days: 3 x ceil(28 / 7)
+            rationale={"reason": "created"},
+            created_at=now,
+        )
+        changed = replace(PLAN, sessions_per_week=4)
+        reason = {"reason": "inputs_changed", "previous_version": 1}
+        with uow_factory(user_id) as uow:
+            second = uow.practice.create_plan(
+                subject_id, changed, date(2026, 10, 16), later, reason
+            )
+            assert uow.practice.active_plan(subject_id) == second
+            assert present(uow.practice.active_plan(other)).version == 1
+        assert (second.version, second.status, second.inputs, second.rationale) == (
+            2,
+            "active",
+            changed,
+            reason,
+        )
+        with uow_factory(other_user_id) as uow:  # Review Focus 5
+            assert uow.practice.active_plan(subject_id) is None
+            with pytest.raises(LookupError):
+                uow.practice.create_plan(subject_id, PLAN, date(2026, 10, 14), now, {})
+        with pytest.raises(TypeError), uow_factory(user_id) as uow:
+            uow.practice.create_plan(subject_id, PLAN, date(2026, 10, 14), now, {"x": object()})
+
+    # Sessions and items
+
+    def test_create_session_stores_its_items_in_seq_order(
+        self, uow_factory: UowFactory, user_id: UUID, now: datetime
+    ) -> None:
+        with uow_factory(user_id) as uow:
+            world = practice_world(uow, now)
+            plan = uow.practice.create_plan(world.subject_id, PLAN, date(2026, 10, 14), now, {})
+            items = (
+                drawn(world.pool, 2, Draw(entries=(3,))),
+                drawn(world.quiz, 1),
+            )
+            session = open_practice(uow, world, now, items=items, mode="app", plan_id=plan.id)
+        assert session == PracticeSessionRow(
+            id=session.id,
+            subject_id=world.subject_id,
+            plan_id=plan.id,
+            mode="app",
+            status="open",
+            started_at=now,
+            ended_at=None,
+            self_rating=None,
+            summary=None,
+            item_count=2,
+        )
+        with uow_factory(user_id) as uow:
+            assert uow.practice.session(session.id) == session
+            assert uow.practice.open_session() == session
+            rows = uow.practice.items(session.id)
+        assert [(r.seq, r.instance_id, r.draw, r.draw_seed) for r in rows] == [
+            (1, world.quiz.id, Draw(), items[1].draw_seed),
+            (2, world.pool.id, Draw(entries=(3,)), items[0].draw_seed),
+        ]
+        assert rows[0] == PracticeItemRow(
+            id=items[1].item_id,
+            session_id=session.id,
+            seq=1,
+            instance_id=world.quiz.id,
+            draw_seed=items[1].draw_seed,
+            draw=Draw(),
+            shown_at=None,
+            answer=None,
+            correct=None,
+            score=None,
+            answered_at=None,
+            source=None,
+        )
+        with uow_factory(user_id) as uow:
+            assert uow.practice.item(items[0].item_id) == rows[1]
+            assert uow.practice.item(uuid4()) is None
+            assert uow.practice.session(uuid4()) is None
+
+    def test_ruling_30_one_open_practice_session_per_user(
+        self, uow_factory: UowFactory, user_id: UUID, other_user_id: UUID, now: datetime
+    ) -> None:
+        with uow_factory(user_id) as uow:
+            world = practice_world(uow, now)
+            first = open_practice(uow, world, now)
+        with pytest.raises(OpenPracticeExists), uow_factory(user_id) as uow:
+            open_practice(uow, world, now)
+        with uow_factory(user_id) as uow:
+            # Independent of English lessons: an open lesson does not block practice.
+            start_session(uow, first_item(uow), now)
+            uow.practice.mark_incomplete(first.id, now + timedelta(minutes=1))
+            second = open_practice(uow, world, now + timedelta(minutes=2))
+            assert uow.practice.open_session() == second
+            gone = present(uow.practice.session(first.id))
+            assert (gone.status, gone.ended_at) == ("incomplete", now + timedelta(minutes=1))
+            uow.practice.mark_incomplete(first.id, now + timedelta(hours=1))  # no-op now
+            assert present(uow.practice.session(first.id)).ended_at == now + timedelta(minutes=1)
+        with uow_factory(other_user_id) as uow:
+            theirs = practice_world(uow, now)
+            open_practice(uow, theirs, now)  # another user's open session does not count
+            assert present(uow.practice.open_session()).subject_id == theirs.subject_id
+
+    def test_review_focus_5_practice_is_isolated_per_user(
+        self, uow_factory: UowFactory, user_id: UUID, other_user_id: UUID, now: datetime
+    ) -> None:
+        with uow_factory(user_id) as uow:
+            world = practice_world(uow, now)
+            item = drawn(world.quiz, 1)
+            session = open_practice(uow, world, now, items=(item,))
+        with uow_factory(other_user_id) as uow:
+            assert uow.practice.session(session.id) is None
+            assert uow.practice.items(session.id) == ()
+            assert uow.practice.item(item.item_id) is None
+            assert uow.practice.open_session() is None
+            assert uow.practice.mark_shown(item.item_id, now) is None
+            assert uow.practice.candidates(world.subject_id) == ()
+            with pytest.raises(LookupError):
+                answer_item(uow, item.item_id, now, shown=False)
+            uow.practice.close(session.id, summary={"items": 1}, self_rating=None, now=now)
+            uow.practice.mark_incomplete(session.id, now)
+            with pytest.raises(LookupError):
+                uow.practice.add_item(session.id, drawn(world.quiz, 2), now)
+            with pytest.raises(LookupError):
+                open_practice(uow, world, now)  # my subject
+        with uow_factory(user_id) as uow:
+            mine = present(uow.practice.session(session.id))
+            assert (mine.status, present(uow.practice.item(item.item_id)).shown_at) == (
+                "open",
+                None,
+            )
+
+    def test_create_session_refuses_foreign_or_mismatched_rows(
+        self, uow_factory: UowFactory, user_id: UUID, now: datetime
+    ) -> None:
+        with uow_factory(user_id) as uow:
+            world = practice_world(uow, now)
+            other_plan = uow.practice.create_plan(
+                world.other_subject_id, PLAN, date(2026, 10, 14), now, {}
+            )
+        attempts: list[dict[str, Any]] = [
+            {"subject_id": uuid4(), "plan_id": None, "items": ()},
+            {"subject_id": world.subject_id, "plan_id": other_plan.id, "items": ()},
+            {"subject_id": world.subject_id, "plan_id": uuid4(), "items": ()},
+            {"subject_id": world.subject_id, "plan_id": None, "items": (drawn(world.foreign, 1),)},
+        ]
+        for attempt in attempts:
+            with pytest.raises(LookupError), uow_factory(user_id) as uow:
+                uow.practice.create_session(uuid4(), mode="text", now=now, **attempt)
+        twice = (drawn(world.quiz, 1), drawn(world.loose_quiz, 1))
+        with pytest.raises(ValueError), uow_factory(user_id) as uow:
+            open_practice(uow, world, now, items=twice)
+        with uow_factory(user_id) as uow:
+            assert uow.practice.open_session() is None
+
+    def test_ruling_63_mark_shown_keeps_the_first_moment(
+        self, uow_factory: UowFactory, user_id: UUID, now: datetime
+    ) -> None:
+        with uow_factory(user_id) as uow:
+            world = practice_world(uow, now)
+            item = drawn(world.quiz, 1)
+            open_practice(uow, world, now, items=(item,))
+        with uow_factory(user_id) as uow:
+            assert uow.practice.mark_shown(item.item_id, now) == now
+            assert uow.practice.mark_shown(item.item_id, now + timedelta(seconds=30)) == now
+            assert uow.practice.mark_shown(uuid4(), now) is None
+            assert present(uow.practice.item(item.item_id)).shown_at == now
+
+    def test_record_keeps_the_first_answer_and_needs_a_showing(
+        self, uow_factory: UowFactory, user_id: UUID, now: datetime
+    ) -> None:
+        later = now + timedelta(seconds=41)
+        with uow_factory(user_id) as uow:
+            world = practice_world(uow, now)
+            item = drawn(world.quiz, 1)
+            open_practice(uow, world, now, items=(item,))
+        with pytest.raises(ValueError), uow_factory(user_id) as uow:
+            answer_item(uow, item.item_id, later, shown=False)
+        with uow_factory(user_id) as uow:
+            uow.practice.mark_shown(item.item_id, now)
+            stored = present(answer_item(uow, item.item_id, later, score=0))
+            again = answer_item(uow, item.item_id, later + timedelta(seconds=5), score=100)
+        assert again is None
+        assert (stored.correct, stored.score, stored.answered_at, stored.source) == (
+            False,
+            0,
+            later,
+            "chat",
+        )
+        assert stored.answer == {"answer_kind": "number", "value": "4"}
+        with uow_factory(user_id) as uow:
+            assert uow.practice.item(item.item_id) == stored
+        with pytest.raises(LookupError), uow_factory(user_id) as uow:
+            answer_item(uow, uuid4(), later)
+
+    def test_close_stores_the_summary_once(
+        self, uow_factory: UowFactory, user_id: UUID, now: datetime
+    ) -> None:
+        later = now + timedelta(minutes=12)
+        with uow_factory(user_id) as uow:
+            world = practice_world(uow, now)
+            session = open_practice(uow, world, now)
+            uow.practice.close(session.id, summary={"items": 0}, self_rating=3, now=later)
+            uow.practice.close(session.id, summary={"items": 9}, self_rating=1, now=now)
+            closed = present(uow.practice.session(session.id))
+            assert uow.practice.open_session() is None
+        assert (closed.status, closed.ended_at, closed.self_rating, closed.summary) == (
+            "closed",
+            later,
+            3,
+            {"items": 0},
+        )
+
+    def test_add_item_appends_a_shown_showing_to_an_open_session(
+        self, uow_factory: UowFactory, user_id: UUID, now: datetime
+    ) -> None:
+        later = now + timedelta(minutes=1)
+        with uow_factory(user_id) as uow:
+            world = practice_world(uow, now)
+            session = open_practice(uow, world, now, items=(drawn(world.quiz, 1),), mode="class")
+            extra = drawn(world.pool, 2, Draw(entries=(1,)))
+            added = uow.practice.add_item(session.id, extra, later)
+            assert [r.id for r in uow.practice.items(session.id)] == [
+                uow.practice.items(session.id)[0].id,
+                extra.item_id,
+            ]
+            assert present(uow.practice.session(session.id)).item_count == 1
+        assert (added.seq, added.shown_at, added.draw, added.instance_id) == (
+            2,
+            later,
+            Draw(entries=(1,)),
+            world.pool.id,
+        )
+        with pytest.raises(LookupError), uow_factory(user_id) as uow:
+            uow.practice.add_item(session.id, drawn(world.foreign, 3), later)
+        with pytest.raises(ValueError), uow_factory(user_id) as uow:
+            uow.practice.add_item(session.id, drawn(world.quiz, 2), later)
+        with uow_factory(user_id) as uow:
+            uow.practice.close(session.id, summary={}, self_rating=None, now=later)
+        with pytest.raises(ValueError), uow_factory(user_id) as uow:
+            uow.practice.add_item(session.id, drawn(world.quiz, 3), later)
+        with pytest.raises(LookupError), uow_factory(user_id) as uow:
+            uow.practice.add_item(uuid4(), drawn(world.quiz, 3), later)
+
+    def test_completed_count_follows_attendance_rules(
+        self, uow_factory: UowFactory, user_id: UUID, other_user_id: UUID, now: datetime
+    ) -> None:
+        def at(minutes: int) -> datetime:
+            return now + timedelta(minutes=minutes)
+
+        with uow_factory(user_id) as uow:
+            world = practice_world(uow, now)
+            plan = uow.practice.create_plan(world.subject_id, PLAN, date(2026, 10, 14), now, {})
+            other_plan = uow.practice.create_plan(
+                world.other_subject_id, PLAN, date(2026, 10, 14), now, {}
+            )
+            # A closed text session counts, with or without answers.
+            done = open_practice(uow, world, at(0), plan_id=plan.id)
+            uow.practice.close(done.id, summary={}, self_rating=None, now=at(1))
+            # An incomplete app session does not.
+            dropped = open_practice(uow, world, at(2), mode="app", plan_id=plan.id)
+            uow.practice.mark_incomplete(dropped.id, at(3))
+            # A closed class session without an answer does not (spec 15.13 D5).
+            empty = open_practice(uow, world, at(4), mode="class", plan_id=plan.id)
+            uow.practice.close(empty.id, summary={}, self_rating=None, now=at(5))
+            # A class session with an answer counts while open and after it is replaced.
+            item = drawn(world.quiz, 1)
+            taught = open_practice(uow, world, at(6), items=(item,), mode="class", plan_id=plan.id)
+            answer_item(uow, item.item_id, at(7))
+            assert uow.practice.completed_count(plan.id) == 2
+            uow.practice.mark_incomplete(taught.id, at(8))
+            assert uow.practice.completed_count(plan.id) == 2
+            assert uow.practice.completed_count(other_plan.id) == 0
+            assert uow.practice.completed_count(uuid4()) == 0
+        with uow_factory(other_user_id) as uow:
+            assert uow.practice.completed_count(plan.id) == 0
+
+    def test_candidates_are_active_exercises_with_their_last_showing(
+        self, uow_factory: UowFactory, user_id: UUID, now: datetime
+    ) -> None:
+        first, second = now + timedelta(minutes=1), now + timedelta(minutes=9)
+        with uow_factory(user_id) as uow:
+            world = practice_world(uow, now)
+            a, b, c = drawn(world.quiz, 1), drawn(world.quiz, 2), drawn(world.pool, 3)
+            session = open_practice(uow, world, now, items=(a, b, c))
+            uow.practice.mark_shown(a.item_id, second)
+            uow.practice.mark_shown(b.item_id, first)
+            uow.practice.close(session.id, summary={}, self_rating=None, now=second)
+            found = uow.practice.candidates(world.subject_id)
+            assert uow.practice.candidates(uuid4()) == ()
+        expected_ids = sorted(
+            [world.quiz.id, world.loose_quiz.id, world.pool.id, world.replacement.id]
+        )
+        assert [c.instance_id for c in found] == expected_ids
+        by_id = {c.instance_id: c for c in found}
+        assert by_id[world.quiz.id].last_shown_at == second
+        assert by_id[world.pool.id].last_shown_at is None  # drawn but never handed out
+        assert by_id[world.loose_quiz.id].last_shown_at is None
+        assert by_id[world.quiz.id].spec == world.numeric.spec
+        assert by_id[world.quiz.id].params == world.quiz.params
+        assert by_id[world.pool.id].spec == world.flash.spec
+        assert world.retired.id not in by_id and world.display.id not in by_id
+
+    # Progress facts (ruling 70; spec 16.12 fixture)
+
+    def test_progress_facts_on_the_shared_fixture(
+        self, uow_factory: UowFactory, user_id: UUID, other_user_id: UUID, now: datetime
+    ) -> None:
+        # The learner is in Mexico City (UTC-6): 05:50 UTC is 23:50 the day before.
+        day1_late = datetime(2026, 10, 14, 5, 50, tzinfo=UTC)
+        day2_early = datetime(2026, 10, 14, 6, 10, tzinfo=UTC)
+        day2_later = datetime(2026, 10, 14, 9, 0, tzinfo=UTC)
+        with uow_factory(user_id) as uow:
+            uow.users.set_timezone("America/Mexico_City")
+            world = practice_world(uow, now)
+            items = (
+                drawn(world.quiz, 1),
+                drawn(world.loose_quiz, 2),
+                drawn(world.pool, 3, Draw(entries=(2,))),
+                drawn(world.quiz, 4),
+            )
+            session = open_practice(uow, world, day1_late - timedelta(minutes=5), items=items)
+            for item, at, score in zip(
+                items[:3], (day1_late, day2_early, day2_later), (100, 0, 67), strict=True
+            ):
+                uow.practice.mark_shown(item.item_id, at - timedelta(seconds=40))
+                uow.practice.record(
+                    item.item_id,
+                    answer={"answer_kind": "value", "value": "ZQ-SECRET-ANSWER"},
+                    correct=score == 100,
+                    score=score,
+                    source="app",
+                    now=at,
+                )
+            uow.practice.mark_shown(items[3].item_id, day2_later + timedelta(minutes=1))
+            uow.practice.close(session.id, summary={}, self_rating=None, now=day2_later)
+            dropped = open_practice(uow, world, day2_later + timedelta(minutes=5))
+            uow.practice.mark_incomplete(dropped.id, day2_later + timedelta(minutes=6))
+            uow.audit.record(
+                "notes_searched",
+                {"subject_id": str(world.subject_id), "hits": 1, "fuzzy": False},
+                now,
+            )
+            uow.audit.record("notes_searched", {"subject_id": None, "hits": 0, "fuzzy": True}, now)
+            uow.audit.record(
+                "notes_searched",
+                {"subject_id": str(world.other_subject_id), "hits": 2, "fuzzy": False},
+                now,
+            )
+        with uow_factory(other_user_id) as uow:  # Beto's rows never reach Ana's facts
+            theirs = practice_world(uow, now)
+            item = drawn(theirs.quiz, 1)
+            open_practice(uow, theirs, now, items=(item,))
+            answer_item(uow, item.item_id, now + timedelta(seconds=5))
+            uow.audit.record("notes_searched", {"subject_id": None, "hits": 0, "fuzzy": False}, now)
+            assert uow.progress.showings(world.subject_id) == ()
+            assert uow.progress.sessions(world.subject_id) == ()
+            assert uow.progress.concepts(world.subject_id) == ()
+            assert uow.progress.templates(world.subject_id) == ()
+            assert uow.progress.practice_days(world.subject_id, "UTC") == ()
+            assert uow.progress.activity(world.subject_id) == ActivityFacts((), (), (), ())
+            assert uow.progress.unscoped_search_count() == 1
+        with uow_factory(user_id) as uow:
+            showings = uow.progress.showings(world.subject_id)
+            days_mx = uow.progress.practice_days(world.subject_id, "America/Mexico_City")
+            days_utc = uow.progress.practice_days(world.subject_id, "UTC")
+            sessions = uow.progress.sessions(world.subject_id)
+            activity = uow.progress.activity(world.subject_id)
+            concepts = uow.progress.concepts(world.subject_id)
+            templates = uow.progress.templates(world.subject_id)
+            unscoped = uow.progress.unscoped_search_count()
+            assert uow.progress.showings(uuid4()) == ()
+        assert showings == (
+            ShowingFact(
+                world.quiz.id,
+                world.numeric.id,
+                world.concept_id,
+                "numeric",
+                True,
+                100,
+                day1_late - timedelta(seconds=40),
+                day1_late,
+            ),
+            ShowingFact(
+                world.loose_quiz.id,
+                world.numeric.id,
+                None,
+                "numeric",
+                False,
+                0,
+                day2_early - timedelta(seconds=40),
+                day2_early,
+            ),
+            ShowingFact(
+                world.pool.id,
+                world.flash.id,
+                None,
+                "exact_text",
+                False,
+                67,
+                day2_later - timedelta(seconds=40),
+                day2_later,
+            ),
+        )
+        assert days_mx == (day1_late, day2_early)  # by the learner's day, not UTC's
+        assert days_utc == (day1_late,)
+        assert sessions == (
+            SessionFact(
+                started_at=day1_late - timedelta(minutes=5),
+                status="closed",
+                last_activity_at=day2_later + timedelta(minutes=1),
+            ),
+            SessionFact(
+                started_at=day2_later + timedelta(minutes=5),
+                status="incomplete",
+                last_activity_at=day2_later + timedelta(minutes=5),
+            ),
+        )
+        assert activity.notes == (now,)
+        assert activity.templates == (now, now, now)
+        assert len(activity.instances) == 6 and set(activity.instances) == {now}
+        assert activity.searches == (now,)
+        assert concepts == (ConceptFact(world.concept_id, "Suma", "suma"),)
+        assert [(t.name, t.grading_kind, t.status) for t in templates] == [
+            ("Respuesta numérica", "numeric", "active"),
+            ("Tabla de la lección", "none", "active"),
+            ("Tarjetas de vocabulario", "exact_text", "active"),
+        ]
+        assert unscoped == 1
+        assert "ZQ-SECRET-ANSWER" not in repr((showings, sessions, activity))
+
+    def test_progress_templates_include_retired_ones(
+        self, uow_factory: UowFactory, user_id: UUID, now: datetime
+    ) -> None:
+        with uow_factory(user_id) as uow:
+            subject_id = uow.subjects.create(sample_subject(), now).id
+            old = uow.templates.create(subject_id, spec(NUMERIC), HTML, 1, now)
+            new = uow.templates.create(subject_id, spec(NUMERIC), HTML + " ", 1, now, old.id)
+            facts = uow.progress.templates(subject_id)
+        assert sorted((t.id, t.status) for t in facts) == sorted(
+            [(old.id, "retired"), (new.id, "active")]
+        )

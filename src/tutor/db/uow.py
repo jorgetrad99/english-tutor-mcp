@@ -28,7 +28,9 @@ from tutor.services.ports import (
     InstanceRepo,
     NoteRepo,
     PlanRepo,
+    PracticeRepo,
     ProfileRepo,
+    ProgressRepo,
     ResolvedUser,
     ReviewRepo,
     SessionRepo,
@@ -96,6 +98,10 @@ class PgUnitOfWork:
     notes: NoteRepo
     templates: TemplateRepo
     instances: InstanceRepo
+    # Declared for the port only: the Postgres repositories come with migration 0007 (slice B
+    # Task 3), so practice and progress run on the memory store until then.
+    practice: PracticeRepo
+    progress: ProgressRepo
 
     def __init__(self, conn: Connection, user_id: UUID) -> None:
         self.conn = conn
