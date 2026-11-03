@@ -14,7 +14,7 @@ from tutor.services.context import Services
 from tutor.services.errors import ServiceError
 from tutor.services.memory import MemoryStore, MemorySubjectRepo
 from tutor.services.ports import SubjectRow
-from tutor.services.subject_views import SaveSubjectResult, SubjectsView, SubjectView
+from tutor.services.subject_views import PlanStatus, SaveSubjectResult, SubjectsView, SubjectView
 from tutor.services.subjects import get_subjects, save_subject
 
 from .conftest import NOW, FixedClock, create_subject, subject_input
@@ -34,7 +34,7 @@ def test_get_subjects_before_any_subject_returns_the_questions(
     assert get_subjects(svc, user_id) == SubjectsView(subjects=(), questions=SUBJECT_QUESTIONS)
 
 
-def test_save_subject_creates_with_no_plan_yet(
+def test_save_subject_creates_the_subject_and_its_first_plan(
     svc: Services, store: MemoryStore, user_id: UUID
 ) -> None:
     target = TODAY + timedelta(days=60)
@@ -55,21 +55,41 @@ def test_save_subject_creates_with_no_plan_yet(
                 target_date=target,
                 status="active",
             ),
-            plan_status=None,  # ruling 5: no plan in this slice
+            plan_status=PlanStatus(  # slice B ruling 29: the first plan starts today
+                version=1,
+                start_date=TODAY,
+                total_sessions=27,  # 3 a week for ceil(60 / 7) = 9 weeks
+                expected_sessions=0,
+                completed_sessions=0,
+                missed=0,
+                projected_end=TODAY + timedelta(days=63),
+                delay_days=3,
+                adherence=None,
+            ),
         ),
         created=True,
-        plan_changed=False,  # ruling 6
+        plan_changed=True,
     )
+    [plan] = store.tables.practice_plans.values()
     assert events(store, user_id) == [
+        (
+            "practice_plan_created",
+            {
+                "subject_id": str(result.subject.id),
+                "plan_id": str(plan.id),
+                "version": 1,
+                "reason": "created",
+            },
+        ),
         (
             "subject_saved",
             {
                 "subject_id": str(result.subject.id),
                 "created": True,
                 "subject_status": "active",
-                "plan_changed": False,
+                "plan_changed": True,
             },
-        )
+        ),
     ]
     assert get_subjects(svc, user_id).subjects == (result.subject,)
 
@@ -85,18 +105,18 @@ def test_save_subject_updates_in_place(
         subject_input(name="Guitarra eléctrica", status="paused", minutes_per_session=45),
         subject_id,
     )
-    assert (result.created, result.plan_changed, result.subject.id) == (False, False, subject_id)
+    # minutes_per_session changed: a second plan version (slice B ruling 29).
+    assert (result.created, result.plan_changed, result.subject.id) == (False, True, subject_id)
     subject = result.subject.subject
     assert (subject.name, subject.status, subject.minutes_per_session) == (
         "Guitarra eléctrica",
         "paused",
         45,
     )
-    assert [(e, m["created"]) for e, m in events(store, user_id)] == [
-        ("subject_saved", True),
-        ("subject_saved", False),
-    ]
-    assert events(store, user_id)[1][1]["subject_status"] == "paused"
+    saved = [m for e, m in events(store, user_id) if e == "subject_saved"]
+    assert [m["created"] for m in saved] == [True, False]
+    assert saved[1]["subject_status"] == "paused"
+    assert result.subject.plan_status is not None and result.subject.plan_status.version == 2
     with svc.uow(user_id) as uow:
         row = present(uow.subjects.get(subject_id))
     assert (row.created_at, row.updated_at) == (NOW, later)
@@ -110,7 +130,7 @@ def test_get_subjects_lists_active_first_then_by_name(svc: Services, user_id: UU
     create_subject(svc, user_id, name="Solfeo")
     views = get_subjects(svc, user_id).subjects
     assert [v.subject.name for v in views] == ["Canto", "Solfeo", "Bajo", "Piano"]
-    assert all(v.plan_status is None for v in views)
+    assert all(v.plan_status is not None and v.plan_status.version == 1 for v in views)
 
 
 def test_validation_errors_list_every_field_once_and_write_nothing(

@@ -13,6 +13,7 @@ from typing import Literal
 from uuid import UUID
 
 from tutor.domain.notes import Origin
+from tutor.domain.practice import KindResult, PracticeMode
 from tutor.domain.subjects import Subject, SubjectQuestion
 from tutor.domain.templates import (
     GradingKind,
@@ -35,7 +36,8 @@ InstanceOutcome = Literal["new", "existing", "superseded"]
 
 @dataclass(frozen=True, slots=True)
 class PlanStatus:
-    """Spec 6.1 shape, filled by slice B; this slice returns None for every subject (ruling 5)."""
+    """Spec 6.1: the subject's active plan at the learner's local date (slice B rulings 28 and
+    29); None for a subject saved before slice B until its next save."""
 
     version: int
     start_date: date
@@ -208,3 +210,77 @@ class InstanceView:
     status: InstanceStatus
     document: str
     text: str
+
+
+# --- practice (spec 6.2 amended by 15; slice B) -------------------------------------------------
+
+ResultOutcome = Literal["new", "existing"]
+
+
+@dataclass(frozen=True, slots=True)
+class PracticeItemView:
+    """One showing as a client sees it: prompt parameters and the stored draw only, never an
+    answer key, a reveal or a pool. `document` is the composed template (artifact bridge until
+    slice C gives the app its own), None in text mode; `text` always states the item."""
+
+    item_id: UUID
+    session_id: UUID
+    seq: int
+    instance_id: UUID
+    practice_kind: PracticeKind | None
+    grading_kind: GradingKind
+    needs_view: bool
+    document: str | None
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class PracticeStart:
+    session_id: UUID
+    mode: PracticeMode
+    item_count: int
+    short: bool  # fewer than four items could be drawn (ruling 35)
+    first: PracticeItemView | None
+
+
+@dataclass(frozen=True, slots=True)
+class NextItem:
+    session_id: UUID
+    done: bool
+    item: PracticeItemView | None
+    answered: int
+    remaining: int
+
+
+@dataclass(frozen=True, slots=True)
+class ShownExercise:
+    session_id: UUID
+    mode: PracticeMode
+    item: PracticeItemView
+
+
+@dataclass(frozen=True, slots=True)
+class GradedResult:
+    """The server's grade of one showing; `reveal` holds the instance's reveal parameters and
+    the drawn entries' explanations (learner data)."""
+
+    session_id: UUID
+    item_id: UUID
+    outcome: ResultOutcome
+    correct: bool | None
+    score: int
+    reveal: Mapping[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class PracticeSummary:
+    session_id: UUID
+    items: int
+    answered: int
+    unanswered: int
+    by_kind: tuple[KindResult, ...]
+    minutes: int
+    short: bool
+    self_rating: int | None
+    plan_status: PlanStatus | None
+    streak_days: int  # the subject's current streak (spec 16.13 Q2), never the English one

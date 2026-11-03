@@ -236,11 +236,11 @@ async def test_onboarding_then_save_subject_then_update() -> None:
                 "target_date": "2027-03-01",
             },
         )
-        assert (saved["created"], saved["plan_changed"]) == (True, False)
+        assert (saved["created"], saved["plan_changed"]) == (True, True)  # the first plan
         subject = saved["subject"]
         assert subject["subject_status"] == "active"
         assert subject["exercise_kinds"] == ["quiz", "drill", "exercise"]
-        assert subject["plan_status"] is None
+        assert subject["plan_status"]["version"] == 1
         assert saved["response_rules"] == rules.SAVE_SUBJECT
 
         listed = await call(client, "get_subjects", {})
