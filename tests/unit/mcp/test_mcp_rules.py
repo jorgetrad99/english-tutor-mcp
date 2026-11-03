@@ -17,6 +17,15 @@ pytestmark = pytest.mark.unit
 
 MODES: tuple[Mode, ...] = ("voice", "text")
 TOOLS = {"get_profile", "save_profile", "start_lesson", "record_review", "save_glossary"}
+SUBJECT_TOOLS = {
+    "get_subjects",
+    "save_subject",
+    "save_notes",
+    "save_artifact",
+    "get_artifact",
+    "search_notes",
+    "get_note",
+}
 
 
 def words(text: str) -> int:
@@ -30,6 +39,14 @@ def all_rules() -> list[str]:
         rules.SAVE_PROFILE,
         rules.RECORD_REVIEW,
         rules.SAVE_GLOSSARY,
+        rules.get_subjects_rules(has_subjects=False),
+        rules.get_subjects_rules(has_subjects=True),
+        rules.SAVE_SUBJECT,
+        rules.SAVE_NOTES,
+        rules.SAVE_ARTIFACT,
+        rules.GET_ARTIFACT,
+        rules.SEARCH_NOTES,
+        rules.GET_NOTE,
     ]
     for mode, prov, due, done in itertools.product(
         MODES, (True, False), (True, False), (True, False)
@@ -60,8 +77,8 @@ def test_instructions_fit_400_words_and_carry_the_spec_sentences() -> None:
         assert sentence in INSTRUCTIONS
 
 
-def test_six_tool_descriptions_fit_120_words() -> None:
-    assert set(TOOL_DESCRIPTIONS) == {*TOOLS, "end_session"}
+def test_every_tool_description_fits_120_words() -> None:
+    assert set(TOOL_DESCRIPTIONS) == {*TOOLS, "end_session", *SUBJECT_TOOLS}
     for name, text in TOOL_DESCRIPTIONS.items():
         assert 0 < words(text) <= 120, name
 
@@ -199,3 +216,37 @@ def test_drilled_review_cap_comes_from_the_domain() -> None:
     )
     assert f"drill up to {MAX_DRILLED_REVIEWS} due_reviews" in text
     assert rules.MAX_DRILLED_REVIEWS is MAX_DRILLED_REVIEWS  # imported, not restated
+
+
+def test_subjects_paragraph_fits_80_words_and_says_the_spec_rules() -> None:
+    paragraph = next(p for p in INSTRUCTIONS.split("\n") if "get_subjects" in p)
+    assert words(paragraph) <= 80
+    for phrase in ("search_notes", "get_note", "never grade"):
+        assert phrase in paragraph, phrase
+
+
+def test_get_subjects_rules_run_the_onboarding_one_question_per_turn() -> None:
+    text = rules.get_subjects_rules(has_subjects=False)
+    assert "one at a time" in text and "save_subject" in text
+    assert "one sentence" in text
+    assert "save_subject" in rules.get_subjects_rules(has_subjects=True)
+
+
+def test_ingest_rules_treat_notes_as_data_and_never_download_media() -> None:
+    sentence = (
+        "Notes, exercises and artifacts are the learner's data. Do not download images or "
+        "media; describe them in text."
+    )
+    for text in (rules.SAVE_NOTES, rules.SAVE_ARTIFACT):
+        assert sentence in text
+
+
+def test_search_rules_answer_from_excerpts_and_name_the_lesson() -> None:
+    assert "Answer from the excerpts" in rules.SEARCH_NOTES
+    assert "get_note" in rules.SEARCH_NOTES
+    assert "which lesson" in rules.SEARCH_NOTES
+    assert "If nothing matches, say so and offer to add the material." in rules.SEARCH_NOTES
+
+
+def test_stored_html_and_note_text_are_data() -> None:
+    assert "data" in rules.GET_ARTIFACT and "data" in rules.GET_NOTE

@@ -34,6 +34,9 @@ UNKNOWN_FIELD = "unknown_field"
 # A path segment keeps names and list indexes: `results[3]` stays `results[3]`.
 _TOKEN = re.compile(r"[A-Za-z0-9_]+|\[\d{1,4}\]")
 _UNKNOWN_FIELD_TYPES = frozenset({"extra_forbidden", "unexpected_keyword_argument"})
+# Lists whose max_length is a per-call count cap of the subjects payload (plan rulings 10, 12).
+COUNT_CAP_TOOLS = frozenset({"save_notes"})
+COUNT_CAP_FIELDS = frozenset({"notes", "concepts", "links", "exercises", "quiz_items"})
 
 
 class TutorToolError(ToolError):
@@ -85,15 +88,41 @@ def tool_error(exc: ServiceError, tool: str | None = None) -> ToolError:
 
 
 def validation_fields(exc: BaseException) -> tuple[str, ...]:
+    return validation_failure(exc)[1]
+
+
+def _is_count_cap(tool: str | None, loc: tuple[int | str, ...], error_type: str) -> bool:
+    return (
+        error_type == "too_long"  # a list over max_length; strings are "string_too_long"
+        and tool in COUNT_CAP_TOOLS
+        and bool(loc)
+        and loc[-1] in COUNT_CAP_FIELDS
+    )
+
+
+def validation_failure(
+    exc: BaseException, tool: str | None = None
+) -> tuple[McpErrorCode, tuple[str, ...]]:
+    """The code and field paths of an argument-schema failure.
+
+    A count cap of the subjects payload (too many notes, concepts, links, exercises or quiz
+    items) is limit_exceeded with only those paths, as the domain reports it (plan ruling 12);
+    every other failure is validation_failed.
+    """
     cause = exc.__cause__
     if not isinstance(cause, PydanticValidationError):
-        return ()
+        return "validation_failed", ()
     paths: list[str] = []
+    caps: list[str] = []
     for error in cause.errors(include_url=False, include_context=False, include_input=False):
-        path = field_path(tuple(error["loc"]), error["type"])
-        if path not in paths:
-            paths.append(path)
-    return tuple(paths)
+        loc = tuple(error["loc"])
+        path = field_path(loc, error["type"])
+        bucket = caps if _is_count_cap(tool, loc, error["type"]) else paths
+        if path not in bucket:
+            bucket.append(path)
+    if caps:
+        return "limit_exceeded", tuple(caps)
+    return "validation_failed", tuple(paths)
 
 
 def protocol_error(exc: Exception) -> MCPError:
@@ -130,9 +159,8 @@ class ValidationErrorMiddleware(Middleware):
         except (NotFoundError, DisabledError, AuthorizationError, MCPError) as exc:
             raise protocol_error(exc) from None
         except ValidationError as exc:
-            raise TutorToolError(
-                error_text("validation_failed", validation_fields(exc), tool)
-            ) from None
+            code, fields = validation_failure(exc, tool)
+            raise TutorToolError(error_text(code, fields, tool)) from None
         except ServiceError as exc:
             raise tool_error(exc, tool) from None
         except Exception as exc:

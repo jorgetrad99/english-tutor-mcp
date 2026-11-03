@@ -1,4 +1,5 @@
-"""FastMCP server: six tools, the start-lesson prompt and the instructions (spec section 8).
+"""FastMCP server: six English tools, seven subjects tools, the start-lesson prompt and the
+instructions (spec section 8; subjects spec 7.1).
 
 Tools are plain `def` functions: FastMCP runs them in a worker thread with contextvars
 copied, so the blocking services and get_access_token() work inside them.
@@ -32,8 +33,10 @@ from tutor.mcp.observe import (
 from tutor.mcp.ratelimit import SlidingWindowLimiter
 from tutor.services import glossary as glossary_svc
 from tutor.services import lesson as lesson_svc
+from tutor.services import notes as notes_svc
 from tutor.services import profile as profile_svc
 from tutor.services import session_end as end_svc
+from tutor.services import subjects as subjects_svc
 from tutor.services.context import Services
 from tutor.services.errors import ServiceError
 from tutor.services.ports import IdentityResolver
@@ -135,6 +138,141 @@ def _register(
     tool.parameters.update(inputs)
     tool.output_schema.clear()
     tool.output_schema.update(outputs)
+
+
+def _register_subject_tools(mcp: FastMCP, svc: Services) -> None:
+    """The seven subjects tools (subjects spec 7.1, first seven rows)."""
+
+    def get_subjects() -> s.GetSubjectsOutput:
+        def run() -> s.GetSubjectsOutput:
+            view = subjects_svc.get_subjects(svc, _user())
+            return s.GetSubjectsOutput.of(
+                view, rules.get_subjects_rules(has_subjects=bool(view.subjects))
+            )
+
+        return _guard("get_subjects", run)
+
+    def save_subject(
+        name: s.SubjectName,
+        preference: s.PreferenceField,
+        exercise_kinds: s.ExerciseKindsField,
+        minutes_per_session: s.MinutesPerSession,
+        sessions_per_week: s.SessionsPerWeek,
+        subject_id: s.SubjectIdOptional = None,
+        goal_text: s.SubjectGoalText = None,
+        context_text: s.SubjectContextText = None,
+        target_date: s.SubjectTargetDate = None,
+        subject_status: s.SubjectStatusField = None,
+    ) -> s.SaveSubjectOutput:
+        def run() -> s.SaveSubjectOutput:
+            args = s.SaveSubjectInput(
+                name=name,
+                preference=preference,
+                exercise_kinds=exercise_kinds,
+                minutes_per_session=minutes_per_session,
+                sessions_per_week=sessions_per_week,
+                subject_id=subject_id,
+                goal_text=goal_text,
+                context_text=context_text,
+                target_date=target_date,
+                subject_status=subject_status,
+            )
+            try:
+                result = subjects_svc.save_subject(
+                    svc, _user(), args.to_subject_input(), args.subject_id
+                )
+            except ServiceError as exc:
+                raise s.mcp_fields(exc) from None
+            return s.SaveSubjectOutput.of(result, rules.SAVE_SUBJECT)
+
+        return _guard("save_subject", run)
+
+    def save_notes(
+        subject_id: s.SubjectIdField, notes: s.NotesField, source: s.SourceField = None
+    ) -> s.SaveNotesOutput:
+        def run() -> s.SaveNotesOutput:
+            args = s.SaveNotesInput(subject_id=subject_id, notes=notes, source=source)
+            try:
+                result = notes_svc.save_notes(
+                    svc, _user(), subject_id, args.to_source_input(), args.to_note_inputs()
+                )
+            except ServiceError as exc:
+                raise s.mcp_fields(exc) from None
+            return s.SaveNotesOutput.of(result, rules.SAVE_NOTES)
+
+        return _guard("save_notes", run)
+
+    def save_artifact(
+        note_id: s.NoteIdField,
+        artifact_kind: s.ArtifactKindField,
+        title: s.ArtifactTitle,
+        html: s.ArtifactHtml,
+    ) -> s.SaveArtifactOutput:
+        def run() -> s.SaveArtifactOutput:
+            saved = notes_svc.save_artifact(svc, _user(), note_id, artifact_kind, title, html)
+            return s.SaveArtifactOutput.of(saved, rules.SAVE_ARTIFACT)
+
+        return _guard("save_artifact", run)
+
+    def get_artifact(artifact_id: s.ArtifactIdField) -> s.GetArtifactOutput:
+        def run() -> s.GetArtifactOutput:
+            view = notes_svc.get_artifact(svc, _user(), artifact_id)
+            return s.GetArtifactOutput.of(view, rules.GET_ARTIFACT)
+
+        return _guard("get_artifact", run)
+
+    def search_notes(
+        query: s.SearchQuery,
+        subject_id: s.SearchSubjectId = None,
+        limit: s.SearchLimit = s.DEFAULT_SEARCH_LIMIT,
+    ) -> s.SearchNotesOutput:
+        def run() -> s.SearchNotesOutput:
+            found = notes_svc.search_notes(svc, _user(), query, subject_id, limit)
+            return s.SearchNotesOutput.of(found, rules.SEARCH_NOTES)
+
+        return _guard("search_notes", run)
+
+    def get_note(
+        note_id: s.NoteIdField,
+        passage_from: s.PassageFrom = None,
+        passage_to: s.PassageTo = None,
+    ) -> s.GetNoteOutput:
+        def run() -> s.GetNoteOutput:
+            view = notes_svc.get_note(svc, _user(), note_id, passage_from, passage_to)
+            return s.GetNoteOutput.of(view, rules.GET_NOTE)
+
+        return _guard("get_note", run)
+
+    def read(title: str) -> ToolAnnotations:
+        return ToolAnnotations(title=title, read_only_hint=True, open_world_hint=False)
+
+    _register(mcp, get_subjects, s.GetSubjectsInput, read("Get subjects"))
+    _register(
+        mcp,
+        save_subject,
+        s.SaveSubjectInput,
+        ToolAnnotations(title="Save subject", destructive_hint=False, open_world_hint=False),
+    )
+    _register(
+        mcp,
+        save_notes,
+        s.SaveNotesInput,
+        ToolAnnotations(
+            title="Save notes",
+            idempotent_hint=True,
+            destructive_hint=False,
+            open_world_hint=False,
+        ),
+    )
+    _register(
+        mcp,
+        save_artifact,
+        s.SaveArtifactInput,
+        ToolAnnotations(title="Save artifact", destructive_hint=False, open_world_hint=False),
+    )
+    _register(mcp, get_artifact, s.GetArtifactInput, read("Get artifact"))
+    _register(mcp, search_notes, s.SearchNotesInput, read("Search notes"))
+    _register(mcp, get_note, s.GetNoteInput, read("Get note"))
 
 
 def build_mcp(
@@ -314,6 +452,8 @@ def build_mcp(
             open_world_hint=False,
         ),
     )
+
+    _register_subject_tools(mcp, svc)
 
     @mcp.prompt(
         name=text.START_LESSON_PROMPT_NAME, description=text.START_LESSON_PROMPT_DESCRIPTION

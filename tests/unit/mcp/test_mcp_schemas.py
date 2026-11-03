@@ -135,6 +135,15 @@ def test_output_closed_sets_are_enums_not_open_strings() -> None:
         "already_confirmed",
     }
     assert enums["domains"] == {"it"}
+    # Subjects (plan ruling 1): names of their own, never an English one.
+    assert enums["subject_status"] == {"active", "paused", "archived"}
+    assert enums["preference"] == {"practice_first", "theory_first", "balanced"}
+    assert enums["exercise_kinds"] == {"quiz", "ear", "exercise"}
+    assert enums["choice_value"] == enums["preference"] | enums["exercise_kinds"]
+    assert enums["note_outcome"] == {"new", "existing", "superseded"}
+    assert enums["artifact_kind"] == {"lesson_view", "exercise_view", "other"}
+    assert enums["exercise_kind"] == {"technique", "repertoire", "theory", "ear", "other"}
+    assert enums["origin"] == {"mcp", "web"}
 
 
 def test_enums_are_closed_and_match_the_contract() -> None:
@@ -169,6 +178,14 @@ def test_enums_are_closed_and_match_the_contract() -> None:
         "category": {"grammar", "lexis", "word_order", "register", "other"},
         "task_result": {"achieved", "partial", "not_achieved"},
         "confidence": {"low", "medium", "high"},
+        # Subjects (plan ruling 1).
+        "preference": {"practice_first", "theory_first", "balanced"},
+        "exercise_kinds": {"quiz", "ear", "exercise"},
+        "subject_status": {"active", "paused", "archived"},
+        "source_kind": {"course", "pdf", "text", "url", "other"},
+        "link_kind": {"prerequisite", "related"},
+        "exercise_kind": {"technique", "repertoire", "theory", "ear", "other"},
+        "artifact_kind": {"lesson_view", "exercise_view", "other"},
     }
     assert enums["minutes_per_day"] == set(MINUTES_CHOICES)
 
@@ -310,6 +327,43 @@ def glossary_args() -> dict[str, Any]:
     return {"session_id": str(uuid4()), "status": "confirmed", "items": [glossary_item()]}
 
 
+def subject_args() -> dict[str, Any]:
+    return {
+        "name": "Guitarra",
+        "preference": "balanced",
+        "exercise_kinds": ["quiz"],
+        "minutes_per_session": 30,
+        "sessions_per_week": 3,
+    }
+
+
+def notes_args() -> dict[str, Any]:
+    return {
+        "subject_id": str(uuid4()),
+        "source": {"source_kind": "course", "title": "Curso"},
+        "notes": [
+            {
+                "title": "Clase 1",
+                "raw_text": "Texto",
+                "links": [{"from": "A", "to": "B", "link_kind": "related"}],
+                "exercises": [
+                    {"name": "E", "instructions": "Haz esto.", "exercise_kind": "technique"}
+                ],
+                "quiz_items": [{"question": "Q", "options": ["a", "b"], "answer_index": 0}],
+            }
+        ],
+    }
+
+
+def artifact_args() -> dict[str, Any]:
+    return {
+        "note_id": str(uuid4()),
+        "artifact_kind": "lesson_view",
+        "title": "Vista",
+        "html": "<!doctype html><html></html>",
+    }
+
+
 # (tool, valid minimal payload, where the unknown key goes; "" means the top level)
 UNKNOWN_KEY_CASES: list[tuple[str, dict[str, Any], str]] = [
     ("get_profile", {}, ""),
@@ -322,6 +376,18 @@ UNKNOWN_KEY_CASES: list[tuple[str, dict[str, Any], str]] = [
     ("end_session", end_args(), ""),
     ("end_session", end_args(), "errors.0"),
     ("end_session", end_args(), "cefr_estimate"),
+    ("get_subjects", {}, ""),
+    ("save_subject", subject_args(), ""),
+    ("save_notes", notes_args(), ""),
+    ("save_notes", notes_args(), "source"),
+    ("save_notes", notes_args(), "notes.0"),
+    ("save_notes", notes_args(), "notes.0.links.0"),
+    ("save_notes", notes_args(), "notes.0.exercises.0"),
+    ("save_notes", notes_args(), "notes.0.quiz_items.0"),
+    ("save_artifact", artifact_args(), ""),
+    ("get_artifact", {"artifact_id": str(uuid4())}, ""),
+    ("search_notes", {"query": "acorde"}, ""),
+    ("get_note", {"note_id": str(uuid4())}, ""),
 ]
 
 
@@ -454,6 +520,40 @@ EDGE_CASES: list[tuple[str, dict[str, Any], tuple[Any, ...], Any]] = [
         [review_args()["results"][0]] * (MAX_REVIEW_RESULTS + 1),
     ),
     ("record_review", review_args(), ("results",), []),
+    ("save_subject", subject_args(), ("subject_status",), "done"),
+    ("save_subject", subject_args(), ("minutes_per_session",), 9),
+    ("save_subject", subject_args(), ("minutes_per_session",), 121),
+    ("save_subject", subject_args(), ("sessions_per_week",), 8),
+    ("save_subject", subject_args(), ("exercise_kinds",), []),
+    ("save_subject", subject_args(), ("exercise_kinds",), ["quiz", "ear", "exercise", "quiz"]),
+    ("save_subject", subject_args(), ("name",), "x" * 81),
+    ("save_subject", subject_args(), ("goal_text",), "x" * 301),
+    ("save_subject", subject_args(), ("context_text",), "x" * 601),
+    ("save_notes", notes_args(), ("notes",), []),
+    ("save_notes", notes_args(), ("notes",), notes_args()["notes"] * 5),
+    ("save_notes", notes_args(), ("source", "source_kind"), "book"),
+    ("save_notes", notes_args(), ("source", "url"), "x" * 2001),
+    ("save_notes", notes_args(), ("notes", 0, "raw_text"), "x" * 6001),
+    ("save_notes", notes_args(), ("notes", 0, "title"), "x" * 201),
+    ("save_notes", notes_args(), ("notes", 0, "lesson_ref"), "x" * 121),
+    ("save_notes", notes_args(), ("notes", 0, "position"), -1),
+    ("save_notes", notes_args(), ("notes", 0, "concepts"), ["c"] * 13),
+    ("save_notes", notes_args(), ("notes", 0, "concepts"), ["x" * 81]),
+    ("save_notes", notes_args(), ("notes", 0, "links", 0, "link_kind"), "parent"),
+    ("save_notes", notes_args(), ("notes", 0, "exercises", 0, "exercise_kind"), "song"),
+    ("save_notes", notes_args(), ("notes", 0, "exercises", 0, "tempo_bpm"), 301),
+    ("save_notes", notes_args(), ("notes", 0, "exercises", 0, "duration_min"), 0),
+    ("save_notes", notes_args(), ("notes", 0, "quiz_items", 0, "options"), ["a"]),
+    ("save_notes", notes_args(), ("notes", 0, "quiz_items", 0, "answer_index"), 5),
+    ("save_notes", notes_args(), ("notes", 0, "quiz_items", 0, "explanation"), "x" * 501),
+    ("save_artifact", artifact_args(), ("artifact_kind",), "page"),
+    ("save_artifact", artifact_args(), ("title",), "x" * 201),
+    ("save_artifact", artifact_args(), ("html",), ""),
+    ("search_notes", {"query": "acorde"}, ("query",), ""),
+    ("search_notes", {"query": "acorde"}, ("query",), "x" * 201),
+    ("search_notes", {"query": "acorde"}, ("limit",), 11),
+    ("get_note", {"note_id": str(uuid4())}, ("passage_from",), 0),
+    ("get_note", {"note_id": str(uuid4())}, ("passage_to",), 0),
 ]
 
 
