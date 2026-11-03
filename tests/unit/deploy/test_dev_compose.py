@@ -173,12 +173,27 @@ def test_dockerfile_dev_target_reloads_the_editable_source_as_non_root() -> None
     assert "tutor.dev" not in runtime and "--reload" not in runtime
 
 
+def test_runtime_is_the_last_dockerfile_stage() -> None:
+    # A build without --target (docker build, or a compose build block without `target:`) builds
+    # the last stage, so the product image must be last and the dev stage above it.
+    text = (DEPLOY / "Dockerfile").read_text(encoding="utf-8")
+    froms = [line for line in text.splitlines() if line.startswith("FROM ")]
+    assert re.fullmatch(r"FROM \S+ AS runtime", froms[-1]), froms[-1]
+    names = [line.rsplit(" AS ", 1)[-1] for line in froms]
+    assert names.index("dev") < names.index("runtime")
+
+
 @pytest.mark.parametrize("name", PROD_COMPOSE)
-def test_prod_compose_files_never_carry_the_flag_or_the_dev_target(name: str) -> None:
+def test_prod_compose_files_build_the_runtime_target_and_never_carry_the_flag(name: str) -> None:
     text = (DEPLOY / name).read_text(encoding="utf-8")
     assert "TUTOR_DEV_AUTH" not in text
-    assert "target:" not in text and "tutor:dev" not in text
+    assert "target: dev" not in text and "tutor:dev" not in text
     services: dict[str, dict[str, object]] = yaml.safe_load(text)["services"]
+    builds = [svc["build"] for svc in services.values() if "build" in svc]
+    assert builds, f"{name}: no build block"
+    for build in builds:
+        assert isinstance(build, dict)
+        assert build.get("target") == "runtime", (name, build)
     for svc in services.values():
         assert "profiles" not in svc
 
