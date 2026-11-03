@@ -171,6 +171,7 @@ def test_descriptions_say_what_the_spec_asks() -> None:
     for phrase in ("one note per lesson", "in order", "lesson_ref", "parte 2", "4 notes"):
         assert phrase in ingest, phrase
     assert "16,000 characters" in ingest
+    assert len(ingest.split()) <= 108  # trimmed well under the 120-word cap (plan ruling 41)
     assert "describe images" in ingest.lower() and "never download" in ingest.lower()
     assert "list_templates" in ingest and "instances" in ingest
     search = TOOL_DESCRIPTIONS["search_notes"]

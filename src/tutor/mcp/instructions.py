@@ -108,16 +108,15 @@ SAVE_SUBJECT_DESCRIPTION = (
     "save_notes and search_notes."
 )
 SAVE_NOTES_DESCRIPTION = (
-    "Call to store the learner's material for a subject: one note per lesson, sent in order, "
-    f"with the optional source it comes from. At most {MAX_NOTES_PER_CALL} notes and "
-    f"{MAX_CALL_CHARS:,} characters of raw_text per call (64 KB in all); if a note's text is over "
-    f"{MAX_NOTE_CHARS:,} characters, split it into several notes with the same lesson_ref plus "
-    "a suffix ('... / parte 2'). Send the text as given; you may fix "
-    "obvious extraction damage. Describe images in text; never download media. Add the "
-    f"lesson's concepts and links, and up to {MAX_INSTANCES} instances per note: a "
-    "template_id from list_templates for this subject with parameters taken from the lesson. "
-    "Sending the same "
-    "lesson again changes nothing; a corrected text replaces it."
+    "Call to store a learner's subject material: one note per lesson, sent in order, "
+    f"with its optional source. At most {MAX_NOTES_PER_CALL} notes and {MAX_CALL_CHARS:,} "
+    "characters of raw_text per call (64 KB in all); split a note over "
+    f"{MAX_NOTE_CHARS:,} characters into several notes with the same lesson_ref plus a suffix "
+    "('... / parte 2'). Send the text as given, fixing only obvious extraction damage. "
+    "Describe images in text; never download media. Add the lesson's concepts and links, and "
+    f"up to {MAX_INSTANCES} instances per note: a template_id from list_templates for this "
+    "subject and parameters from the lesson. The same lesson again changes nothing; a "
+    "corrected text replaces it."
 )
 GET_TEMPLATE_GUIDE_DESCRIPTION = (
     "Call before writing or proposing a template if you have not read the guide in this chat. "
