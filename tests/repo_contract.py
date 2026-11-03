@@ -9,10 +9,11 @@ identity resolver, with seeded track ids, so the same tests run on memory and on
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import date, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
 import pytest
@@ -115,6 +116,42 @@ DROPPED_ERROR = ValidError(
 
 class ContractAbort(Exception):
     """Raised inside a unit of work to force a rollback."""
+
+
+FailPoint = Literal["second_note_insert", "notes_saved_audit"]
+
+
+def failing_uow(factory: UowFactory, where: FailPoint) -> UowFactory:
+    """`factory` with one write that raises ContractAbort part-way through `save_notes`: the
+    second `notes.insert` of the call, or the closing `notes_saved` audit record (after every
+    other row of the call is written)."""
+
+    @contextmanager
+    def unit_of_work(user_id: UUID) -> Iterator[UnitOfWork]:
+        with factory(user_id) as uow:
+            if where == "second_note_insert":
+                insert = uow.notes.insert
+                calls: list[int] = []
+
+                def failing_insert(*args: Any, **kwargs: Any) -> NoteRow:
+                    calls.append(1)
+                    if len(calls) == 2:
+                        raise ContractAbort
+                    return insert(*args, **kwargs)
+
+                uow.notes.insert = failing_insert  # type: ignore[method-assign]
+            else:
+                record = uow.audit.record
+
+                def failing_record(event: Any, meta: Any, now: datetime) -> None:
+                    if event == "notes_saved":
+                        raise ContractAbort
+                    record(event, meta, now)
+
+                uow.audit.record = failing_record  # type: ignore[method-assign]
+            yield uow
+
+    return unit_of_work
 
 
 def present[T](value: T | None) -> T:

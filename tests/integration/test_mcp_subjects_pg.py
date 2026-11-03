@@ -14,16 +14,21 @@ from uuid import UUID
 import pytest
 from fastmcp import Client
 from mcp_lesson import Clock, call, random_sub, text_of
+from repo_contract import ContractAbort, FailPoint, failing_uow
 from sqlalchemy import Engine, text
+from template_fixtures import HTML, NUMERIC, numeric_params
 
 from tutor.db.uow import PgIdentity, pg_uow_factory
 from tutor.domain.html_guard import MAX_TEMPLATE_BYTES, TEMPLATE_MARKER
+from tutor.domain.notes import ConceptLinkInput, InstanceInput, NoteInput, SourceInput
 from tutor.domain.subjects import SubjectInput
 from tutor.domain.templates import TEMPLATE_GUIDE_VERSION
 from tutor.mcp import rules
 from tutor.services.context import Services
+from tutor.services.notes import save_notes
 from tutor.services.subjects import save_subject
 from tutor.services.template_files import guide_examples
+from tutor.services.templates import save_template
 
 from .test_mcp_lesson_pg import server, signed_in
 
@@ -286,3 +291,86 @@ def test_concurrent_subject_updates_keep_both_changes(login_engine: Engine) -> N
         final = uow.subjects.get(subject_id)
     assert final is not None
     assert (final.subject.goal_text, final.subject.minutes_per_session) == ("Tocar", 60)
+
+
+NOTES_TABLES = (
+    "sources",
+    "notes",
+    "note_passages",
+    "concepts",
+    "note_concepts",
+    "concept_links",
+    "template_instances",
+)
+
+
+def _row_counts(engine: Engine, user_id: UUID) -> dict[str, int]:
+    """Rows of the user per notes table, read as the owner (no RLS in the way)."""
+    with engine.connect() as conn:
+        counts = {
+            table: conn.execute(
+                text(f"SELECT count(*) FROM {table} WHERE user_id = :u"),  # noqa: S608 - fixed names
+                {"u": user_id},
+            ).scalar_one()
+            for table in NOTES_TABLES
+        }
+        counts["notes_saved"] = conn.execute(
+            text("SELECT count(*) FROM audit_log WHERE user_id = :u AND event = 'notes_saved'"),
+            {"u": user_id},
+        ).scalar_one()
+    return counts
+
+
+@pytest.mark.parametrize("where", ["second_note_insert", "notes_saved_audit"])
+def test_a_failure_part_way_through_save_notes_leaves_nothing_saved(
+    engine: Engine, login_engine: Engine, where: FailPoint
+) -> None:
+    """Plan ruling 23 on Postgres: one transaction per call, so a write that fails after the
+    source, the first note, its passages, concepts, link and instance are written rolls them all
+    back, as the login role under RLS."""
+    svc = Services(
+        uow=pg_uow_factory(login_engine),
+        clock=lambda: datetime(2026, 10, 14, 15, tzinfo=UTC),
+        valid_timezones=frozenset(zoneinfo.available_timezones()),
+    )
+    user_id = PgIdentity(login_engine).resolve(random_sub(), None, None, svc.clock()).id
+    subject = SubjectInput(
+        name="Guitarra",
+        goal_text=None,
+        context_text=None,
+        preference="balanced",
+        exercise_kinds=("quiz", "exercise"),
+        minutes_per_session=30,
+        sessions_per_week=3,
+        target_date=None,
+        status=None,
+    )
+    subject_id = save_subject(svc, user_id, subject).subject.id
+    template_id = save_template(
+        svc, user_id, subject_id, NUMERIC, HTML, TEMPLATE_GUIDE_VERSION
+    ).template_id
+    source = SourceInput("course", "Curso de guitarra", "https://example.test/curso")
+    notes = [
+        NoteInput(
+            title="Clase 3",
+            lesson_ref="Clase 3",
+            position=3,
+            raw_text=str(NOTE["raw_text"]),
+            concepts=("Acorde de séptima", "Quinto traste"),
+            links=(ConceptLinkInput("Quinto traste", "Acorde de séptima", "prerequisite"),),
+            instances=(InstanceInput(template_id, numeric_params(), "Suma."),),
+        ),
+        NoteInput(title="Clase 4", lesson_ref="Clase 4", position=4, raw_text="Otra lección."),
+    ]
+    empty = dict.fromkeys((*NOTES_TABLES, "notes_saved"), 0)
+    assert _row_counts(engine, user_id) == empty
+    broken = replace(svc, uow=failing_uow(svc.uow, where))
+    with pytest.raises(ContractAbort):
+        save_notes(broken, user_id, subject_id, source, notes)
+    assert _row_counts(engine, user_id) == empty
+    # Nothing half-written blocks the retry: the same call now saves both notes as new.
+    retry = save_notes(svc, user_id, subject_id, source, notes)
+    assert [o.outcome for o in retry.notes] == ["new", "new"]
+    counts = _row_counts(engine, user_id)
+    assert counts["notes"] == 2 and counts["template_instances"] == 1
+    assert counts["notes_saved"] == 1

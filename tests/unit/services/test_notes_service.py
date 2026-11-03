@@ -3,12 +3,15 @@ rulings 9, 11, 12). Instances in save_notes and get_note: test_templates_service
 
 from __future__ import annotations
 
+import copy
+import dataclasses
 from datetime import timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from repo_contract import long_paragraph
+from repo_contract import ContractAbort, FailPoint, failing_uow, long_paragraph
+from template_fixtures import HTML, NUMERIC, numeric_params
 
 from tutor.domain.notes import (
     MAX_CALL_CHARS,
@@ -19,7 +22,7 @@ from tutor.domain.notes import (
     NoteInput,
     SourceInput,
 )
-from tutor.domain.templates import MAX_INSTANCES
+from tutor.domain.templates import MAX_INSTANCES, TEMPLATE_GUIDE_VERSION
 from tutor.services.context import Services
 from tutor.services.errors import ServiceError
 from tutor.services.memory import MemoryStore
@@ -34,6 +37,7 @@ from tutor.services.subject_views import (
     SaveNotesResult,
     SearchWhy,
 )
+from tutor.services.templates import save_template
 
 from .conftest import NOW, FixedClock, create_subject
 
@@ -243,6 +247,37 @@ def test_review_focus_6_caps_are_all_or_nothing(
     assert store.tables.notes == {}
     assert store.tables.sources == {}
     assert events(store, user_id, "notes_saved") == []
+
+
+@pytest.mark.parametrize("where", ["second_note_insert", "notes_saved_audit"])
+def test_a_failure_part_way_through_save_notes_leaves_nothing_saved(
+    svc: Services, store: MemoryStore, user_id: UUID, where: FailPoint
+) -> None:
+    """One unit of work per call (plan ruling 23): a write that fails after the source, the
+    first note, its passages, concepts, links and instance are written rolls all of them back."""
+    subject_id = create_subject(svc, user_id)
+    template_id = save_template(
+        svc, user_id, subject_id, NUMERIC, HTML, TEMPLATE_GUIDE_VERSION
+    ).template_id
+    notes = [
+        note(instances=(InstanceInput(template_id, numeric_params(), "Suma."),)),
+        note(title="Clase 4", lesson_ref="Módulo 2 / Clase 4", raw_text="Otra lección."),
+    ]
+    before = copy.deepcopy(store.tables)
+    broken = dataclasses.replace(svc, uow=failing_uow(svc.uow, where))
+    with pytest.raises(ContractAbort):
+        save_notes(broken, user_id, subject_id, SOURCE, notes)
+    assert store.tables == before
+    assert (store.tables.notes, store.tables.sources, store.tables.template_instances) == (
+        {},
+        {},
+        {},
+    )
+    assert events(store, user_id, "notes_saved") == []
+    # Nothing half-written blocks the retry: the same call now saves both notes as new.
+    retry = save_notes(svc, user_id, subject_id, SOURCE, notes)
+    assert [o.outcome for o in retry.notes] == ["new", "new"]
+    assert len(retry.notes[0].instance_ids) == 1
 
 
 def test_review_focus_5_a_foreign_subject_is_not_found_and_writes_nothing(
