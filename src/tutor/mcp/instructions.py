@@ -130,8 +130,9 @@ LIST_TEMPLATES_DESCRIPTION = (
     "subject's active templates with purpose, grading kind, parameter specs and guide_version. "
     "Reuse a template whose grading kind and parameters fit the material, even for a new "
     "topic; propose a new one only when the answer shape, interaction or display differs. "
-    "When the subject has no template yet, the result also carries the guide's decision path "
-    "and contract, so you can propose a small starter set. Read only."
+    "When the subject has no template yet, the result also carries the guide's decision path, "
+    "so you can propose a small starter set; after the learner's yes, read "
+    "get_template_guide('contract') before writing HTML. Read only."
 )
 SAVE_TEMPLATE_DESCRIPTION = (
     "Call only after the learner said yes to this template; one yes covers a starter list "

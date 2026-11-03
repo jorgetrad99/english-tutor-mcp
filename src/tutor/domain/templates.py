@@ -110,7 +110,7 @@ ANSWER_KINDS: tuple[AnswerKind, ...] = (
 # recomputes it (tutor.services.template_files.guide_sha256); change both together (plan
 # rulings 21 and 31).
 TEMPLATE_GUIDE_VERSION = 2
-TEMPLATE_CONTRACT_SHA256 = "10db2ce46add5828ebe1056f46188f4e3d88faeeda0222c95df9e6d24b8efc7d"
+TEMPLATE_CONTRACT_SHA256 = "f9f24b54e3da9e020a8c1118e5c8ddcc0fba5aacc86c672bae2ae87914ce1d43"
 
 # Caps (plan ruling 24; spec 15.3, 15.4). The MCP schemas and migration 0006 restate them.
 NAME_MAX = 80
@@ -122,7 +122,7 @@ MAX_INSTANCES = 12  # per note
 PROMPT_TEXT_MAX = 500
 MAX_PARAMS_JSON_BYTES = 32_768
 MAX_PUBLIC_PAYLOAD_BYTES = 8_192
-INLINE_GUIDE_MAX_CHARS = 10_000
+INLINE_GUIDE_MAX_CHARS = 6_000  # the decision path only (plan ruling 33)
 NUMERIC_TOLERANCE_MAX = 1_000_000
 VALUE_LIMIT = 1_000_000_000
 NUMBER_DECIMALS = 6

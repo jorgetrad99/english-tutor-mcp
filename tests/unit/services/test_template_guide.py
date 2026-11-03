@@ -110,17 +110,22 @@ def test_contract_names_everything_from_the_constants() -> None:
     assert f"guide version {TEMPLATE_GUIDE_VERSION}" in contract
 
 
-def test_choosing_exercises_carries_the_decision_path_and_the_map() -> None:
+def test_choosing_exercises_carries_the_decision_path() -> None:
     text = guide_section("choosing_exercises")
     for step in range(1, 8):
         assert f"\n{step}. **" in text
-    for kind in GRADING_KINDS:
-        assert f"- `{kind}`" in text
+    for kind in GRADING_KINDS:  # step 3 maps every kind once; the contract holds the table
+        assert f"`{kind}`" in text
+        assert f"- `{kind}`" not in text
+    assert "Across subjects" not in text
+    assert "get_template_guide('contract')" in text and "yes" in text
 
 
-def test_inline_guide_fits_the_cap() -> None:
+def test_inline_guide_is_the_decision_path_only_and_fits_the_cap() -> None:
+    # Contract review: the contract is read after the learner's yes, before writing HTML.
     text = inline_guide()
-    assert text == guide_section("choosing_exercises") + "\n\n" + guide_section("contract")
+    assert text == guide_section("choosing_exercises")
+    assert guide_section("contract") not in text and "# Template contract" not in text
     assert len(text) <= INLINE_GUIDE_MAX_CHARS
 
 

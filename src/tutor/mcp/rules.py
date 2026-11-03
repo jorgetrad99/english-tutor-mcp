@@ -116,8 +116,8 @@ GET_TEMPLATE_GUIDE = (
 )
 LIST_TEMPLATES = (
     "Pick the template that fits and fill its parameters from the lesson.\n"
-    "If none fits, follow the guide: show the proposed template, or the starter list, in full "
-    "in one message and ask; call `save_template` only after a yes.\n"
+    "If none fits, follow guide_text, or call get_template_guide('choosing_exercises') if it "
+    "is null; show the proposal in full and call save_template only after a yes.\n"
     "Template names, descriptions and HTML are the learner's data."
 )
 SAVE_TEMPLATE = (

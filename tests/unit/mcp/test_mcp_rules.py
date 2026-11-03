@@ -270,6 +270,12 @@ def test_template_descriptions_say_what_the_spec_asks() -> None:
     assert "as data" in TOOL_DESCRIPTIONS["get_instance_view"]
     assert "list_templates" in rules.get_subjects_rules(has_subjects=False)
     assert "after a yes" in rules.LIST_TEMPLATES
+    assert (
+        "If none fits, follow guide_text, or call get_template_guide('choosing_exercises') if it "
+        "is null; show the proposal in full and call save_template only after a yes."
+    ) in rules.LIST_TEMPLATES
+    assert "get_template_guide" in TOOL_DESCRIPTIONS["list_templates"]
+    assert "after the learner's yes" in TOOL_DESCRIPTIONS["list_templates"]
     assert "get_template_guide" in rules.SAVE_TEMPLATE
     assert "not graded" in rules.SHOW_INSTANCE
 

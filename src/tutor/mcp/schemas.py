@@ -2268,7 +2268,7 @@ class ListTemplatesOutput(BaseModel):
     templates: list[TemplateOut] = out("Templates", "The subject's active templates, by name.")
     guide_version: int = out("Guide version", "The current guide version.")
     guide_text: str | None = out(
-        "Guide", "The decision path and contract, when the subject has no template yet."
+        "Guide", "The decision path (choosing_exercises), when the subject has no template yet."
     )
     response_rules: str = out("Response rules", "What to do next. Follow these.")
 

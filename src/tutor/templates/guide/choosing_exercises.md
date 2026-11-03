@@ -10,10 +10,6 @@ Works for any subject. The server grades; you write templates, only after the le
 6. **Reuse before proposing.** Reuse a template when its grading kind and parameters fit, even for another topic; new content is never a reason for a new template. A change the learner wants is a replacement (replaces_template_id) with its own yes.
 7. **Take parameters from the note.** Answers come from the note's text; never invent an answer key. prompt_text states the task in the learner's language. Accepted variants go in `accept` or a text_list key; distractors from the same lesson; one instance per idea. An instance's `concept` must be one of the note's `concepts` or a concept the subject already has; an instance never creates one (on a note with one concept, leave it out to use that one). Keep one pool per lesson or topic (6-40 entries). Never place the answer in a prompt parameter.
 
-Grading kinds and pools:
-
-{{GRADING_MAP}}
-
 Practice kind (derived by the server): {{PRACTICE_KINDS}}.
 
-Across subjects (illustrative): languages - flashcard pool, multiple choice on usage, conjugation table display; math - numeric answers, ordering the steps of a method, formula display; history - timeline ordering, multiple choice on causes, timeline table; programming - `exact_case` output prediction, code display, self-reported coding exercise; cooking - ordering recipe steps, numeric scaling, self-reported cooking; music - a listening pool, theory multiple choice, notation display, self-reported practice at a tempo.
+After the learner's yes, and before writing any HTML, read get_template_guide('contract'): it holds the parameter types, the grading kinds with their answer shapes, the pool draws and the sandbox rules. The worked examples are further sections of get_template_guide.

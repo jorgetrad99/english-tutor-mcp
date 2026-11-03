@@ -1,7 +1,7 @@
 """The template guide, its worked examples and the bridge scripts (subjects spec 15.5, 15.6).
 
 Package files under `tutor.templates`, read once and cached. The contract tables and the
-grading-kind map are rendered from `tutor.domain.templates.contract_constants()` into
+practice-kind line are rendered from `tutor.domain.templates.contract_constants()` into
 `{{PLACEHOLDER}}` tokens at load, so the guide never states a number the domain does not hold
 (plan ruling 21). Reads files, so it lives outside the domain.
 """
@@ -84,12 +84,6 @@ def _placeholders() -> dict[str, Callable[[Mapping[str, Any]], str]]:
         ]
         return _table(("grading_kind", "without a pool", "with a pool", "answer", "score"), rows)
 
-    def grading_map(c: Mapping[str, Any]) -> str:
-        return "\n".join(
-            f"- {_code(k)} ({v['purpose']}): with a pool, {v['with_pool']}"
-            for k, v in c["grading_kinds"].items()
-        )
-
     def text_match(c: Mapping[str, Any]) -> str:
         kinds = ", ".join(_code(k) for k in c["text_match_kinds"])
         rows = [(_code(k), v) for k, v in c["text_match"].items()]
@@ -129,7 +123,6 @@ def _placeholders() -> dict[str, Callable[[Mapping[str, Any]], str]]:
         "PARAM_TYPES": param_types,
         "PARAM_ROLES": roles,
         "GRADING_KINDS": grading,
-        "GRADING_MAP": grading_map,
         "TEXT_MATCH": text_match,
         "POOL_DRAWS": draws,
         "PRACTICE_KINDS": practice,
@@ -162,9 +155,10 @@ def guide_section(section: GuideSection) -> str:
 
 @cache
 def inline_guide() -> str:
-    """The decision path and the contract, returned by list_templates on a subject with no
-    active template (spec 15.6)."""
-    return guide_section("choosing_exercises") + "\n\n" + guide_section("contract")
+    """The decision path alone, returned by list_templates on a subject with no active template
+    (spec 15.6). The contract is read with get_template_guide after the learner's yes, before
+    writing HTML (plan ruling 33)."""
+    return guide_section("choosing_exercises")
 
 
 @cache

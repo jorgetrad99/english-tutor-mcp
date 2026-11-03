@@ -89,7 +89,7 @@ def list_templates(
 ) -> TemplatesView:
     """The subject's active templates (spec 15.9), or one template of the subject in any status
     (with its HTML when asked). A subject without an active template also gets the inline guide
-    (decision path and contract)."""
+    (the decision path; the contract is a get_template_guide call after the learner's yes)."""
     if include_html and template_id is None:
         raise ServiceError("validation_failed", ("include_html",))
     with svc.uow(user_id) as uow:
