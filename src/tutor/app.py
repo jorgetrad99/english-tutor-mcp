@@ -19,8 +19,10 @@ from typing import Any
 from uuid import UUID
 
 import anyio.to_thread
+from fastmcp.server.auth import AuthProvider
 from sqlalchemy import Engine
 
+from tutor.auth.dev_auth import build_dev_verifier
 from tutor.auth.mcp_auth import MCP_CALLBACK_PATH, build_google_provider
 from tutor.db.engine import check_app_role, make_engine
 from tutor.db.uow import PgIdentity, pg_uow_factory
@@ -286,7 +288,8 @@ def build_app(
     """MCP + OAuth proxy and the website, both behind the 64 KB guard and the request log.
 
     On Postgres the login role is checked first (RLS must bind it), and the server lifespan
-    purges expired web sessions at startup and then hourly."""
+    purges expired web sessions at startup and then hourly. With TUTOR_DEV_AUTH (loopback dev
+    only) the OAuth proxy and its discovery routes are replaced by the dev token verifier."""
     engine = engine if engine is not None else make_engine(settings.database_url)
     on_postgres = engine.dialect.name == "postgresql"
     if on_postgres:
@@ -297,7 +300,10 @@ def build_app(
         clock=_utc_now,
         valid_timezones=frozenset(zoneinfo.available_timezones()),
     )
-    mcp = build_mcp(svc, PgIdentity(engine), auth=build_google_provider(settings))
+    auth: AuthProvider = (
+        build_dev_verifier(settings) if settings.dev_auth else build_google_provider(settings)
+    )
+    mcp = build_mcp(svc, PgIdentity(engine), auth=auth)
     deps = pg_web_deps(engine, settings, config)
     mcp_app: ASGIApp = RequestLog(BodySizeGuard(mcp.http_app(path=MCP_PATH)))
     if on_postgres and isinstance(deps.sessions, PgWebBackend):
