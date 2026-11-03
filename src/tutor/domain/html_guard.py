@@ -60,7 +60,9 @@ _BOM = chr(0xFEFF)
 _WS = r"[\t\n\f\r ]"
 _ATTR_VALUE = r"""(?:"[^"<>\x00]*"|'[^'<>\x00]*'|[^\t\n\f\r "'=<>`\x00]+)"""
 _HTML_ATTR = rf"{_WS}+[a-z][a-z0-9-]*(?:{_WS}*={_WS}*{_ATTR_VALUE})?"
-_CHARSET = r"""(?:"utf-8"|'utf-8'|utf-8)"""  # another charset could re-decode the page
+# Another charset could re-decode the page. A browser reads an unquoted value up to whitespace
+# or `>`, so `charset=utf-8/>` names `utf-8/`: unquoted, `/` may follow only after whitespace.
+_CHARSET = rf"""(?:(?:"utf-8"|'utf-8'){_WS}*/?|utf-8(?:{_WS}+/?)?)"""
 _MARKER_PREFIX = re.compile(
     "".join(
         (
@@ -68,7 +70,7 @@ _MARKER_PREFIX = re.compile(
             rf"(?:<!doctype html>{_WS}*)?",
             rf"(?:<html(?:{_HTML_ATTR})*{_WS}*>{_WS}*)?",
             rf"(?:<head>{_WS}*)?",
-            rf"(?:<meta{_WS}+charset{_WS}*={_WS}*{_CHARSET}{_WS}*/?>{_WS}*)?",
+            rf"(?:<meta{_WS}+charset{_WS}*={_WS}*{_CHARSET}>{_WS}*)?",
         )
     ),
     re.ASCII | re.IGNORECASE,

@@ -523,6 +523,9 @@ def test_svg_math_and_comments_before_the_marker_are_refused(prefix: str) -> Non
         before_marker("", start="<!doctype html><meta char" + chr(0x17F) + "et='utf-8'>"),
         before_marker("", start="<!doctype html><meta charset=''>"),
         before_marker("", start="<!doctype html><meta charset='windows-1252'>"),  # only utf-8
+        # A browser reads an unquoted value up to whitespace or `>`: this charset is `utf-8/`.
+        before_marker("", start="<!doctype html><meta charset=utf-8/>"),
+        before_marker("", start="<!doctype html><meta charset=utf-8//>"),
         before_marker("", start=chr(0xFEFF) + chr(0xFEFF) + "<!doctype html>"),
         f"<!doctype html><html><body><p>x</p>{TEMPLATE_MARKER}</body></html>",  # in the body
     ],
@@ -543,6 +546,9 @@ def test_anything_else_before_the_marker_is_refused(html: str) -> None:
         '<!doctype html>\n<html lang="es">\n<head>\n<meta charset="utf-8">\n',
         "<!doctype html><head>",
         "<!doctype html><meta charset=utf-8>",
+        "<!doctype html><meta charset=utf-8 />",
+        "<!doctype html><meta charset=utf-8	>",
+        "<!doctype html><meta charset='utf-8'/>",
         "<!doctype html><html><head><meta charset='UTF-8' />",
         '<!doctype html><html><HEAD><META CHARSET="utf-8">',
         chr(0xFEFF) + "<!doctype html>\r\n<html>\r\n<head>\r\n",
