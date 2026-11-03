@@ -1,0 +1,119 @@
+{% extends "layouts/app.html" %}
+{% import "macros/subjects.html" as sl %}
+{% set active_nav = "subjects" %}
+{% set s = page.subject.subject %}
+{% block title %}{{ s.name }} · English Tutor{% endblock %}
+{% block content %}
+<p><a href="/app/subjects">← {{ _("Todas las materias") }}</a></p>
+<header class="page-head">
+  <h1>{{ s.name }}</h1>
+  <p>{{ sl.subject_status(s.status) }}</p>
+</header>
+<div class="grid">
+  <section class="card" aria-labelledby="settings-title">
+    <h2 id="settings-title" class="card__title">{{ _("Tu materia") }}</h2>
+    <dl class="facts">
+      <dt>{{ _("Meta") }}</dt><dd>{% if s.goal_text %}{{ s.goal_text }}{% else %}{{ sl.nil() }}{% endif %}</dd>
+      <dt>{{ _("Contexto") }}</dt><dd>{% if s.context_text %}{{ s.context_text }}{% else %}{{ sl.nil() }}{% endif %}</dd>
+      <dt>{{ _("Minutos por sesión") }}</dt><dd>{{ s.minutes_per_session|integer }}</dd>
+      <dt>{{ _("Fecha meta") }}</dt><dd>{% if s.target_date %}{{ s.target_date|day("long") }}{% else %}{{ sl.nil() }}{% endif %}</dd>
+    </dl>
+    <p class="muted">{{ _("Para cambiar tu materia, pídeselo a Claude.") }}</p>
+  </section>
+
+  <section class="card" aria-labelledby="plan-title">
+    <h2 id="plan-title" class="card__title">{{ _("Plan de práctica") }}</h2>
+    {% with plan=page.subject.plan_status, per_week=s.sessions_per_week %}{% include "partials/plan_facts.html" %}{% endwith %}
+  </section>
+
+  <section class="card card--wide subject-progress" aria-labelledby="progress-title">
+    <h2 id="progress-title" class="card__title">{{ _("Progreso") }}</h2>
+    {% include "partials/subject_progress.html" %}
+  </section>
+
+  <section class="card card--wide" aria-labelledby="notes-title">
+    <h2 id="notes-title" class="card__title">{{ _("Apuntes") }}</h2>
+    {% if page.sources %}
+    {% for g in page.sources %}
+    <section class="subject-source" aria-label="{{ g.title or _('Sin fuente') }}">
+      <h3>{% if g.title %}{{ g.title }}{% else %}{{ _("Sin fuente") }}{% endif %} <span class="chip chip--muted">{{ sl.source_kind(g.kind) }}</span></h3>
+      <ul class="subject-notes">
+        {% for n in g.notes %}
+        <li class="subject-note{% if n.superseded %} subject-note--superseded{% endif %}">
+          <a href="/app/notes/{{ n.id }}">{{ n.title }}</a>{% if n.lesson_ref %} <span class="muted">{{ n.lesson_ref }}</span>{% endif %}
+          {{ sl.origin_chip(n.origin) }}{% if n.superseded %} <span class="chip chip--muted">{{ _("Reemplazada") }}</span>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endfor %}
+    {% else %}
+    <p class="empty">{{ _("Aún no hay apuntes en esta materia. Compártelos con Claude o agrégalos aquí.") }}</p>
+    {% endif %}
+  </section>
+
+  {# slice D Task 4: the PDF upload and pasted text forms (partials/upload_forms.html) go here. #}
+
+  <section class="card card--wide" aria-labelledby="templates-title">
+    <h2 id="templates-title" class="card__title">{{ _("Plantillas") }}</h2>
+    {% if page.templates %}
+    <div class="table-wrap">
+      <table class="table table--stack">
+        <caption class="sr-only">{{ _("Plantillas activas de esta materia") }}</caption>
+        <thead>
+          <tr>
+            <th scope="col">{{ _("Plantilla") }}</th>
+            <th scope="col">{{ _("Uso") }}</th>
+            <th scope="col">{{ _("Tipo de calificación") }}</th>
+            <th scope="col">{{ _("Ejercicios activos") }}</th>
+            {# slice D Task 5: the retire button column goes here. #}
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in page.templates %}{% include "partials/template_row.html" %}{% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="empty">{{ _("Aún no hay plantillas. Claude las crea cuando preparas ejercicios.") }}</p>
+    {% endif %}
+  </section>
+
+  <section class="card card--wide" aria-labelledby="history-title">
+    <h2 id="history-title" class="card__title">{{ _("Prácticas") }}</h2>
+    {% if page.history %}
+    <div class="table-wrap">
+      <table class="table table--stack">
+        <caption class="sr-only">{{ _("Tus prácticas de esta materia, de la más reciente a la más antigua") }}</caption>
+        <thead>
+          <tr>
+            <th scope="col">{{ _("Fecha") }}</th>
+            <th scope="col">{{ _("Modo") }}</th>
+            <th scope="col">{{ _("Respondidos") }}</th>
+            <th scope="col">{{ _("Aciertos") }}</th>
+            <th scope="col">{{ _("Minutos") }}</th>
+            <th scope="col">{{ _("Estado") }}</th>
+            <th scope="col">{{ _("Cuenta para el plan") }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for h in page.history %}
+          <tr>
+            <td data-label="{{ _('Fecha') }}">{{ h.started_at|day("short") }}</td>
+            <td data-label="{{ _('Modo') }}">{{ sl.practice_mode(h.mode) }}</td>
+            <td data-label="{{ _('Respondidos') }}">{% trans answered=h.answered|integer, items=h.items|integer %}{{ answered }} de {{ items }}{% endtrans %}</td>
+            <td data-label="{{ _('Aciertos') }}">{{ sl.share(h.accuracy) }}</td>
+            <td data-label="{{ _('Minutos') }}">{% if h.minutes is not none %}{{ h.minutes|integer }}{% else %}{{ sl.nil() }}{% endif %}</td>
+            <td data-label="{{ _('Estado') }}">{{ sl.practice_status(h.status) }}</td>
+            <td data-label="{{ _('Cuenta para el plan') }}">{% if h.counted %}{{ _("Sí") }}{% else %}{{ _("No") }}{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="empty">{{ _("Aún no has practicado esta materia. Pídele a Claude una práctica.") }}</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

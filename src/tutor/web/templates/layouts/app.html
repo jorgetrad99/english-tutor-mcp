@@ -1,10 +1,11 @@
 {% extends "base.html" %}
-{# Core loop v0 navigation (plan ruling 11): the five v0 pages; no plan chip, meter or admin link. #}
+{# Core loop v0 navigation (plan ruling 11) plus Materias (slice D ruling 61); no plan chip, meter or admin link. #}
 {% set nav = [
   ("home", "/app/", _("Inicio"), "home"),
   ("profile", "/app/profile", _("Perfil"), "account"),
   ("sessions", "/app/sessions", _("Sesiones"), "sessions"),
   ("glossary", "/app/glossary", _("Glosario"), "glossary"),
+  ("subjects", "/app/subjects", _("Materias"), "subjects"),
   ("connect", "/app/connect", _("Conectar"), "connect"),
 ] %}
 {% block body %}

@@ -1,0 +1,14 @@
+{# The plan numbers of one subject, from PlanStatus only (slice D). Needs `plan` and `per_week`. #}
+{% import "macros/subjects.html" as sl %}
+<dl class="facts">
+  <dt>{{ _("Sesiones por semana") }}</dt><dd>{{ per_week|integer }}</dd>
+  {% if plan %}
+  <dt>{{ _("Sesiones hechas") }}</dt><dd>{% trans done=plan.completed_sessions|integer, expected=plan.expected_sessions|integer %}{{ done }} de {{ expected }} esperadas{% endtrans %}</dd>
+  <dt>{{ _("Sesiones perdidas") }}</dt><dd>{{ plan.missed|integer }}</dd>
+  <dt>{{ _("Fin estimado") }}</dt><dd>{% if plan.projected_end %}{{ plan.projected_end|day("long") }}{% else %}{{ sl.nil() }}{% endif %}</dd>
+  <dt>{{ _("Retraso") }}</dt><dd>{% if plan.delay_days is not none %}{% trans n=plan.delay_days|integer %}{{ n }} días{% endtrans %}{% else %}{{ sl.nil() }}{% endif %}</dd>
+  <dt>{{ _("Cumplimiento") }}</dt><dd>{{ sl.share(plan.adherence) }}</dd>
+  {% else %}
+  <dt>{{ _("Plan") }}</dt><dd>{{ _("Aún sin plan de práctica.") }}</dd>
+  {% endif %}
+</dl>

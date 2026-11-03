@@ -32,8 +32,32 @@ EXTRA_CLASSES = [
     "vt-today",
     "vt-last-session",
     "htmx-indicator",
+    # Materias, Materia, Nota (slice D)
+    "subject-card",
+    "subject-source",
+    "subject-notes",
+    "subject-note",
+    "subject-note--superseded",
+    "subject-progress",
+    "note-text",
+    "note-concepts",
+    "note-instances",
+    "note-instance",
+    "instance-prompt",
+    "instance-frame",
+    "instance-frame--exercise",
+    "instance-frame--display",
 ]
-NAV_ICONS = {"home", "plan", "progress", "sessions", "glossary", "reports", "account"}
+NAV_ICONS = {
+    "home",
+    "plan",
+    "progress",
+    "sessions",
+    "glossary",
+    "subjects",
+    "reports",
+    "account",
+}
 REQUIRED_ICONS = NAV_ICONS | {
     "more",
     "copy",

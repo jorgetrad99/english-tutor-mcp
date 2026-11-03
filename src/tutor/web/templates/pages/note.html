@@ -1,0 +1,41 @@
+{% extends "layouts/app.html" %}
+{% import "macros/subjects.html" as sl %}
+{% set active_nav = "subjects" %}
+{% set n = page.note %}
+{% block title %}{{ n.title }} · English Tutor{% endblock %}
+{% block content %}
+<p><a href="/app/subjects/{{ n.subject_id }}">← {{ _("Volver a la materia") }}</a></p>
+<header class="page-head">
+  <h1>{{ n.title }}</h1>
+  <p class="muted">{% if n.source_title %}{{ n.source_title }}{% else %}{{ _("Sin fuente") }}{% endif %}{% if n.lesson_ref %} · {{ n.lesson_ref }}{% endif %} · {{ n.created_at|day("long") }}</p>
+  <p>{{ sl.origin_chip(n.origin) }}</p>
+</header>
+<div class="grid">
+  <section class="card card--wide" aria-labelledby="text-title">
+    <h2 id="text-title" class="card__title">{{ _("Texto") }}</h2>
+    {% if n.concepts %}
+    <ul class="stamps note-concepts" aria-label="{{ _('Conceptos') }}">
+      {% for c in n.concepts %}<li class="chip chip--muted">{{ c }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+    <pre class="note-text">{{ n.clean_text }}</pre>
+  </section>
+
+  <section class="card card--wide" aria-labelledby="instances-title">
+    <h2 id="instances-title" class="card__title">{{ _("Ejercicios y material") }}</h2>
+    {% if frames %}
+    <p class="muted">{{ _("Aquí puedes probar el ejercicio; la calificación cuenta solo en una práctica con Claude.") }}</p>
+    <ul class="note-instances">
+      {% for card, src in frames %}
+      <li class="note-instance">
+        <p class="muted">{{ card.template_name }} · {{ sl.purpose_label(card.purpose) }}</p>
+        {% with frame_src=src, prompt_text=card.prompt_text, purpose=card.purpose %}{% include "partials/instance_frame.html" %}{% endwith %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty">{{ _("Esta nota aún no tiene ejercicios.") }}</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

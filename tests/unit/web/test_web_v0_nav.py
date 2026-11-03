@@ -7,6 +7,7 @@ from uuid import UUID
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from subject_web_fixtures import seed_subject_world
 
 from tutor.domain.dashboard.types import (
     PlanPage,
@@ -23,13 +24,21 @@ from tutor.web.memory import FixedClock, MemoryBackend, memory_deps
 from tutor.web.ports import UNCAPPED
 from tutor.web.profile import MemoryProfiles, install_profiles
 from tutor.web.routing import iter_api_routes
+from tutor.web.subjects import MemorySubjects, install_frame_url, install_subjects
 
-from .conftest import BASE, TODAY
+from .conftest import BASE, TODAY, fake_frame_url
 
 pytestmark = pytest.mark.unit
 
 Login = Callable[[UUID], TestClient]
-NAV = ["/app/", "/app/profile", "/app/sessions", "/app/glossary", "/app/connect"]
+NAV = [
+    "/app/",
+    "/app/profile",
+    "/app/sessions",
+    "/app/glossary",
+    "/app/subjects",  # slice D ruling 61: Materias after Glosario
+    "/app/connect",
+]
 POSTPONED = (
     "/app/plan",
     "/app/progress",
@@ -100,15 +109,21 @@ class V0Backend(MemoryBackend):
 
 
 def test_no_v0_route_reads_plan_progress_or_reports(
-    clock: FixedClock, config: WebConfig, profiles: MemoryProfiles
+    clock: FixedClock, config: WebConfig, profiles: MemoryProfiles, subjects: MemorySubjects
 ) -> None:
     backend = V0Backend()
     demo = seed_demo(backend, TODAY)
     app: FastAPI = create_app(memory_deps(backend, clock), config)
     install_profiles(app, profiles)
+    install_subjects(app, subjects)
+    install_frame_url(app, fake_frame_url)
+    subjects.ensure_user(demo.ana)
+    world = seed_subject_world(subjects.svc, demo.ana)
     ids = {
         "session_id": str(backend.session_rows[demo.ana][0].summary.id),
         "item_id": str(backend.glossaries[demo.ana][0].id),
+        "subject_id": str(world.subject_id),
+        "note_id": str(world.note_id),
     }
     with TestClient(app, base_url=BASE, follow_redirects=False) as c:
         assert c.post("/auth/test-login", data={"user_id": str(demo.ana)}).status_code == 303

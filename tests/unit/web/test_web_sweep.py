@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, FastAPI, Request, Response
 from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
 from fastapi.testclient import TestClient
+from subject_web_fixtures import SubjectWorld
 
 from tutor.domain.dashboard.types import ConnectedClient
 from tutor.web.config import WebConfig
@@ -76,13 +77,20 @@ def _fill(path: str, values: dict[str, str]) -> str:
     return PARAM.sub(lambda m: values.get(m.group(1), str(uuid4())), path)
 
 
-def _other_users_ids(backend: MemoryBackend, demo: DemoUsers) -> dict[str, str]:
+def _other_users_ids(
+    backend: MemoryBackend, demo: DemoUsers, world: SubjectWorld
+) -> dict[str, str]:
     """Ids that belong to Beto only; Ana must get 404 for each."""
     backend.clients[demo.beto].append(ConnectedClient("beto-only", "Claude Code", None))
     return {
         "session_id": str(backend.session_rows[demo.beto][0].summary.id),
         "item_id": str(backend.glossaries[demo.beto][0].id),
         "client_id": "beto-only",
+        # Subjects (slice D Review Focus 3): Beto's seeded rows.
+        "subject_id": str(world.subject_id),
+        "note_id": str(world.note_id),
+        "instance_id": str(world.instance_id),
+        "template_id": str(world.template_id),
     }
 
 
@@ -129,9 +137,9 @@ def test_unsafe_methods_need_the_csrf_token(app: FastAPI, login: Login, demo: De
 
 
 def test_another_users_ids_are_not_found(
-    app: FastAPI, login: Login, demo: DemoUsers, backend: MemoryBackend
+    app: FastAPI, login: Login, demo: DemoUsers, backend: MemoryBackend, beto_world: SubjectWorld
 ) -> None:
-    beto = _other_users_ids(backend, demo)
+    beto = _other_users_ids(backend, demo, beto_world)
     c = login(demo.ana)
     token = csrf_of(c)
     form = {"csrf_token": token, "meaning": "x", "context_sentence": "Una frase.", "value": "1"}
@@ -163,6 +171,23 @@ def test_own_ids_still_work(login: Login, demo: DemoUsers, backend: MemoryBacken
     c = login(demo.ana)
     own_session = backend.session_rows[demo.ana][0].summary.id
     assert c.get(f"/app/sessions/{own_session}").status_code == 200
+
+
+def test_beto_sees_his_own_subject_rows(
+    login: Login, demo: DemoUsers, beto_world: SubjectWorld
+) -> None:
+    c = login(demo.beto)
+    assert c.get(f"/app/subjects/{beto_world.subject_id}").status_code == 200
+    assert c.get(f"/app/notes/{beto_world.note_id}").status_code == 200
+
+
+@pytest.mark.parametrize("path", ["/app/subjects/{}", "/app/notes/{}"])
+@pytest.mark.parametrize("raw", ["not-a-uuid", "123", "%27%3B--", "0" * 40])
+def test_malformed_subject_ids_are_not_found(
+    login: Login, demo: DemoUsers, path: str, raw: str
+) -> None:
+    # Review Focus 3: a malformed id is 404, never 422.
+    assert login(demo.ana).get(path.format(raw)).status_code == 404
 
 
 def test_postponed_pages_are_not_registered(app: FastAPI) -> None:
