@@ -607,10 +607,10 @@ _NUMERIC_TYPES: tuple[ParamType, ...] = ("integer", "integer_list", "number", "n
 def _bound(
     value: float | None, default: int, param_type: ParamType, field: str, errors: Errors
 ) -> float | None:
-    if value is None:
-        return default
-    number = _decimal(value)
     integral = param_type in ("integer", "integer_list")
+    if value is None:
+        return default if integral else float(default)
+    number = _decimal(value)
     if (
         number is None
         or not _decimals_ok(number)

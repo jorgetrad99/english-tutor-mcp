@@ -74,6 +74,20 @@ class PgSubjectRepo:
         )
         return None if m is None else _row(m)
 
+    def get_for_update(self, subject_id: UUID) -> SubjectRow | None:
+        # Row lock until the transaction ends: a second save_subject on the same subject waits
+        # here and then merges onto the first one's result (plan ruling 27b).
+        m = (
+            self._conn.execute(
+                select(subjects)
+                .where(subjects.c.id == subject_id, subjects.c.user_id == self._user_id)
+                .with_for_update()
+            )
+            .mappings()
+            .one_or_none()
+        )
+        return None if m is None else _row(m)
+
     def create(self, subject: Subject, now: datetime) -> SubjectRow:
         m = (
             self._conn.execute(

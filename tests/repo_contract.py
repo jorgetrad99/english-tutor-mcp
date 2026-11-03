@@ -1881,7 +1881,7 @@ class RepoContract:
                 prompt_text="Mira.",
                 concept=None,
                 origin="ingest",
-                key="t" * 64,
+                key="d" * 64,
                 now=now,
             )
         with uow_factory(user_id) as uow:
@@ -1909,7 +1909,7 @@ class RepoContract:
                 prompt_text="Mira.",
                 concept=None,
                 origin="class",
-                key="o" * 64,
+                key="e" * 64,
                 now=now,
             )
             assert uow.instances.get(their_instance.id) is None
@@ -1936,7 +1936,7 @@ class RepoContract:
                 "prompt_text": "Mira.",
                 "concept": None,
                 "origin": "ingest",
-                "key": "m" * 64,
+                "key": "f" * 64,
                 "now": now,
                 **changes,
             }

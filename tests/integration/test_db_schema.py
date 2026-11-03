@@ -20,12 +20,13 @@ pytestmark = pytest.mark.integration
 TRACK_ID = "zz-rls-01"
 # Composite (col, user_id) foreign keys: 7 from 0002 (plan_items.plan_id, sessions.plan_item_id,
 # session_metrics.session_id, session_errors.session_id, review_states.glossary_item_id,
-# review_logs.glossary_item_id, review_logs.session_id) plus 14 from 0006 (sources.subject_id,
+# review_logs.glossary_item_id, review_logs.session_id) plus 17 from 0006 (sources.subject_id,
 # notes.subject_id, notes.source_id, notes.supersedes_note_id, note_passages.note_id,
-# note_artifacts.note_id, exercises.note_id, quiz_items.note_id, quiz_items.concept_id,
 # concepts.subject_id, note_concepts.note_id, note_concepts.concept_id, concept_links.from_id,
-# concept_links.to_id).
-COMPOSITE_FKS = 21
+# concept_links.to_id, exercise_templates.subject_id, exercise_templates.supersedes_template_id,
+# template_instances.subject_id, template_instances.template_id, template_instances.note_id,
+# template_instances.concept_id, template_instances.supersedes_instance_id).
+COMPOSITE_FKS = 24
 
 # One row in every user table for one user, inserted as the owner (superuser bypasses RLS).
 _SEED_SQL = (
@@ -66,17 +67,19 @@ _SEED_SQL = (
     " VALUES (:n, :u, :subj, :src, 'Clase', 'clase', 'texto', repeat('a', 64), 'texto', :h,"
     " 'mcp', now(), now())",
     "INSERT INTO note_passages (note_id, seq, user_id, text) VALUES (:n, 1, :u, 'texto')",
-    "INSERT INTO note_artifacts (id, user_id, note_id, kind, title, html, html_sha256, bytes,"
-    " created_at) VALUES (:art, :u, :n, 'other', 'Vista', '<!doctype html>', repeat('b', 64),"
-    " 15, now())",
-    "INSERT INTO exercises (user_id, note_id, seq, name, instructions, kind)"
-    " VALUES (:u, :n, 1, 'Ej', 'Toca.', 'technique')",
     "INSERT INTO concepts (id, user_id, subject_id, name, name_norm)"
     " VALUES (:c, :u, :subj, 'Ritmo', 'ritmo')",
     "INSERT INTO concepts (id, user_id, subject_id, name, name_norm)"
     " VALUES (:c2, :u, :subj, 'Compás', 'compas')",
-    "INSERT INTO quiz_items (user_id, note_id, seq, question, options, answer_index, concept_id)"
-    " VALUES (:u, :n, 1, '¿Qué es?', ARRAY['a', 'b'], 0, :c)",
+    "INSERT INTO exercise_templates (id, user_id, subject_id, name, name_norm,"
+    " template_purpose, grading_kind, pool_draw, needs_view, params, html, html_sha256, bytes,"
+    " guide_version, status, created_at, updated_at) VALUES (:tpl, :u, :subj, 'Tabla', 'tabla',"
+    " 'display', 'none', 'none', false, '[{}]', '<!doctype html>', repeat('b', 64), 15, 1,"
+    " 'active', now(), now())",
+    "INSERT INTO template_instances (id, user_id, subject_id, note_id, seq, template_id,"
+    " template_purpose, grading_kind, params, prompt_text, concept_id, origin, content_key,"
+    " status, created_at) VALUES (:inst, :u, :subj, :n, 1, :tpl, 'display', 'none', '{}',"
+    " 'Mira.', :c, 'ingest', repeat('d', 64), 'active', now())",
     "INSERT INTO note_concepts (note_id, concept_id, user_id) VALUES (:n, :c, :u)",
     "INSERT INTO concept_links (from_id, to_id, kind, user_id) VALUES (:c, :c2, 'related', :u)",
 )
@@ -96,7 +99,8 @@ def _seed_user(conn: Connection, sub: str, track_item_id: str) -> UUID:
         "subj": uuid4(),
         "src": uuid4(),
         "n": uuid4(),
-        "art": uuid4(),
+        "tpl": uuid4(),
+        "inst": uuid4(),
         "c": uuid4(),
         "c2": uuid4(),
     }
@@ -250,6 +254,8 @@ _PARENT_IDS = {
     "src": "SELECT id FROM sources WHERE user_id = :u",
     "n": "SELECT id FROM notes WHERE user_id = :u",
     "c": "SELECT id FROM concepts WHERE user_id = :u AND name_norm = 'ritmo'",
+    "tpl": "SELECT id FROM exercise_templates WHERE user_id = :u",
+    "inst": "SELECT id FROM template_instances WHERE user_id = :u",
 }
 
 
@@ -273,6 +279,20 @@ _METRICS_INSERT = (
     " errors_per_100w, recurring_errors, uptake_count, chunks_offered, chunks_used,"
     " chunks_rejected, activation_rate)"
     " VALUES (:a_s, :b, 40, 4, 10, 12, 3.3, 1, 0, '{}', 2.5, 0, 0, 5, 1, 0, 0.2)"
+)
+_TEMPLATE_INSERT = (
+    "INSERT INTO exercise_templates (user_id, subject_id, name, name_norm, template_purpose,"
+    " grading_kind, pool_draw, needs_view, params, html, html_sha256, bytes, guide_version,"
+    " status, supersedes_template_id, created_at, updated_at) VALUES (:b, {subject}, 'Otra',"
+    " 'otra', 'display', 'none', 'none', false, '[{{}}]', '<!doctype html>', repeat('b', 64),"
+    " 15, 1, 'active', {supersedes}, now(), now())"
+)
+_INSTANCE_INSERT = (
+    "INSERT INTO template_instances (user_id, subject_id, note_id, template_id,"
+    " template_purpose, grading_kind, params, prompt_text, concept_id, origin, content_key,"
+    " status, supersedes_instance_id, created_at) VALUES (:b, {subject}, {note}, {template},"
+    " 'display', 'none', '{{}}', 'x', {concept}, 'class', repeat('e', 64), 'active',"
+    " {supersedes}, now())"
 )
 # Each statement runs as user B and points at user A's parent row.
 _CROSS_USER_CHILDREN = {
@@ -300,15 +320,25 @@ _CROSS_USER_CHILDREN = {
     ),
     "note_passages.note_id": "INSERT INTO note_passages (note_id, seq, user_id, text)"
     " VALUES (:a_n, 2, :b, 'x')",
-    "note_artifacts.note_id": "INSERT INTO note_artifacts (user_id, note_id, kind, title, html,"
-    " html_sha256, bytes, created_at) VALUES (:b, :a_n, 'other', 'x', 'x', repeat('b', 64), 1,"
-    " now())",
-    "exercises.note_id": "INSERT INTO exercises (user_id, note_id, seq, name, instructions, kind)"
-    " VALUES (:b, :a_n, 2, 'x', 'x', 'other')",
-    "quiz_items.note_id": "INSERT INTO quiz_items (user_id, note_id, seq, question, options,"
-    " answer_index) VALUES (:b, :a_n, 2, 'x', ARRAY['a', 'b'], 0)",
-    "quiz_items.concept_id": "INSERT INTO quiz_items (user_id, note_id, seq, question, options,"
-    " answer_index, concept_id) VALUES (:b, :b_n, 2, 'x', ARRAY['a', 'b'], 0, :a_c)",
+    "exercise_templates.subject_id": _TEMPLATE_INSERT.format(subject=":a_subj", supersedes="NULL"),
+    "exercise_templates.supersedes_template_id": _TEMPLATE_INSERT.format(
+        subject=":b_subj", supersedes=":a_tpl"
+    ),
+    "template_instances.subject_id": _INSTANCE_INSERT.format(
+        subject=":a_subj", note="NULL", template=":b_tpl", concept="NULL", supersedes="NULL"
+    ),
+    "template_instances.template_id": _INSTANCE_INSERT.format(
+        subject=":b_subj", note="NULL", template=":a_tpl", concept="NULL", supersedes="NULL"
+    ),
+    "template_instances.note_id": _INSTANCE_INSERT.format(
+        subject=":b_subj", note=":a_n", template=":b_tpl", concept="NULL", supersedes="NULL"
+    ),
+    "template_instances.concept_id": _INSTANCE_INSERT.format(
+        subject=":b_subj", note="NULL", template=":b_tpl", concept=":a_c", supersedes="NULL"
+    ),
+    "template_instances.supersedes_instance_id": _INSTANCE_INSERT.format(
+        subject=":b_subj", note="NULL", template=":b_tpl", concept="NULL", supersedes=":a_inst"
+    ),
     "concepts.subject_id": "INSERT INTO concepts (user_id, subject_id, name, name_norm)"
     " VALUES (:b, :a_subj, 'x', 'x')",
     "note_concepts.note_id": "INSERT INTO note_concepts (note_id, concept_id, user_id)"
@@ -347,6 +377,9 @@ def test_composite_foreign_keys_reject_another_users_parent(
         "b_subj": b_ids["subj"],
         "b_n": b_ids["n"],
         "b_c": b_ids["c"],
+        "a_tpl": a_ids["tpl"],
+        "b_tpl": b_ids["tpl"],
+        "a_inst": a_ids["inst"],
     }
     with pytest.raises(DBAPIError) as err, scoped_connection(engine, user_id=b) as conn:
         conn.execute(text(_CROSS_USER_CHILDREN[reference]), params)

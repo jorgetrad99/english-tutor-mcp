@@ -1,12 +1,11 @@
-"""Sources, notes, passages, exercises, quiz items, concepts, links, artifacts and the search
-statement on Postgres (subjects spec 4, 5.1, 8.1).
+"""Sources, notes, passages, concepts, links and the search statement on Postgres (subjects
+spec 4, 5.1, 8.1). Templates and instances live in tutor.db.repos.templates.
 
 Every statement filters by the unit of work's user on top of row-level security, and every
 write that references another row checks ownership first (foreign keys ignore RLS). Learner
 text travels as bound parameters only.
 """
 
-import hashlib
 import re
 from datetime import datetime
 from typing import Any
@@ -20,15 +19,11 @@ from tutor.db.repos._guards import require_note, require_subject
 from tutor.db.tables import (
     concept_links,
     concepts,
-    exercises,
-    note_artifacts,
     note_concepts,
     note_passages,
     notes,
-    quiz_items,
     sources,
 )
-from tutor.domain.html_guard import ArtifactKind
 from tutor.domain.notes import (
     CLEAN_VERSION,
     ConceptName,
@@ -39,12 +34,9 @@ from tutor.domain.notes import (
     name_norm,
 )
 from tutor.services.ports import (
-    ArtifactRow,
     ConceptRow,
-    ExerciseRow,
     NoteRow,
     PassageRow,
-    QuizItemRow,
     SearchHit,
     SourceRow,
 )
@@ -223,16 +215,29 @@ def _note_row(m: RowMapping) -> NoteRow:
     )
 
 
-def _artifact_row(m: RowMapping, *, html: str | None) -> ArtifactRow:
-    return ArtifactRow(
-        id=m["id"],
-        note_id=m["note_id"],
-        kind=m["kind"],
-        title=m["title"],
-        html=html,
-        bytes=m["bytes"],
-        created_at=m["created_at"],
-    )
+def upsert_concept(conn: Connection, user_id: UUID, subject_id: UUID, concept: ConceptName) -> UUID:
+    """The subject's concept with this name_norm, created with this spelling if new."""
+    inserted = conn.execute(
+        pg_insert(concepts)
+        .values(
+            id=uuid4(),
+            user_id=user_id,
+            subject_id=subject_id,
+            name=concept.name,
+            name_norm=concept.name_norm,
+        )
+        .on_conflict_do_nothing(constraint="concepts_user_subject_name_norm_key")
+        .returning(concepts.c.id)
+    ).scalar_one_or_none()
+    if inserted is not None:
+        return inserted
+    return conn.execute(
+        select(concepts.c.id).where(
+            concepts.c.user_id == user_id,
+            concepts.c.subject_id == subject_id,
+            concepts.c.name_norm == concept.name_norm,
+        )
+    ).scalar_one()
 
 
 class PgNoteRepo:
@@ -376,24 +381,6 @@ class PgNoteRepo:
                     for seq, passage in enumerate(note.passages, start=1)
                 ],
             )
-        if note.exercises:
-            self._conn.execute(
-                insert(exercises),
-                [
-                    {
-                        "id": uuid4(),
-                        "user_id": self._user_id,
-                        "note_id": note_id,
-                        "seq": seq,
-                        "name": exercise.name,
-                        "instructions": exercise.instructions,
-                        "kind": exercise.kind,
-                        "tempo_bpm": exercise.tempo_bpm,
-                        "duration_min": exercise.duration_min,
-                    }
-                    for seq, exercise in enumerate(note.exercises, start=1)
-                ],
-            )
         concept_ids: dict[str, UUID] = {}
 
         def concept_id(concept: ConceptName) -> UUID:
@@ -401,24 +388,6 @@ class PgNoteRepo:
                 concept_ids[concept.name_norm] = self._concept_id(subject_id, concept)
             return concept_ids[concept.name_norm]
 
-        if note.quiz_items:
-            self._conn.execute(
-                insert(quiz_items),
-                [
-                    {
-                        "id": uuid4(),
-                        "user_id": self._user_id,
-                        "note_id": note_id,
-                        "seq": seq,
-                        "question": item.question,
-                        "options": list(item.options),
-                        "answer_index": item.answer_index,
-                        "explanation": item.explanation,
-                        "concept_id": concept_id(item.concept) if item.concept else None,
-                    }
-                    for seq, item in enumerate(note.quiz_items, start=1)
-                ],
-            )
         for concept in note.concepts:
             self._conn.execute(
                 pg_insert(note_concepts)
@@ -438,28 +407,7 @@ class PgNoteRepo:
             )
 
     def _concept_id(self, subject_id: UUID, concept: ConceptName) -> UUID:
-        """The subject's concept with this name_norm, created with this spelling if new."""
-        inserted = self._conn.execute(
-            pg_insert(concepts)
-            .values(
-                id=uuid4(),
-                user_id=self._user_id,
-                subject_id=subject_id,
-                name=concept.name,
-                name_norm=concept.name_norm,
-            )
-            .on_conflict_do_nothing(constraint="concepts_user_subject_name_norm_key")
-            .returning(concepts.c.id)
-        ).scalar_one_or_none()
-        if inserted is not None:
-            return inserted
-        return self._conn.execute(
-            select(concepts.c.id).where(
-                concepts.c.user_id == self._user_id,
-                concepts.c.subject_id == subject_id,
-                concepts.c.name_norm == concept.name_norm,
-            )
-        ).scalar_one()
+        return upsert_concept(self._conn, self._user_id, subject_id, concept)
 
     def get(self, note_id: UUID) -> NoteRow | None:
         m = (
@@ -471,7 +419,7 @@ class PgNoteRepo:
         )
         return None if m is None else _note_row(m)
 
-    # --- passages, exercises, quiz items, concepts -------------------------------------------
+    # --- passages and concepts ---------------------------------------------------------------
 
     def passages(self, note_id: UUID, start: int, stop: int) -> tuple[PassageRow, ...]:
         rows = self._conn.execute(
@@ -493,48 +441,6 @@ class PgNoteRepo:
         ).scalar_one()
         return int(count)
 
-    def exercises(self, note_id: UUID) -> tuple[ExerciseRow, ...]:
-        rows = self._conn.execute(
-            select(exercises)
-            .where(exercises.c.note_id == note_id, exercises.c.user_id == self._user_id)
-            .order_by(exercises.c.seq)
-        ).mappings()
-        return tuple(
-            ExerciseRow(
-                id=m["id"],
-                seq=m["seq"],
-                name=m["name"],
-                instructions=m["instructions"],
-                kind=m["kind"],
-                tempo_bpm=m["tempo_bpm"],
-                duration_min=m["duration_min"],
-            )
-            for m in rows
-        )
-
-    def quiz_items(self, note_id: UUID) -> tuple[QuizItemRow, ...]:
-        rows = self._conn.execute(
-            select(quiz_items, concepts.c.name.label("concept_name"))
-            .outerjoin(
-                concepts,
-                (concepts.c.id == quiz_items.c.concept_id) & (concepts.c.user_id == self._user_id),
-            )
-            .where(quiz_items.c.note_id == note_id, quiz_items.c.user_id == self._user_id)
-            .order_by(quiz_items.c.seq)
-        ).mappings()
-        return tuple(
-            QuizItemRow(
-                id=m["id"],
-                seq=m["seq"],
-                question=m["question"],
-                options=tuple(m["options"]),
-                answer_index=m["answer_index"],
-                explanation=m["explanation"],
-                concept=m["concept_name"],
-            )
-            for m in rows
-        )
-
     def concepts(self, note_id: UUID) -> tuple[ConceptRow, ...]:
         rows = self._conn.execute(
             select(concepts)
@@ -552,62 +458,6 @@ class PgNoteRepo:
             )
             for m in rows
         )
-
-    # --- artifacts ---------------------------------------------------------------------------
-
-    def artifacts(self, note_id: UUID) -> tuple[ArtifactRow, ...]:
-        rows = self._conn.execute(
-            select(
-                note_artifacts.c.id,
-                note_artifacts.c.note_id,
-                note_artifacts.c.kind,
-                note_artifacts.c.title,
-                note_artifacts.c.bytes,
-                note_artifacts.c.created_at,
-            )
-            .where(note_artifacts.c.note_id == note_id, note_artifacts.c.user_id == self._user_id)
-            .order_by(note_artifacts.c.created_at, note_artifacts.c.id)
-        ).mappings()
-        return tuple(_artifact_row(m, html=None) for m in rows)
-
-    def add_artifact(
-        self, note_id: UUID, kind: ArtifactKind, title: str, html: str, now: datetime
-    ) -> ArtifactRow:
-        require_note(self._conn, self._user_id, note_id)
-        encoded = html.encode("utf-8")
-        m = (
-            self._conn.execute(
-                insert(note_artifacts)
-                .values(
-                    id=uuid4(),
-                    user_id=self._user_id,
-                    note_id=note_id,
-                    kind=kind,
-                    title=title,
-                    html=html,
-                    html_sha256=hashlib.sha256(encoded).hexdigest(),
-                    bytes=len(encoded),
-                    created_at=now,
-                )
-                .returning(note_artifacts)
-            )
-            .mappings()
-            .one()
-        )
-        return _artifact_row(m, html=m["html"])
-
-    def artifact(self, artifact_id: UUID) -> ArtifactRow | None:
-        m = (
-            self._conn.execute(
-                select(note_artifacts).where(
-                    note_artifacts.c.id == artifact_id,
-                    note_artifacts.c.user_id == self._user_id,
-                )
-            )
-            .mappings()
-            .one_or_none()
-        )
-        return None if m is None else _artifact_row(m, html=m["html"])
 
     # --- search ------------------------------------------------------------------------------
 

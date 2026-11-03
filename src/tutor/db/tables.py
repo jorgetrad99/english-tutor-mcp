@@ -30,12 +30,11 @@ USER_TABLES: tuple[str, ...] = (
     "sources",
     "notes",
     "note_passages",
-    "note_artifacts",
-    "exercises",
-    "quiz_items",
     "concepts",
     "note_concepts",
     "concept_links",
+    "exercise_templates",
+    "template_instances",
 )
 # Seed tables: no RLS, read only for tutor_app.
 TRACK_TABLES: tuple[str, ...] = ("track_items", "track_chunks")
@@ -350,48 +349,6 @@ note_passages = sa.Table(
     _req("tsv", TSVECTOR),
 )
 
-note_artifacts = sa.Table(
-    "note_artifacts",
-    metadata,
-    _uuid_pk(),
-    _req("user_id", sa.Uuid),
-    _req("note_id", sa.Uuid),
-    _req("kind", sa.Text),
-    _req("title", sa.Text),
-    _req("html", sa.Text),
-    _req("html_sha256", sa.Text),
-    _req("bytes", sa.Integer),
-    _req("created_at", TS),
-)
-
-exercises = sa.Table(
-    "exercises",
-    metadata,
-    _uuid_pk(),
-    _req("user_id", sa.Uuid),
-    _req("note_id", sa.Uuid),
-    _req("seq", sa.Integer),
-    _req("name", sa.Text),
-    _req("instructions", sa.Text),
-    _req("kind", sa.Text),
-    _opt("tempo_bpm", sa.SmallInteger),
-    _opt("duration_min", sa.SmallInteger),
-)
-
-quiz_items = sa.Table(
-    "quiz_items",
-    metadata,
-    _uuid_pk(),
-    _req("user_id", sa.Uuid),
-    _req("note_id", sa.Uuid),
-    _req("seq", sa.Integer),
-    _req("question", sa.Text),
-    _req("options", TEXT_ARRAY),
-    _req("answer_index", sa.SmallInteger),
-    _opt("explanation", sa.Text),
-    _opt("concept_id", sa.Uuid),
-)
-
 concepts = sa.Table(
     "concepts",
     metadata,
@@ -417,4 +374,57 @@ concept_links = sa.Table(
     sa.Column("to_id", sa.Uuid, primary_key=True),
     sa.Column("kind", sa.Text, primary_key=True),
     _req("user_id", sa.Uuid),
+)
+
+exercise_templates = sa.Table(
+    "exercise_templates",
+    metadata,
+    _uuid_pk(),
+    _req("user_id", sa.Uuid),
+    _req("subject_id", sa.Uuid),
+    _req("name", sa.Text),
+    _req("name_norm", sa.Text),
+    _opt("description", sa.Text),
+    _req("template_purpose", sa.Text),
+    _opt("practice_kind", sa.Text),
+    _req("grading_kind", sa.Text),
+    _opt("text_match", sa.Text),
+    _opt("numeric_tolerance", sa.Numeric),
+    _req("pool_draw", sa.Text),
+    _opt("pool_count", sa.SmallInteger),
+    _req("needs_view", sa.Boolean),
+    _req("params", JSONB),
+    _opt("options_param", sa.Text),
+    _req("html", sa.Text),
+    _req("html_sha256", sa.Text),
+    _req("bytes", sa.Integer),
+    _req("guide_version", sa.Integer),
+    _req("status", sa.Text),
+    _opt("supersedes_template_id", sa.Uuid),
+    _req("created_at", TS),
+    _req("updated_at", TS),
+    _opt("retired_at", TS),
+)
+
+template_instances = sa.Table(
+    "template_instances",
+    metadata,
+    _uuid_pk(),
+    _req("user_id", sa.Uuid),
+    _req("subject_id", sa.Uuid),
+    _opt("note_id", sa.Uuid),
+    _opt("seq", sa.Integer),
+    _req("template_id", sa.Uuid),
+    _req("template_purpose", sa.Text),
+    _opt("practice_kind", sa.Text),
+    _req("grading_kind", sa.Text),
+    _req("params", JSONB),
+    _req("prompt_text", sa.Text),
+    _opt("concept_id", sa.Uuid),
+    _req("origin", sa.Text),
+    _req("content_key", sa.Text),
+    _req("status", sa.Text),
+    _opt("supersedes_instance_id", sa.Uuid),
+    _req("created_at", TS),
+    _opt("retired_at", TS),
 )

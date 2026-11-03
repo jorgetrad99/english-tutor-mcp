@@ -18,12 +18,14 @@ from tutor.db.repos.people import PgAuditRepo, PgProfileRepo, PgUserRepo
 from tutor.db.repos.plans import PgPlanRepo
 from tutor.db.repos.sessions import PgSessionRepo
 from tutor.db.repos.subjects import PgSubjectRepo
+from tutor.db.repos.templates import PgInstanceRepo, PgTemplateRepo
 from tutor.db.repos.track import PgTrackRepo
 from tutor.db.tables import users
 from tutor.services.ports import (
     AuditRepo,
     GlossaryRepo,
     IdentityResolver,
+    InstanceRepo,
     NoteRepo,
     PlanRepo,
     ProfileRepo,
@@ -31,6 +33,7 @@ from tutor.services.ports import (
     ReviewRepo,
     SessionRepo,
     SubjectRepo,
+    TemplateRepo,
     TrackRepo,
     UnitOfWork,
     UowFactory,
@@ -91,6 +94,8 @@ class PgUnitOfWork:
     audit: AuditRepo
     subjects: SubjectRepo
     notes: NoteRepo
+    templates: TemplateRepo
+    instances: InstanceRepo
 
     def __init__(self, conn: Connection, user_id: UUID) -> None:
         self.conn = conn
@@ -105,6 +110,8 @@ class PgUnitOfWork:
         self.audit = PgAuditRepo(conn, user_id)
         self.subjects = PgSubjectRepo(conn, user_id)
         self.notes = PgNoteRepo(conn, user_id)
+        self.templates = PgTemplateRepo(conn, user_id)
+        self.instances = PgInstanceRepo(conn, user_id)
 
 
 def pg_uow_factory(engine: Engine) -> UowFactory:

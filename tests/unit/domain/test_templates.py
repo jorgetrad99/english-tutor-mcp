@@ -1141,3 +1141,11 @@ def test_grade_self_report_and_wrong_shapes() -> None:
     assert grade(ok(SELF), values, Draw(), ValueAnswer("x")) == (FieldError("answer", "invalid"),)
     table = params_ok(ok(TABLE), ParamPair("table", "text_table", [["a"]]))
     assert grade(ok(TABLE), table, Draw(), ValueAnswer("x")) == (FieldError("answer", "invalid"),)
+
+
+def test_spec_hash_survives_the_json_round_trip() -> None:
+    # Stored specs come back from JSON: number bounds must already be floats, integer bounds ints.
+    for data in (NUMERIC, SELF, CHOICE, TABLE):
+        spec = ok(data)
+        stored = param_specs_from_json(json.loads(json.dumps(param_specs_to_json(spec.params))))
+        assert spec_hash(dataclasses.replace(spec, params=stored)) == spec_hash(spec)

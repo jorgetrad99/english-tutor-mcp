@@ -105,7 +105,7 @@ def test_rollback_restores_every_table(
             prompt_text="Suma.",
             concept=ConceptName("Ritmo", "ritmo"),
             origin="ingest",
-            key="k" * 64,
+            key="0" * 64,
             now=now,
         )
         raise RuntimeError("abort")
