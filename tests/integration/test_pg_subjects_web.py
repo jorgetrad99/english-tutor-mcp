@@ -25,7 +25,7 @@ from web_pg_support import (
 )
 
 from tutor.app import BodySizeGuard, RequestLog, build_app
-from tutor.db.tables import notes, users
+from tutor.db.tables import exercise_templates, notes, template_instances, users
 from tutor.db.uow import PgIdentity, pg_uow_factory
 from tutor.domain.notes import MAX_WEB_NOTE_CHARS
 from tutor.services.context import Services
@@ -178,10 +178,10 @@ PASSWORD = "clave"  # noqa: S105 - a fixture's throwaway password
 EXTRA = {"extra": ("", b"", "application/octet-stream")}  # makes the body multipart
 
 
-def test_upload_and_paste_on_postgres_through_build_app(
+def test_upload_paste_and_retire_on_postgres_through_build_app(
     engine: Engine, login_engine: Engine, tmp_path: Path
 ) -> None:
-    """Slice D Task 4: real multipart bodies under BodySizeGuard with a session cookie,
+    """Slice D Tasks 4 and 5: real multipart bodies under BodySizeGuard with a session cookie,
     the PDF parsed in its child process, the rows read back as the owner."""
     settings = replace(
         pg_settings(),
@@ -258,6 +258,15 @@ def test_upload_and_paste_on_postgres_through_build_app(
         )
         assert over.status_code == 413  # the guard's own answer past the route's 2 MB
 
+        foreign_retire = f"/app/templates/{theirs.template_id}/retire"
+        assert c.post(foreign_retire, data={"csrf_token": token}).status_code == 404
+        retire = f"/app/templates/{world.template_id}/retire"
+        row = c.post(retire, data={"csrf_token": token}, headers={"hx-request": "true"})
+        assert row.status_code == 200 and "<form" not in row.text and "Retirada" in row.text
+        back = c.post(retire, data={"csrf_token": token})  # already_retired
+        assert back.status_code == 303
+        assert back.headers["location"] == f"/app/subjects/{world.subject_id}"
+
     with engine.connect() as conn:
         saved = {
             r.id: r
@@ -267,5 +276,18 @@ def test_upload_and_paste_on_postgres_through_build_app(
                 )
             )
         }
+        statuses = {
+            r.id: r.status
+            for r in conn.execute(
+                select(exercise_templates.c.id, exercise_templates.c.status).where(
+                    exercise_templates.c.id.in_([world.template_id, theirs.template_id])
+                )
+            )
+        }
+        instance_status = conn.execute(
+            select(template_instances.c.status).where(template_instances.c.id == world.instance_id)
+        ).scalar_one()
     assert saved[pdf_note].origin == "web" and saved[pdf_note].raw_text == LESSON
     assert saved[text_note].origin == "web" and len(saved[text_note].raw_text) == len(long_text)
+    assert statuses == {world.template_id: "retired", theirs.template_id: "active"}
+    assert instance_status == "active"  # amendment A56: the instances are untouched

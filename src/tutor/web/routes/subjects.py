@@ -72,7 +72,7 @@ def note_page(
     return render(request, "pages/note.html", {"page": page, "frames": frames})
 
 
-# --- writes (slice D Task 4) --------------------------------------------------------------
+# --- writes (slice D Tasks 4 and 5) --------------------------------------------------------------
 
 UploadKind = Literal["pdf", "text"]
 
@@ -233,3 +233,20 @@ def subject_add_text(
     except ServiceError as error:
         errors = _not_found_or_fields(error, "text", values)
     return _upload_answer(request, page, "text", values, errors, saved)
+
+
+@router.post("/app/templates/{template_id}/retire")
+def template_retire(
+    template_id: str, request: Request, user: Annotated[User, Depends(current_user)]
+) -> Response:
+    """Retire one template (spec 15.13 D9, ruling 59); its instances are untouched (amendment
+    A56). A second POST is `already_retired` and answered as the first. HTMX gets the row
+    without its button, no-JS a 303 back to the subject page."""
+    port = get_subjects_port(request)
+    tid = parse_uuid(template_id)
+    ref = port.template(user.id, tid) if tid else None
+    if ref is None or tid is None or port.retire_template(user.id, tid) is None:
+        raise HTTPException(status_code=404)
+    if not is_htmx(request):
+        return RedirectResponse(f"{SUBJECTS_PATH}/{ref.subject_id}", status_code=303)
+    return render(request, "partials/template_row.html", {"t": ref.card, "retired": True})

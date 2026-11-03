@@ -1067,7 +1067,7 @@ msgstr "no data"
 msgid "Última práctica: %(day)s"
 msgstr "Last practice: %(day)s"
 
-# Uploads and pasted text (slice D Task 4)
+# Uploads, pasted text and the template retire button (slice D Tasks 4 and 5)
 msgid "Agregar material"
 msgstr "Add material"
 
@@ -1134,6 +1134,9 @@ msgstr "Paste the text of your material."
 msgid "Pegar texto"
 msgstr "Paste text"
 
+msgid "Retirar"
+msgstr "Retire"
+
 msgid "Si lo dejas vacío, usamos el nombre del archivo."
 msgstr "If you leave it empty, we use the file name."
 
@@ -1148,3 +1151,6 @@ msgstr "Title"
 
 msgid "Ver el apunte"
 msgstr "See the note"
+
+msgid "¿Retirar esta plantilla? Claude ya no la usará para ejercicios nuevos."
+msgstr "Retire this template? Claude will no longer use it for new exercises."

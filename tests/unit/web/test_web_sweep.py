@@ -63,10 +63,11 @@ POSTPONED_PREFIXES = (
 )
 NOT_USER_OWNED = {"key"}  # admin setting keys are global and guarded by require_admin
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
-# The subjects writes (slice D Task 4): the sweeps below must reach each of them.
+# The subjects writes (slice D Tasks 4 and 5): the sweeps below must reach each of them.
 SUBJECT_WRITES = {
     ("POST", "/app/subjects/{subject_id}/pdf"),
     ("POST", "/app/subjects/{subject_id}/text"),
+    ("POST", "/app/templates/{template_id}/retire"),
 }
 PARAM = re.compile(r"{(\w+)(?::\w+)?}")
 

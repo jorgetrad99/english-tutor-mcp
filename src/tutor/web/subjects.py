@@ -36,6 +36,7 @@ from tutor.services.subjects import get_subjects
 from tutor.services.templates import (
     instance_counts,
     list_templates,
+    retire_template,
     web_instance_document,
 )
 from tutor.web.frames import FrameUrl
@@ -80,6 +81,16 @@ class TemplateCard:
     grading_kind: GradingKind
     practice_kind: PracticeKind | None
     active_instances: int
+
+
+@dataclass(frozen=True, slots=True)
+class TemplateRef:
+    """One of the learner's templates in any status, with the subject it belongs to (the retire
+    route's ownership check, its redirect and its row)."""
+
+    subject_id: UUID
+    card: TemplateCard
+    retired: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,6 +150,8 @@ class SubjectsPort(Protocol):
     ) -> WebNoteSaved:
         """Raises ServiceError with field paths (`title`, `lesson_ref`, `raw_text`)."""
         ...
+
+    def template(self, user_id: UUID, template_id: UUID) -> TemplateRef | None: ...
 
     def retire_template(self, user_id: UUID, template_id: UUID) -> RetireOutcome | None: ...
 
@@ -292,8 +305,26 @@ class ServicesSubjects:
         saved = save_web_note(self._svc, user_id, subject_id, source, title, lesson_ref, raw_text)
         return WebNoteSaved(note_id=saved.note_id, outcome=saved.outcome)
 
+    def template(self, user_id: UUID, template_id: UUID) -> TemplateRef | None:
+        with self._svc.uow(user_id) as uow:
+            row = uow.templates.get(template_id)
+            if row is None:
+                return None
+            count = dict(uow.instances.active_counts(row.subject_id)).get(row.id, 0)
+        spec = row.spec
+        card = TemplateCard(
+            id=row.id,
+            name=spec.name,
+            description=spec.description,
+            purpose=spec.purpose,
+            grading_kind=spec.grading_kind,
+            practice_kind=spec.practice_kind,
+            active_instances=count,
+        )
+        return TemplateRef(subject_id=row.subject_id, card=card, retired=row.status == "retired")
+
     def retire_template(self, user_id: UUID, template_id: UUID) -> RetireOutcome | None:
-        raise NotImplementedError  # slice D Task 5 (templates.retire_template) fills this
+        return retire_template(self._svc, user_id, template_id)
 
 
 class MemorySubjects(ServicesSubjects):
@@ -344,8 +375,13 @@ class MemorySubjects(ServicesSubjects):
         self.ensure_user(user_id)
         return super().add_text(user_id, subject_id, title, lesson_ref, text)
 
+    def template(self, user_id: UUID, template_id: UUID) -> TemplateRef | None:
+        self.ensure_user(user_id)
+        return super().template(user_id, template_id)
+
     def retire_template(self, user_id: UUID, template_id: UUID) -> RetireOutcome | None:
-        raise NotImplementedError  # slice D Task 5 fills this
+        self.ensure_user(user_id)
+        return super().retire_template(user_id, template_id)
 
 
 def install_subjects(app: FastAPI, port: SubjectsPort) -> None:

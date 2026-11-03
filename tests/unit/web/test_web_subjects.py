@@ -16,15 +16,17 @@ from fastapi.testclient import TestClient
 from httpx2 import Response
 from pdf_fixtures import build_pdf
 from subject_web_fixtures import SubjectWorld, seed_subject_world
+from template_fixtures import numeric_params
 
 from tutor.domain.dashboard.types import Lang
-from tutor.domain.notes import MAX_WEB_NOTE_CHARS
+from tutor.domain.notes import MAX_WEB_NOTE_CHARS, InstanceInput, NoteInput
 from tutor.services import pdf_text
 from tutor.services._pdf_worker import parse
 from tutor.services.errors import ServiceError
-from tutor.services.notes import get_whole_note, list_notes
+from tutor.services.notes import get_whole_note, list_notes, save_notes
 from tutor.services.pdf_text import MAX_PDF_BYTES, MAX_PDF_PAGES, PdfProblem, read_answer
 from tutor.services.progress import subject_progress
+from tutor.services.templates import list_templates
 from tutor.web.demo import DemoUsers
 from tutor.web.memory import MemoryBackend
 from tutor.web.subjects import MemorySubjects
@@ -118,8 +120,15 @@ def test_the_memory_adapter_writes_only_for_the_owner(
     with pytest.raises(ServiceError) as caught:
         subjects.add_text(demo.ana, beto_world.subject_id, "Texto", None, "Hola.")
     assert caught.value.code == "not_found"
-    with pytest.raises(NotImplementedError):
-        subjects.retire_template(demo.ana, ana_world.template_id)
+    assert subjects.template(demo.ana, beto_world.template_id) is None
+    assert subjects.retire_template(demo.ana, beto_world.template_id) is None
+    ref = subjects.template(demo.ana, ana_world.template_id)
+    assert ref is not None and ref.subject_id == ana_world.subject_id and not ref.retired
+    assert ref.card.active_instances == 1
+    assert subjects.retire_template(demo.ana, ana_world.template_id) == "retired"
+    assert subjects.retire_template(demo.ana, ana_world.template_id) == "already_retired"
+    again = subjects.template(demo.ana, ana_world.template_id)
+    assert again is not None and again.retired
 
 
 # --- the pages (Task 2) -------------------------------------------------------------------------
@@ -609,3 +618,73 @@ def test_review_focus_3_uploads_to_foreign_or_missing_subjects_are_not_found(
         assert _post_text(c, sid).status_code == 404, sid
         assert _post_text(c, sid, htmx=True).status_code == 404, sid
     assert _notes(subjects, demo.beto, beto_world.subject_id) == before
+
+
+# --- retiring a template (Task 5) ---------------------------------------------------------------
+
+
+def _retire(c: TestClient, template_id: UUID | str, *, htmx: bool = False) -> Response:
+    return c.post(
+        f"/app/templates/{template_id}/retire",
+        data={"csrf_token": csrf_of(c)},
+        headers=_hx(htmx),
+    )
+
+
+def test_each_template_row_has_a_retire_form(
+    login: Login, demo: DemoUsers, ana_world: SubjectWorld
+) -> None:
+    html = login(demo.ana).get(f"/app/subjects/{ana_world.subject_id}").text
+    row = _section(html, f'<tr id="template-{ana_world.template_id}"', "</tr>")
+    assert f'action="/app/templates/{ana_world.template_id}/retire"' in row
+    assert 'name="csrf_token"' in row and 'method="post"' in row
+    confirm = "¿Retirar esta plantilla? Claude ya no la usará para ejercicios nuevos."
+    assert f'hx-confirm="{confirm}"' in row
+
+
+def test_review_focus_6_retiring_from_the_website(
+    login: Login, subjects: MemorySubjects, demo: DemoUsers, ana_world: SubjectWorld
+) -> None:
+    # Review Focus 6
+    c = login(demo.ana)
+    response = _retire(c, ana_world.template_id)
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/app/subjects/{ana_world.subject_id}"
+    listed = list_templates(subjects.svc, demo.ana, ana_world.subject_id).templates
+    assert ana_world.template_id not in [t.template_id for t in listed]
+    data = InstanceInput(ana_world.template_id, numeric_params(5.0), "Suma.", None, None)
+    note = NoteInput(title="Clase 9", lesson_ref="L9", position=9, raw_text="x", instances=[data])
+    with pytest.raises(ServiceError) as caught:
+        save_notes(subjects.svc, demo.ana, ana_world.subject_id, None, [note])
+    assert caught.value.code == "not_found"
+    page = c.get(f"/app/subjects/{ana_world.subject_id}").text
+    assert f'/app/templates/{ana_world.template_id}/retire"' not in page
+    assert f'/app/templates/{ana_world.table_template_id}/retire"' in page
+    second = _retire(c, ana_world.template_id, htmx=True)
+    assert second.status_code == 200  # already_retired is not an error
+    assert _retire(c, ana_world.template_id).status_code == 303
+    # Amendment A56: its instances stay active and shown.
+    note_page = c.get(f"/app/notes/{ana_world.note_id}").text
+    assert len(FRAME.findall(note_page)) == 2 and "Respuesta numérica" in note_page
+
+
+def test_the_htmx_retire_answer_is_the_row_without_its_button(
+    login: Login, demo: DemoUsers, ana_world: SubjectWorld
+) -> None:
+    row = _retire(login(demo.ana), ana_world.template_id, htmx=True)
+    assert row.status_code == 200 and "<html" not in row.text
+    assert f'<tr id="template-{ana_world.template_id}"' in row.text
+    assert "<form" not in row.text and "Retirada" in row.text
+    assert "Respuesta numérica" in row.text
+
+
+def test_review_focus_3_retiring_a_foreign_or_missing_template_changes_nothing(
+    login: Login, subjects: MemorySubjects, demo: DemoUsers, beto_world: SubjectWorld
+) -> None:
+    # Review Focus 3 (the retire POST)
+    c = login(demo.ana)
+    for tid in (beto_world.template_id, uuid4(), "nope", "0" * 40):
+        assert _retire(c, tid).status_code == 404, tid
+        assert _retire(c, tid, htmx=True).status_code == 404, tid
+    listed = list_templates(subjects.svc, demo.beto, beto_world.subject_id).templates
+    assert beto_world.template_id in [t.template_id for t in listed]

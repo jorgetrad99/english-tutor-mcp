@@ -1,8 +1,16 @@
-{# One active template on the subject page. The retire button comes with slice D Task 5. #}
+{# One active template on the subject page, with its retire button (slice D Task 5, ruling 59).
+   After a retire POST over HTMX the same row comes back marked retired and without the button;
+   its exercises stay as they are (amendment A56). #}
 {% import "macros/subjects.html" as sl %}
-<tr id="template-{{ t.id }}">
+{% set is_retired = retired if retired is defined else false %}
+<tr id="template-{{ t.id }}"{% if is_retired %} class="template-row--retired"{% endif %}>
   <td data-label="{{ _('Plantilla') }}">{{ t.name }}{% if t.description %}<br><span class="muted">{{ t.description }}</span>{% endif %}</td>
   <td data-label="{{ _('Uso') }}">{{ sl.purpose_label(t.purpose) }}</td>
   <td data-label="{{ _('Tipo de calificación') }}">{{ sl.grading_label(t.grading_kind) }}</td>
   <td data-label="{{ _('Ejercicios activos') }}">{{ t.active_instances|integer }}</td>
+  <td data-label="{{ _('Acciones') }}">{% if is_retired %}<span class="chip chip--muted" role="status">{{ _("Retirada") }}</span>{% else %}
+    <form class="inline-form" method="post" action="/app/templates/{{ t.id }}/retire" hx-post="/app/templates/{{ t.id }}/retire" hx-target="#template-{{ t.id }}" hx-swap="outerHTML" hx-confirm="{{ _('¿Retirar esta plantilla? Claude ya no la usará para ejercicios nuevos.') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="btn btn--ghost btn--small">{{ _("Retirar") }}<span class="sr-only"> {{ t.name }}</span></button>
+    </form>{% endif %}</td>
 </tr>
