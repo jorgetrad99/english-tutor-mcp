@@ -79,7 +79,9 @@ are 404): clients must send the header; a client that tries the OAuth flow inste
 Recipes: `dev-token sub=dev-nuevo hours=2` (another token from the running app), `dev-logs`
 (follow `app-dev`), `dev-down` (stops `app-dev` and `migrate-dev`; `db` keeps running and keeps
 its data), `dev-reset` (DESTRUCTIVE: stops the whole compose project, `db` included, and deletes
-the `pgdata` volume; refuses unless `CONFIRM=1`), `inspector-dev` (host Node).
+this project's `pgdata` volume, whose name compose resolves: `uv run python scripts/dev_pgdata.py`
+prints it, so a worktree never touches the main checkout's database; refuses unless `CONFIRM=1`),
+`inspector-dev` (host Node).
 
 Notes:
 
@@ -279,7 +281,7 @@ http://localhost:8000/login (not `127.0.0.1`) and add the MCP with
 
   ```
   docker compose rm -sfv db
-  docker volume rm english_tutor_mcp_pgdata
+  uv run python scripts/dev_pgdata.py --remove
   ```
 
   then repeat steps 1 and 3.

@@ -9,9 +9,8 @@ export MIGRATION_DATABASE_URL := env("MIGRATION_DATABASE_URL", env("DATABASE_URL
 # In CI the db-test Postgres is a job service, so compose is skipped there.
 db_test_up := if env("CI", "") == "true" { "uv --version" } else { "docker compose up -d --wait db-test" }
 
-# Dev profile (docker-compose.yml): compose names volumes <project>_pgdata; the project is the
-# directory name unless COMPOSE_PROJECT_NAME says otherwise. `dev-reset` deletes data only with CONFIRM=1.
-compose_project := env("COMPOSE_PROJECT_NAME", "english-tutor-mcp")
+# Dev profile (docker-compose.yml): `dev-reset` deletes data only with CONFIRM=1, and only this
+# compose project's pgdata volume, whose name compose itself resolves (scripts/dev_pgdata.py).
 confirm := env("CONFIRM", "")
 
 default:
@@ -126,10 +125,10 @@ dev-logs:
 dev-down:
     docker compose --profile dev down app-dev migrate-dev
 
-# DESTRUCTIVE: stops this compose project (db included) and deletes the pgdata volume; needs CONFIRM=1
+# DESTRUCTIVE: stops this compose project (db included) and deletes its pgdata volume; needs CONFIRM=1
 dev-reset:
-    {{ if confirm == "1" { "docker compose --profile dev down --remove-orphans" } else { "echo dev-reset deletes the " + compose_project + "_pgdata volume; re-run with CONFIRM=1 to proceed" } }}
-    {{ if confirm == "1" { "docker volume rm " + compose_project + "_pgdata" } else { "exit 1" } }}
+    {{ if confirm == "1" { "docker compose --profile dev down --remove-orphans" } else { "echo dev-reset deletes the pgdata volume of this compose project. Print its name with: uv run python scripts/dev_pgdata.py. Re-run with CONFIRM=1 to proceed." } }}
+    {{ if confirm == "1" { "uv run python scripts/dev_pgdata.py --remove" } else { "exit 1" } }}
 
 # MCP Inspector on host Node against the dev profile: prints the token and the connection lines, then opens the UI
 inspector-dev:
