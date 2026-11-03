@@ -749,7 +749,10 @@ class V0Settings:
 
 
 def pg_web_deps(engine: Engine, settings: Settings, config: WebConfig) -> WebDeps:
-    """Production wiring of the dashboard ports for v0."""
+    """Production wiring of the dashboard ports for v0.
+
+    The test login picks users out of the memory backend, so it is refused here; the dev login
+    (config.dev_auth) signs in through `sign_in` like Google does, so Postgres is fine."""
     if config.test_login:
         raise ValueError("test login needs the in-memory backend; never wire it to Postgres")
     backend = PgWebBackend(engine, _utc_now)

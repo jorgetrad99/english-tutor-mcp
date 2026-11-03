@@ -8,6 +8,7 @@
 - **ADR:** `docs/adr/0004-subjects-context-beside-english.md`
 - **Spike:** `docs/spike/05-mcp-apps-practice-view.md`
 - **Amended:** 2026-11-02 by section 15 (exercise templates, ADR `docs/adr/0005-exercise-templates.md`). Where an earlier section and section 15 disagree, section 15 wins; the affected sections carry an "Amended by 15" line. Slice A's rulings and the final tool and field names are recorded in "Amendments" at the end (A1–A51, 2026-11-03).
+- **Amended:** 2026-11-03 by section 16 (subject metrics: accuracy per concept, time per item, streak, behaviour counts). Where an earlier section and section 16 disagree, section 16 wins; the affected sections carry an "Amended by 16" line.
 
 ## 1. Goal
 
@@ -146,6 +147,8 @@ Algorithm (one SQL statement in `PgNoteRepo.search`, mirrored in memory):
 
 Response rules: "Answer from the excerpts and, if needed, `get_note`. Say which lesson the answer comes from. If nothing matches, say so and offer to add the material."
 
+**Amended by 16:** each call records a `notes_searched` audit event with the `subject_id` filter (or null), the hit count and `fuzzy`; never the query (section 16.6).
+
 ### 5.2 `get_note`
 
 Returns the note's metadata, `clean_text` (up to 12,000 characters; `truncated: true` beyond, with `passage_count`), the note's instances (amended by 15: id, template name and purpose, `prompt_text`, public parameters only; answer-key and reveal parameters never leave the server here) and concepts. `passage_from`/`passage_to` (1-based, ≤ 10 passages per call) read a window of a long note.
@@ -178,6 +181,8 @@ Pure functions in `tutor.domain.practice_plan` (`PlanStatus` is a frozen datacla
 
 **Amended by 15 (applies to the rest of 6.2):** every practice item is one **showing** of a stored template instance. Quiz items and exercises are drawn from the subject's exercise instances by `practice_kind`; drill items are showings of the subject's pool instances, each with a draw the server makes and stores (section 15.4.1); the mix shares of `ear` below belong to `drill`, and text mode skips only instances whose template has `needs_view: true`. `practice_items` hold `instance_id` instead of `kind` and `prompt`, and `record_result` grades against that instance's stored parameters by its template's grading kind (section 15.8). The original text follows for history.
 
+**Amended by 16:** practice items also hold `shown_at`, set once by the server when a showing is first returned to a client; `record_result` refuses an item that was never shown, and time per item is `answered_at − shown_at` (section 16.4).
+
 `practice_items` rows hold `seq`, `kind` (`note_id`, `interval_id`, `quiz`, `exercise`), the server-generated `prompt` JSONB (for ear items: note name and frequency, options; for quiz: the item id, question and options; for exercise: the exercise id, name, instructions, tempo), and after answering: `answer` JSONB, `correct`, `score` (0–100), `answered_at`, `source` (`app`, `chat`).
 
 `next_exercise(session_id)` returns the first unanswered item or `done: true`. `record_result(session_id, item_id, answer)` grades on the server: ear and quiz compare with the prompt (`score` 100 or 0); exercise takes `{rating 1–4, tempo_bpm optional, minutes optional}` and scores `rating × 25`. The first answer wins; a repeat returns the stored result (`status: existing`). `end_practice(session_id, self_rating 1–4 optional)` closes the session with a computed `summary` (items answered, accuracy per kind, minutes) and records `practice_ended` in the audit log.
@@ -188,7 +193,7 @@ Rejected inputs are `validation_failed` on the field; a foreign or missing sessi
 
 ### 7.1 Tools
 
-~~Eleven~~ Fifteen new tools (amended by 15: two removed, six added), all additive to the released surface, names stable, every field titled and described, descriptions ≤ 120 words, every result with `response_rules`:
+~~Eleven~~ ~~Fifteen~~ Sixteen new tools (amended by 15: two removed, six added; amended by 16: `get_subject_progress` added), all additive to the released surface, names stable, every field titled and described, descriptions ≤ 120 words, every result with `response_rules`:
 
 | Tool | Input (required) | Output | Notes |
 | --- | --- | --- | --- |
@@ -209,6 +214,7 @@ Rejected inputs are `validation_failed` on the field; a foreign or missing sessi
 | `show_exercise` | `subject_id`, `instance_id` | `session_id`, `item_id`, the view | slice B; **new (15)**: Claude shows a chosen exercise in a class; app-enabled |
 | `record_result` | `session_id`, `item_id`, `answer` | graded result | idempotent per item; answer shapes by grading kind (15.8) |
 | `end_practice` | `session_id`; optional `self_rating` | summary, plan status | idempotent |
+| `get_subject_progress` | `subject_id` | accuracy per concept, time per item, streak, weekly counts | read; **new (16)**, section 16.8 |
 
 ~~`record_result.answer` is a tagged union by kind~~ **Amended by 15:** `record_result.answer` is a tagged union on `answer_kind` with closed shapes, one per grading kind: `{answer_kind: "choice_index", option_index: 2}`, `{answer_kind: "value", value: "la cuenta"}`, `{answer_kind: "values", values: ["C", "E", "G"]}`, `{answer_kind: "sequence", values: ["1810", "1821", "1857"]}`, `{answer_kind: "number", value: "3,14"}`, `{answer_kind: "self_report", rating: 3, tempo_bpm: 80, minutes: 10}`.
 
@@ -245,7 +251,7 @@ The text fallback: every result keeps a `content` text that states the item in w
 
 ### 8.2 Migration `0007_practice`
 
-`practice_plans`, `practice_sessions`, `practice_items`, same conventions. Amended by 15: `practice_items` reference `template_instances (id, user_id)` and `practice_sessions.mode` gains `class` (section 15.10). `practice_sessions.status` in `open`, `closed`, `incomplete`; one open session per user enforced by a partial unique index on `(user_id) WHERE status = 'open'`.
+`practice_plans`, `practice_sessions`, `practice_items`, same conventions. Amended by 15: `practice_items` reference `template_instances (id, user_id)` and `practice_sessions.mode` gains `class` (section 15.10). `practice_sessions.status` in `open`, `closed`, `incomplete`; one open session per user enforced by a partial unique index on `(user_id) WHERE status = 'open'`. Amended by 16: `practice_items.shown_at` with its `CHECK`, and a column-level update grant on `practice_items` (section 16.10).
 
 ### 8.3 Conventions and tests
 
@@ -259,7 +265,7 @@ The text fallback: every result keeps a `content` text that states the item in w
 New nav entry "Materias" after Glosario:
 
 - `/app/materias`: subjects with plan status (missed, projected end).
-- `/app/materias/{id}`: notes by source and position, practice history (date, items, accuracy), a PDF upload form (`multipart/form-data`, ≤ 20 MB, ≤ 200 pages, `pypdf`, one note per PDF, `origin = web`; empty extraction gives a validation error "el PDF no tiene texto").
+- `/app/materias/{id}`: notes by source and position, practice history (date, items, accuracy), a PDF upload form (`multipart/form-data`, ≤ 20 MB, ≤ 200 pages, `pypdf`, one note per PDF, `origin = web`; empty extraction gives a validation error "el PDF no tiene texto"). Amended by 16: a Progreso section with the subject metrics (section 16.9).
 - `/app/notas/{id}`: title, lesson reference, clean text, concepts, and each instance (amended by 15) in `<iframe sandbox="allow-scripts" referrerpolicy="no-referrer">` pointing at `/app/instancias/{iid}/raw`, with its `prompt_text` beside it.
 - `/app/instancias/{iid}/raw` (amended by 15; was `/app/notas/{id}/artefactos/{aid}/raw`): the composed template document (section 15.5, `web` bridge: answers are shown, not recorded, in v0) served from **a separate origin that sets and receives no cookies** (amended 2026-11-03, Task 4b security review; ADR 0005 decision 8), with headers `Content-Security-Policy: sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors <dashboard origin>` (`tutor.web.security.template_frame_csp`; `navigate-to` is not used, no browser enforces it), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: private, no-store`. The frame URL carries a short-lived signed frame token instead of the session cookie (its constraints are binding, section 10). The dashboard CSP sets `frame-src` to exactly the template origin, which serves only this route; the template-safety test gets an allowance for this one `iframe` tag. Slice C's `app_frame` document, when it is served by URL, sends the same policy.
 
@@ -268,7 +274,7 @@ Routes use the `app.state` port pattern (`web/profile.py`) with Postgres and mem
 ## 10. Security and privacy
 
 - Every new table is user-scoped with forced RLS; repos filter by user and check ownership before writes that reference another row.
-- All learner text (`goal_text`, `context_text`, note text, artifacts, exercises, quiz items, concept names, answers) is data: stored, returned only to its owner, never logged, never inside `response_rules`, instructions, errors or metrics, never marked safe in templates.
+- All learner text (`goal_text`, `context_text`, note text, artifacts, exercises, quiz items, concept names, answers) is data: stored, returned only to its owner, never logged, never inside `response_rules`, instructions, errors or metrics, never marked safe in templates. Amended by 16: metrics read no learner text except concept and template names, returned to their owner as data (section 16.11).
 - Templates (amended by 15; this bullet said "Artifacts"): the sandbox header and attribute are the boundary; template code never runs on the server and never shares a document with the app's host channel (section 15.11); the validator is hygiene. No `message` listener on the dashboard in v0. The session cookie keeps its `__Host-` prefix; state changes stay POST with CSRF. Before any multi-user exposure, artifacts move to a dedicated subdomain with signed URLs (ADR 0004 consequence). **Binding (2026-11-03, Task 4b security review):** the `web` and `app_frame` routes that serve a composed template send `Content-Security-Policy: sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; form-action 'none'` plus `base-uri 'none'` and `frame-ancestors` with the dashboard origin only, from a separate origin with no cookies, from their first release (section 9; `tutor.web.security.TEMPLATE_FRAME_CSP`).
 - **Binding on slices C and D (2026-11-03, Task 4b security re-review; ADR 0005 decision 8; slice A plan ruling 44).** (a) The sandboxed template has no network except WebRTC and DNS prefetch, which CSP cannot block (accepted because the payload holds no answer key). (b) The dashboard CSP sets `frame-src` to exactly the template origin (today it falls back to `default-src 'self'`). The template origin serves only `/app/instancias/{iid}/raw`: no redirects and no other routes, so nothing else can be framed or fetched there. (c) The signed frame token in the frame URL: its own signing key (never the session or CSRF secret), audience equal to the template origin; claims `user_id` and `instance_id`, accepted only on a GET of that one `/raw` and never as a session; `exp` of 5 minutes or less, single use preferred; the server re-checks that the instance belongs to the token's user under RLS, as that user; the reverse proxy drops query strings from its logs; the response sends `Referrer-Policy: no-referrer`. (d) The template origin is a separate ASGI app or a host-routed stack, not a route of the dashboard app: `SecurityHeadersMiddleware` (`tutor.web.security`) overwrites `Content-Security-Policy` and `Referrer-Policy` on every response it wraps. Slice D pins this with a test on the real `/raw` response (its CSP is `template_frame_csp(dashboard_origin)` and its `Referrer-Policy` is `no-referrer`). (e) Slice C's `app_frame` document is composed into a `srcdoc`, which no response header covers, so the server inserts the policy as `<meta http-equiv="Content-Security-Policy" content="...">`, the first child of `<head>` (a meta policy applies only to what follows it; the server adds `<head>` when the template has none). Its directives are those of `template_frame_csp` minus `sandbox` and `frame-ancestors`, which a meta policy ignores: `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'`. The frame's `sandbox="allow-scripts"` attribute supplies the sandbox. The guard already refuses `meta[http-equiv]` in template HTML, so the server's meta is the only one. No `app_frame` compose function exists in slice A; slice C implements this with a test.
 - The practice view is served with no extra permissions or domains; app-initiated tool calls arrive on the chat's OAuth session and pass `IdentityMiddleware` unchanged; the `ui://` read is authenticated by the OAuth proxy and carries no user data.
@@ -285,6 +291,7 @@ Done when `uv run just check` passes. Tests by area:
 - **Migrations**: upgrade and downgrade on `db-test`; isolation per table; the configurations exist; GIN and trigram indexes used (`EXPLAIN` contains `Bitmap Index Scan` for a query over 1,000 generated passages).
 - **MCP**: schema contract tests extended for the eleven tools (closed enums, titles, ≤ 120 words, `response_rules`); the tagged-union answer; caps rejected with `validation_failed` on the right field; `_meta.ui.resourceUri` on the two app tools; the `ui://` resource read in-process with the right MIME type; rules 2–4 lines; error coverage.
 - **Web**: pages render with memory and Postgres backends; the raw instance route (amended by 15) sends exactly the header set; anonymous and foreign-user access refused; upload caps; template safety allowance limited to the artifact frame.
+- **Metrics** (amended by 16): section 16.12.
 - **Spike 05** (manual, recorded): the practice view on claude.ai, Claude Desktop, iOS, Android; text fallback in Claude Code.
 
 ## 12. Requirement edit for the author (E37)
@@ -309,6 +316,7 @@ Written in `docs/v0/requirements-edits.md` as E37: a new product line "Subjects 
 - Spike 05 decides whether the practice view ships in v0 or the practice slice is text-only.
 - ~~Whether `exercise_kinds` with `ear` should be offered for non-music subjects.~~ Resolved by 15: `ear` becomes the generic `drill`, offered to every subject.
 - Template decisions and the remaining template questions: section 15.13.
+- Metrics decisions and questions: section 16.13.
 
 ## 15. Exercise templates (amendment, 2026-11-02)
 
@@ -402,7 +410,7 @@ A **parameter spec** is `{name, param_type, param_role, required, label, min_ite
 | `template_purpose`, `practice_kind`, `grading_kind` | copied from the template at creation |
 | `params` | validated against the spec by `validate_params`: unknown names, wrong types, caps and missing required parameters are `validation_failed` on the parameter's path; defaults filled; stored canonical (keys sorted) and complete, answer key, reveal and pool included; ≤ 32,768 bytes as JSON in all, and the public payload (prompt parameters plus the largest possible draw) ≤ 8,192 bytes. `choice_index`: the key must index the options. `exact_sequence` without a pool: 3–12 items, distinct after normalisation |
 | `prompt_text` | 1–500, data: the item in words, in the learner's language (the task; for a display, a caption that stands in for the view in text) |
-| `concept` | optional concept name, resolved in the subject |
+| `concept` | optional concept name, resolved in the subject. **Amended by 16:** it must match a concept of the same note (in `save_notes`) or an existing concept of the subject, otherwise `not_found`; an instance never creates a concept; an instance of a note with exactly one concept defaults to it (section 16.3) |
 | `origin` | `ingest` (from `save_notes`), `class` (from `create_instance`) |
 | `content_key` | `sha256` over subject, `template_id`, canonical params, `prompt_text` and `note_id`; unique per user. A repeat returns the stored instance with `instance_outcome: existing` |
 
@@ -475,7 +483,7 @@ Each example is a complete template with its parameter specs and a sample instan
 4. **Choose authored or pool:** many small items of one shape → a pool; items that are each unique → authored instances (15.4.1). Set `needs_view` when the item cannot be done from text.
 5. **Propose a small starter set** on a subject's first ingest: 2 to 4 templates, at most 5, covering the main kinds found in steps 2–3, the learner's `exercise_kinds` and their `preference` (more self-reported practice for `practice_first`, more recall and recognition for `theory_first`). Add a display only if the lessons show tables, diagrams, code or tablature. Show the whole list in one message (15.3) and wait for one yes.
 6. **Reuse before proposing.** Reuse a template when its grading kind and parameters fit, even if the topic differs: one multiple-choice template serves every lesson of a subject, one flashcard pool template serves every vocabulary list. Propose a new template only when the answer shape, the interaction or the display differs. New content is never a reason for a new template. A change the learner wants to an existing template is a replacement (`replaces_template_id`), with its own yes.
-7. **Pick parameters from the note.** Take terms, examples, numbers and answers from the note's text; never invent an answer key. `prompt_text` states the task in the learner's language. Put accepted variants in `accept` or a `text_list` key, plausible distractors from the same lesson in the options, one instance per idea, the concept name when there is one. Keep one pool per lesson or topic (6–40 entries is a good size) rather than one growing pool. Never place the answer in a prompt parameter.
+7. **Pick parameters from the note.** Take terms, examples, numbers and answers from the note's text; never invent an answer key. `prompt_text` states the task in the learner's language. Put accepted variants in `accept` or a `text_list` key, plausible distractors from the same lesson in the options, one instance per idea, the concept name when there is one (amended by 16: one of the note's concepts or an existing concept of the subject; section 16.3). Keep one pool per lesson or topic (6–40 entries is a good size) rather than one growing pool. Never place the answer in a prompt parameter.
 
 **How examples map across subjects** (a table in `choosing_exercises`, illustrative, not exhaustive): languages (flashcard pool, multiple choice on usage, conjugation table display); math (numeric answers, ordering the steps of a method, formula display); history (timeline ordering, multiple choice on causes, timeline table display); programming (`exact_case` output prediction, code display, self-reported coding exercise); cooking (ordering recipe steps, numeric scaling of quantities, self-reported cooking); music (ear pool, multiple choice on theory, tablature display, self-reported practice at a tempo).
 
@@ -556,7 +564,7 @@ An answer of the wrong shape for the instance is `validation_failed` on `answer`
 | `get_template_guide` | new (slice A) | in: optional `guide_section`. out: `guide_version`, `guide_section`, `text` (server-authored, not learner data) |
 | `list_templates` | new (slice A) | in: `subject_id`, optional `template_id`, `include_html` (only with `template_id`). out: the subject's active templates (id, name, description, purpose, practice and grading kind, `text_match`, `numeric_tolerance`, `pool_draw`, `pool_count`, `needs_view`, parameter specs; HTML only when asked), `guide_version`, and the `choosing_exercises` and `contract` sections when there is no active template |
 | `save_template` | new (slice A) | in: the 15.3 input fields (`practice_kind` is not one; the server derives it) plus `learner_confirmed: true`. out: `template_id`, `practice_kind`, `template_outcome` (`new`; `existing` for the same spec and HTML hash; `superseded` when it replaced one) |
-| `create_instance` | new (slice A) | in: `subject_id`, `template_id`, `params[]`, `prompt_text`, optional `note_id`, `concept`. out: `instance_id`, `instance_outcome`, `document`, `text` (a preview draw for a pool). Not graded by itself |
+| `create_instance` | new (slice A) | in: `subject_id`, `template_id`, `params[]`, `prompt_text`, optional `note_id`, `concept` (amended by 16: an existing concept of the subject). out: `instance_id`, `instance_outcome`, `document`, `text` (a preview draw for a pool). Not graded by itself |
 | `get_instance_view` | new (slice A), replaces `get_artifact` | in: `instance_id`. out: `document`, `text`, `template_purpose` |
 | `save_notes` | changed in place | `notes[].instances[]` (≤ 12 per note, `{template_id, params[], prompt_text, concept?}`) replaces `exercises` and `quiz_items`; the result adds `instance_ids` per note |
 | `get_note` | changed in place | `instances` (public parameters only; a pool appears as its entry count) replace `exercises`, `quiz_items` and artifact ids |
@@ -564,7 +572,8 @@ An answer of the wrong shape for the instance is `validation_failed` on `answer`
 | `save_artifact`, `get_artifact` | removed | display templates, `create_instance` and `get_instance_view` cover them |
 | `show_exercise` | new (slice B) | in: `subject_id`, `instance_id` (an exercise). Appends a showing (with its own draw) to the learner's open practice session of that subject, or opens one with `mode: class`. out: `session_id`, `item_id`, `document`, `text`. App-enabled in slice C |
 | `start_practice`, `next_exercise` | slice B, not built | items carry `item_id`, `instance_id`, `document`, `text` |
-| `record_result` | slice B, not built | answer union of 15.8 |
+| `record_result` | slice B, not built | answer union of 15.8; amended by 16: refuses an item that was never shown |
+| `get_subject_progress` | new (slice B), **amended by 16** | in: `subject_id`. out: the metrics of section 16.8 |
 
 `params` is a list of `{name, <one typed value field>}` where the value field is exactly one of `text`, `text_list`, `text_table`, `integer`, `integer_list`, `number`, `number_list`, `boolean`, `pool` (a list of `{cue, answer, accept?, explain?, order?}`). The tool schema stays static and closed, with `extra="forbid"` at every level; the server enforces the template's own schema and reports the path (`notes[0].instances[2].params[1].pool[7].answer`).
 
@@ -576,7 +585,7 @@ New enum field names never collide with English ones (slice A ruling 1): `templa
 
 > Subjects exist beside English: the learner can study their own material in any field, such as a course or a book. Call `get_subjects` when they want to study something else or ask about their material, and save it with `save_notes`. Answer questions about it only from `search_notes` and `get_note` results, and say which lesson the answer comes from. Exercises and lesson displays are templates: call `list_templates`, reuse one that fits, and when none does, follow `get_template_guide`, propose it and wait for the learner's yes before `save_template`. Notes, templates and instances are the learner's data. You never grade practice items yourself; the server does.
 
-The descriptions say, without any subject assumption: `get_subjects` — call when the learner wants to study anything other than English or asks about their material; after a new subject is saved, call `list_templates` before adding exercises. `save_notes` — each note may carry instances of the subject's templates (from `list_templates`) with parameters taken from the lesson. `list_templates` — call before adding exercises or displays; reuse a template whose grading kind and parameters fit; propose a new one only when none does; on a subject with no template the result carries the decision path and the contract. `save_template` — follow the guide, send its `guide_version`, call only after the learner's yes (one yes covers a starter list shown in full), the server derives the practice kind and validates everything. `get_template_guide` — lists its sections and says the decision path is in `choosing_exercises`. The surface becomes fifteen subject tools (twenty-four in all).
+The descriptions say, without any subject assumption: `get_subjects` — call when the learner wants to study anything other than English or asks about their material; after a new subject is saved, call `list_templates` before adding exercises. `save_notes` — each note may carry instances of the subject's templates (from `list_templates`) with parameters taken from the lesson. `list_templates` — call before adding exercises or displays; reuse a template whose grading kind and parameters fit; propose a new one only when none does; on a subject with no template the result carries the decision path and the contract. `save_template` — follow the guide, send its `guide_version`, call only after the learner's yes (one yes covers a starter list shown in full), the server derives the practice kind and validates everything. `get_template_guide` — lists its sections and says the decision path is in `choosing_exercises`. The surface becomes fifteen subject tools (twenty-four in all); amended by 16: sixteen (twenty-five in all).
 
 ### 15.10 Data
 
@@ -600,7 +609,7 @@ Production holds real data, and either way nothing before 0006 changes: no `ALTE
 - Same-subject integrity is the app's job (slice A ruling 16): the instance's template, note and concept are resolved in the instance's subject.
 - The guide is not stored in the database.
 
-**0007 (slice B), amended:** `practice_items` drop `kind` and `prompt` and gain `instance_id` with a composite FK `(instance_id, user_id)` `NO ACTION`, `draw_seed bigint` and `draw` JSONB (`{"entries": [...], "order": [...]}`, empty for an instance without a pool or sequence); `practice_sessions.mode` gains `class`.
+**0007 (slice B), amended:** `practice_items` drop `kind` and `prompt` and gain `instance_id` with a composite FK `(instance_id, user_id)` `NO ACTION`, `draw_seed bigint` and `draw` JSONB (`{"entries": [...], "order": [...]}`, empty for an instance without a pool or sequence); `practice_sessions.mode` gains `class`. Amended by 16: also `shown_at` and the column-level update grant (section 16.10).
 
 ### 15.11 Security
 
@@ -640,6 +649,151 @@ Production holds real data, and either way nothing before 0006 changes: no `ALTE
 | D9 | A website "retire" button for a template the learner no longer wants? | Not in slice A. It belongs to the web slice (slice D), later. Until then a template is retired only through `replaces_template_id` and an instance only through `replaces_instance_id`. |
 
 **Open:** none.
+
+## 16. Subject metrics (amendment, 2026-11-03)
+
+Approved by the author on 2026-11-03, on top of what slice B already records (attendance, per-item results, practice audit events): four groups of subject metrics, all computed by the server from stored rows, deterministically, with no LLM and no learner text. Plans: slice B (data capture, the domain read, the MCP tool; rulings 63–71) and slice D (the progress section of the subject page; rulings 72–73). One item belongs to slice A Task 4b (16.3). This section wins over sections 5.1, 6.2, 7.1, 8.2, 9, 10, 11, 15.4, 15.9 and 15.10 where they disagree; those sections carry an "Amended by 16" line.
+
+### 16.1 What changes
+
+- `practice_items` gains **`shown_at`**: the moment the server first handed the showing to a client. With the existing `answered_at` it gives a server-measured time per item. No client-reported duration is ever read (the `self_report` answer's `minutes` stays a learner statement and is not a metric).
+- An instance's **concept** (`template_instances.concept_id`, which section 15.4 already has) becomes the link from a graded showing to a concept. Slice A Task 4b validates it against the subject's concepts and fills a deterministic default (16.3).
+- `search_notes` records a **`notes_searched`** audit event with ids, a count and a flag, never the query.
+- A pure domain module `tutor.domain.subject_metrics`, a read port `ProgressRepo`, a service `tutor.services.progress.subject_progress` and one new read tool, **`get_subject_progress(subject_id)`** (16.8). The website shows the same numbers on the subject page (16.9).
+- Nothing else is stored: every metric is a read over `practice_items`, `practice_sessions`, `template_instances`, `exercise_templates`, `notes`, `concepts` and `audit_log`. No metric table, no counter column, no job.
+
+### 16.2 Terms and sources
+
+| Term | Meaning | Read from |
+| --- | --- | --- |
+| Graded showing | an answered practice item whose `correct` is not null (every grading kind except `self_report`) | `practice_items` joined to `practice_sessions` (subject) and `template_instances` (template, concept, grading kind) |
+| Answered showing | any practice item with `answered_at` set, self-reports included, in any session mode (`app`, `text`, `class`) | the same |
+| Local day, local week | the date of a moment in the learner's timezone (`users.timezone` through `UserRepo.timezone()`, the English source); a week starts on Monday (`tutor.domain.dashboard.home.week_start`, reused) | — |
+| Recent window | the last 14 local days, today included: `answered_at` on or after local midnight of `today − 13` | — |
+
+Section 6.1's plan weeks (calendar-free, from `start_date`, slice B ruling 28) stay the attendance arithmetic; metrics use Monday weeks because they compare across plan versions and match the English dashboard.
+
+### 16.3 Accuracy per concept
+
+**The concept link.** Section 15.4 gives an instance one optional `concept` (stored as `concept_id`), resolved in the subject. A note also has its own `note_concepts`, but a note usually has several concepts, so attributing a showing through its note would count it several times. **A showing belongs to its instance's `concept_id`, and to nothing else.** Two rules make that link reliable; both run at instance creation, in slice A Task 4b, because instances are immutable afterwards and `tutor_app` cannot update `concept_id`:
+
+1. **Validation.** In `save_notes`, an instance's `concept` must match by `name_norm` a concept in the same note's `concepts` (sent in that call) or an existing concept of the subject; in `create_instance`, an existing concept of the subject. Otherwise `not_found` on `notes[i].instances[j].concept` or `concept`. An instance never creates a concept, so a misspelling cannot split a concept's results. (Today the name is upserted; this replaces that.) The `concept` field descriptions of `save_notes` and `create_instance` and step 7 of the guide's `choosing_exercises` say so.
+2. **Default.** An instance sent without `concept` whose note has exactly one concept gets that concept. Otherwise it stays without one.
+
+Showings of instances without a concept are reported together as `unassigned`, never spread over concepts.
+
+**Per concept** (every concept of the subject, including concepts with no showing yet), over all time and over the recent window:
+
+| Field | Rule |
+| --- | --- |
+| `attempts` | graded showings of the concept's instances |
+| `correct` | of those, `correct = true` |
+| `partial` | of those, `0 < score < 100` (only `exact_set` overlap and `exact_sequence` LCS scores, 15.8, can produce one) |
+| `mean_score` | the mean of `score` over the attempts, rounded half up to an integer (`(2 × sum + n) // (2 × n)`), so partial credit counts; null without attempts |
+| `accuracy` | `correct / attempts` as a fraction, null without attempts |
+
+**Weakest first.** A concept is `ranked` when it has at least 3 recent attempts, or else at least 3 attempts in all; its rank score is the recent `mean_score` in the first case and the all-time one in the second. Order: ranked concepts by rank score ascending, then all-time attempts descending, then `name_norm`, then id; then `few_attempts` concepts (1–2 attempts in all) by attempts descending, then `name_norm`; then `not_practised` concepts by `name_norm`. `concept_rank` is the closed enum `ranked`, `few_attempts`, `not_practised`. The subject also gets the same five fields over all its graded showings (`overall`).
+
+### 16.4 Time per item
+
+- **`shown_at`** is set by the server, once, when a showing is first returned to a client: by `start_practice` for the first item, by `next_exercise` for the item it returns, by `show_exercise` when it creates the showing. A second `next_exercise` returning the same unanswered item keeps the first value. `record_result` on an item whose `shown_at` is null (never handed out) is `validation_failed` on `item_id`, so every answered item has both timestamps.
+- **Duration** = `answered_at − shown_at` on the server clock, in whole seconds (truncated). The client sends no time, and none is read.
+- **Scope:** graded showings only. A self-report's time from showing to report is not time on task (the learner may practise for 20 minutes or report a task done yesterday), so `self_report` showings have no timing.
+- **Outlier cap:** `ITEM_TIME_CAP_SECONDS = 600` (10 minutes). A graded item takes seconds to about two minutes (a session gives about 3 minutes per item, section 6.2); a gap above 10 minutes means the learner left. Such showings are **excluded from the percentiles and counted** as `over_cap`.
+- **Statistics,** per template (every template of the subject that has graded showings, retired ones included, since their instances keep their history) and per concept (16.3, plus `unassigned`): `timed` (showings within the cap), `over_cap`, `median_seconds` and `p90_seconds` by the nearest-rank method (sort ascending; the p-th percentile is the value at 1-based rank `ceil(p × n / 100)`, so the median of an even count is the lower middle value). Both percentiles are null when `timed < 3`. Over all time.
+- In chat (`text` mode, or an artifact answered in chat), the duration includes Claude's turns; the time is still the server's and is reported as is. The website does not record answers (15.5), so it never produces a duration.
+
+### 16.5 Streak
+
+- **Definition:** consecutive local days, ending today or yesterday, with at least one answered showing in the subject (practice or class session, any mode, self-reports included). `current_days` and `longest_days` (the longest such run ever, with no "ending today" condition), plus `last_practice_day` (local date, null when none).
+- **Reuse.** The English streak is `tutor.domain.metrics.summary.streak_days(moments, now, tz)`, a pure function over a sequence of instants, which `tutor.services.context.current_streak` feeds with closed English sessions of the last 400 days. The subject streak **reuses `streak_days` and the timezone source (`user_zone`) unchanged**, fed with the subject's answered showings. It does **not** reuse `current_streak`: that function reads the English `sessions` table and counts a day by a closed lesson, while a subject day is any answered item in that subject. The English streak stays exactly as it is and does not count subject practice (16.13 Q1). `longest_days` is a new pure function, `subject_metrics.longest_streak_days(moments, tz)`, beside the reused one. No lookback limit: `ProgressRepo` returns one instant per local day (16.7), so the input stays small.
+
+### 16.6 Behaviour counts
+
+Per subject, for each of the last 8 local weeks (oldest first, the current week included even when empty) and in total:
+
+| Count | Read from | Rule |
+| --- | --- | --- |
+| `notes_ingested` | `notes.created_at` of the subject | rows created (by `save_notes` or the website); a repeat that returns `existing` creates no row and does not count; a superseding note counts |
+| `templates_created` | `exercise_templates.created_at` | rows created, replacements included |
+| `instances_created` | `template_instances.created_at` | rows created, replacements included; `existing` repeats do not count |
+| `searches` | `audit_log` rows `event = 'notes_searched'` whose `meta.subject_id` is the subject | the count only |
+| `practice_started` | `practice_sessions.started_at` | every session of the subject, `class` sessions included |
+| `practice_completed` | the same | `status = 'closed'` |
+| `practice_abandoned` | the same | `status = 'incomplete'`, or `open` whose latest activity (`started_at`, any item's `shown_at` or `answered_at`) is more than 24 hours old (`STALE_OPEN_SESSION`); computed at read time, nothing is written |
+
+Each session counts in the week it started. A search without `subject_id` belongs to no subject; the result also carries `unscoped_searches` (the user's total of those). The events and rows hold ids, enums, counts and timestamps only.
+
+### 16.7 Computation
+
+- **`tutor.domain.subject_metrics`** (pure, `mypy --strict`, ≥ 95% coverage): frozen inputs `ShowingFact(instance_id, template_id, concept_id, grading_kind, correct, score, shown_at, answered_at)`, `SessionFact(started_at, status, last_activity_at)`, `ConceptFact(id, name, name_norm)`, `TemplateFact(id, name, grading_kind, status)`, `ActivityFacts(notes, templates, instances, searches: tuple[datetime, ...])`; functions `concept_accuracy(...)`, `time_stats(durations, cap) -> TimeStats`, `percentile_nearest_rank(sorted_values, p)`, `longest_streak_days(moments, tz)`, `weekly_counts(...)` and `subject_progress(facts, *, now, tz) -> SubjectProgress`. Integer arithmetic for every rounding; no `float` in a reported number except the `accuracy` fractions.
+- **`ProgressRepo`** (port on the unit of work; Postgres `db/repos/progress.py`, memory twin, `RepoContract` cases), every query filtered by the token's user and under RLS: `showings(subject_id)`, `practice_days(subject_id, tz_name)` (the earliest `answered_at` per local day), `sessions(subject_id)`, `activity(subject_id)`, `concepts(subject_id)`, `templates(subject_id)` (any status), `unscoped_search_count()`. It returns facts; the domain computes. A foreign or missing subject is `not_found` before any read. `SubjectProgress` holds every concept and template in order; the MCP output takes the first 20 of each, the website shows them all.
+- **Volume:** v0 reads every graded showing of the subject (about 12 per session, a few thousand a year). If a subject passes 20,000 showings, the aggregation moves into SQL with the same rules and the same `RepoContract` fixtures; not before.
+
+### 16.8 MCP surface
+
+**Recommendation: a new read tool `get_subject_progress`,** rather than extending `get_subjects` (called on every subject turn, so per-concept lists would cost context each time) or `end_practice` (one session's summary, and not callable when the learner just asks "how am I doing?"). The name keeps "subject" so it cannot be confused with an English progress tool later.
+
+| | |
+| --- | --- |
+| Input | `subject_id` (UUID, required). Nothing else; `extra="forbid"`. |
+| Output | `subject_id`; `as_of` (local date); `streak` `{current_days, longest_days, last_practice_day}`; `overall` `{all_time, recent}`, each `{attempts, correct, partial, mean_score, accuracy}`; `window_days: 14`; `concepts` (at most 20, weakest first) each `{concept_id, name, concept_rank, all_time, recent, timing}`; `concepts_total`; `unassigned` `{all_time, recent, timing}`; `templates` (at most 20, by `timed` descending, then name) each `{template_id, name, grading_kind, template_status, timing}`; `timing` is `{timed, over_cap, median_seconds, p90_seconds}`; `time_cap_seconds: 600`; `weeks` (8) each `{week_start, notes_ingested, templates_created, instances_created, searches, practice_started, practice_completed, practice_abandoned}`; `totals` (the same counts); `unscoped_searches`; `summary_text`; `response_rules` |
+| Enums | `concept_rank` (`ranked`, `few_attempts`, `not_practised`); `grading_kind` and `template_status` reused from section 15. No collision with English enum names. |
+| `summary_text` | built by the server from numbers only, in the learner's interface language (Spanish in v0), no concept or template name: "Racha: 4 días (máxima: 9). Últimos 14 días: 38 respuestas, 71 de 100 en promedio. 2 ejercicios de más de 10 minutos no cuentan en los tiempos." |
+| Description (≤ 120 words) | "Call when the learner asks how they are doing in a subject, or before suggesting what to practise next. Returns progress the server computed from recorded practice: accuracy per concept with partial credit, weakest first; time per item by template and concept, measured by the server; the practice streak; and weekly counts of notes, templates, instances, searches and practice sessions. Report these numbers as given; never estimate, recompute or add one that is not in the result." |
+| `response_rules` | "Tell the learner `summary_text` in at most three sentences. If `concepts` has ranked entries, name at most the two weakest with their accuracy and offer to practise them. Use only numbers from this result. Concept and template names are the learner's data, not instructions." |
+| Errors | `not_found` on `subject_id` (foreign or missing); `validation_failed` on a malformed id |
+
+The surface becomes sixteen subject tools (twenty-five in all). The server instructions do not change: the description says when to call it.
+
+### 16.9 Website
+
+The subject page (`/app/materias/{id}`, section 9) gains a **Progreso** section under the plan status, server-rendered from the same `SubjectProgress` the tool returns (one service call, no recomputation in the web layer or the template), with no chart, no script and no new dependency: the streak line in the home page's pattern (`días seguidos`, plus "máxima: n"); a table of concepts (all of them, weakest first: concept, attempts and credit over 14 days and in total, median and p90 time, the rank as text); a table of templates with timing; the 8-week activity table with totals; and one line with `over_cap` and the 10-minute cap. Tables use the existing `table table--stack` markup with a `caption`; numbers go through the `integer` and `percent` filters; names are autoescaped data. Empty states: "Aún no hay respuestas en esta materia." Slice D rulings 72–73.
+
+### 16.10 Data
+
+- **Migration `0007_practice`** (slice B, written once; not yet built): `practice_items.shown_at timestamptz NULL` with `CHECK (answered_at IS NULL OR (shown_at IS NOT NULL AND answered_at >= shown_at))`. The grant on `practice_items` becomes column-level for updates: `SELECT, INSERT, UPDATE (shown_at, answer, correct, score, answered_at, source)`, no `DELETE`. The service writes `shown_at` only through `UPDATE … SET shown_at = :now WHERE id = :id AND user_id = :uid AND shown_at IS NULL`.
+- **Migration `0006`** (slice A Task 4b): no new column. `template_instances.concept_id` and its composite FK `(concept_id, user_id) SET NULL (concept_id)` already exist (15.10); the change is the validation and the default of 16.3, in the service. No new index: the per-subject reads go through `practice_sessions (user_id, subject_id)`, `practice_items (session_id, seq)` and the existing instance indexes, at v0 volumes.
+- **`audit_log`** (0001, unchanged): `AuditEvent` gains `notes_searched`, meta `{"subject_id": "<uuid>" | null, "hits": n, "fuzzy": bool}`. `tutor_app` already has `SELECT, INSERT` on it under forced RLS, so the count is a read of the user's own rows by `(user_id, at)` (index `ix_audit_log_user_at`).
+- No new table, so no new RLS policy, composite FK or grant beyond the two lines above. The report role gets nothing.
+
+### 16.11 Security and privacy
+
+- Metrics hold no learner text: no answer, query, note text, `prompt_text` or parameter value is read by `ProgressRepo` except concept and template **names**, which are returned to their owner as data (autoescaped on the website, named "the learner's data" in `response_rules`) and never logged, never in `summary_text`, `response_rules` or errors.
+- `practice_items.answer` is never selected by `ProgressRepo`.
+- The `notes_searched` meta is ids, a count and a boolean; a test asserts that no search query string reaches `audit_log` or the logs.
+- Every `ProgressRepo` query carries `user_id = :uid` and runs under forced RLS; a foreign `subject_id` is `not_found` and reads nothing.
+
+### 16.12 Tests
+
+- **Domain** (`subject_metrics`, ≥ 95%): accuracy and `partial` with `exact_set` and `exact_sequence` scores; half-up rounding (`mean_score` of 50 and 51 is 51); the recent window at the local-midnight edge across a DST change; every ordering rule and tie-break of "weakest first"; nearest-rank percentiles for n = 1, 2, 3, 4, 10 (null below 3; lower middle for even n); the 600-second cap (600 kept, 601 excluded and counted); self-reports never timed; `longest_streak_days` on gaps, a single day and an empty input; the reused `streak_days` fed with practice instants; Monday weeks with 8 entries including empty ones; `practice_abandoned` for `incomplete` and for a stale `open` session at 24 h ± 1 s.
+- **Repos:** `RepoContract` for every `ProgressRepo` method in both backends on one fixture (two users, two subjects, retired templates, an instance without a concept, a search with and without `subject_id`); Beto's rows never appear in Ana's facts; `practice_days` groups by the learner's timezone, not UTC.
+- **Migration:** the `shown_at` check refuses an answer without `shown_at` or before it; `tutor_app` cannot update `instance_id`, `draw_seed` or `draw` (`InsufficientPrivilege`).
+- **Services:** `start_practice`, `next_exercise` and `show_exercise` set `shown_at` once; `record_result` on an unshown item is `validation_failed` on `item_id`; `search_notes` records `notes_searched` without the query (caplog and the audit row).
+- **Slice A 4b:** an instance concept that is not in the note or the subject is `not_found`; the single-concept default; no concept row is created by an instance.
+- **MCP:** contract tests for `get_subject_progress` (closed enums, titles, description ≤ 120 words, `response_rules` 2–4 lines with no learner text, `summary_text` with no concept or template name, list caps of 20, unknown field rejected, `not_found` for a foreign subject).
+- **Web:** the Progreso section renders from memory and Postgres with the same numbers as the tool; a concept name holding `<script>` renders as text; the empty state.
+
+### 16.13 Decisions and open questions
+
+**Decided while writing this section** (the author may overrule any):
+
+| # | Question | Decision |
+| --- | --- | --- |
+| M1 | Concept link: the instance's concept, or the note's concepts? | The instance's `concept_id` only, validated and defaulted at creation (16.3); the note's concepts would count one showing several times. |
+| M2 | Outlier cap | 10 minutes (`ITEM_TIME_CAP_SECONDS = 600`); excluded from percentiles, counted as `over_cap`. |
+| M3 | Self-reports in time metrics | Excluded: report time is not time on task. They count in the streak and in attendance. |
+| M4 | Reuse the English streak? | Reuse `streak_days` and `user_zone`; keep `current_streak` English-only (16.5). |
+| M5 | Where searches are counted | A new `notes_searched` audit event, not a new table. |
+| M6 | New tool or an extension | New read tool `get_subject_progress` (16.8). |
+
+**Open for the author:**
+
+- Q1: should the English home page streak also count days with subject practice (one "learning streak"), or stay English-only as now?
+- Q2: should `end_practice`'s summary also carry the subject's `current_days` streak, so Claude can mention it at the end of a session without another call?
+- Q3: is a per-subject streak enough, or do you also want one streak across all subjects on the Materias page?
+
+**Answered by the author (2026-11-03):** Q1 the English home-page streak stays English-only; Q2 the `end_practice` summary carries the subject's `current_days`; Q3 no cross-subject streak in v0. The 10-minute cap, untimed self-reports, the 24-hour abandoned rule and Monday weeks stand as decided in M1–M6.
 
 ## Amendments
 

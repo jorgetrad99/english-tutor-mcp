@@ -65,6 +65,31 @@ def test_main_builds_the_app_and_runs_uvicorn(
     assert tutor_logger.propagate is False
 
 
+def test_dev_factory_builds_the_app_from_the_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tutor_logger: logging.Logger
+) -> None:
+    # `uvicorn --factory tutor.dev:create --reload` (the dev compose profile, design D6).
+    from tutor import dev
+    from tutor.app import PathDispatch
+
+    values = {
+        **env(tmp_path),
+        "TUTOR_DEV_AUTH": "1",
+        "TUTOR_BASE_URL": "http://localhost:8123",
+        "TUTOR_SUPPORT_EMAIL": "soporte@example.test",
+    }
+    for key, value in values.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.delenv("FORWARDED_ALLOW_IPS", raising=False)
+    app = dev.create()
+    assert isinstance(app, PathDispatch)
+    assert tutor_logger.level == logging.INFO and not tutor_logger.propagate
+    # A proxy in front (FORWARDED_ALLOW_IPS) and the dev factory refuses to start.
+    monkeypatch.setenv("FORWARDED_ALLOW_IPS", "172.30.10.3")
+    with pytest.raises(SystemExit, match="FORWARDED_ALLOW_IPS"):
+        dev.create()
+
+
 def test_logging_is_configured_once(tutor_logger: logging.Logger) -> None:
     tutor_logger.handlers.clear()
     entry.configure_logging()

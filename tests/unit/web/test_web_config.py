@@ -35,6 +35,51 @@ def test_unknown_env_is_refused() -> None:
         WebConfig.from_env({**ENV, "TUTOR_ENV": "staging"})
 
 
+# --- TUTOR_DEV_AUTH: the website side of the dev environment (design D5) ------------------------
+
+
+@pytest.mark.parametrize("tutor_env", ["dev", "test"])
+@pytest.mark.parametrize("value", ["1", "true", "Yes"])
+def test_dev_auth_is_allowed_in_dev_or_test_on_loopback(tutor_env: str, value: str) -> None:
+    env = {
+        **ENV,
+        "TUTOR_ENV": tutor_env,
+        "TUTOR_DEV_AUTH": value,
+        "TUTOR_BASE_URL": "http://localhost:8000",
+    }
+    config = WebConfig.from_env(env)
+    assert config.dev_auth and not config.test_login
+
+
+@pytest.mark.parametrize("value", ["", "0", "no", "on"])
+def test_dev_auth_is_off_by_default(value: str) -> None:
+    env = {**ENV, "TUTOR_ENV": "dev", "TUTOR_BASE_URL": "http://localhost:8000"}
+    assert not WebConfig.from_env({**env, "TUTOR_DEV_AUTH": value}).dev_auth
+    assert not WebConfig.from_env(env).dev_auth
+
+
+def test_dev_auth_is_refused_in_prod() -> None:
+    env = {**ENV, "TUTOR_DEV_AUTH": "1", "TUTOR_BASE_URL": "http://localhost:8000"}
+    with pytest.raises(ValueError, match="TUTOR_DEV_AUTH"):
+        WebConfig.from_env(env)  # TUTOR_ENV=prod
+    with pytest.raises(ValueError, match="TUTOR_DEV_AUTH"):
+        WebConfig(
+            env="prod",
+            base_url="http://localhost:8000",
+            mcp_url="http://localhost:8000/mcp",
+            support_email="soporte@example.com",
+            dev_auth=True,
+        )
+
+
+def test_dev_auth_requires_a_loopback_base_url() -> None:
+    with pytest.raises(ValueError, match="loopback"):
+        WebConfig.from_env({**ENV, "TUTOR_ENV": "dev", "TUTOR_DEV_AUTH": "1"})
+    assert WebConfig.from_env(
+        {**ENV, "TUTOR_ENV": "dev", "TUTOR_DEV_AUTH": "1", "TUTOR_BASE_URL": "http://[::1]:8000"}
+    ).dev_auth
+
+
 @pytest.mark.parametrize(
     "url",
     [

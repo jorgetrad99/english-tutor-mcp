@@ -15,7 +15,7 @@ from tutor.web.config import WebConfig
 from tutor.web.demo import DemoUsers
 from tutor.web.memory import FakeGoogle, FixedClock, MemoryBackend, memory_deps
 from tutor.web.ports import GoogleIdentity, WebSession
-from tutor.web.profile import MemoryProfiles
+from tutor.web.profile import MemoryProfiles, install_profiles
 from tutor.web.sessions import COOKIE, hash_token
 
 from .conftest import BASE, NOW, csrf_of
@@ -197,6 +197,98 @@ def test_test_login_does_not_exist_outside_test_env(
         assert c.get("/auth/test-login").status_code == 404
         assert c.post("/auth/test-login", data={"user_id": str(demo.ana)}).status_code in (403, 404)
         assert COOKIE not in c.cookies
+
+
+# --- dev login (dev-environment design D5) ------------------------------------------------------
+
+DEV_LOGIN = "/auth/dev-login"
+
+
+def _dev_app(
+    backend: MemoryBackend, clock: FixedClock, config: WebConfig, profiles: MemoryProfiles
+) -> FastAPI:
+    dev = replace(config, env="dev", test_login=False, dev_auth=True)
+    app = create_app(memory_deps(backend, clock), dev)
+    install_profiles(app, profiles)
+    return app
+
+
+def test_dev_login_signs_in_a_seeded_identity_and_lands_on_perfil_first(
+    backend: MemoryBackend, clock: FixedClock, config: WebConfig, profiles: MemoryProfiles
+) -> None:
+    app = _dev_app(backend, clock, config, profiles)
+    with TestClient(app, base_url=BASE, follow_redirects=False) as c:
+        first = c.get(DEV_LOGIN, params={"as": "dev-ana"})
+        assert first.status_code == 303 and first.headers["location"] == "/app/profile"
+        assert COOKIE in c.cookies
+        user_id = backend.by_sub["dev-ana"]
+        assert backend.users[user_id].display_name == "Ana"
+        assert c.get("/app/profile").status_code == 200  # signed in
+        profiles.save(user_id, ANA_ANSWERS)
+        again = c.get(DEV_LOGIN, params={"as": "dev-ana"})
+        assert again.status_code == 303 and again.headers["location"] == "/app/"
+        assert backend.by_sub["dev-ana"] == user_id  # the same user, never a duplicate
+        other = c.get(DEV_LOGIN, params={"as": "dev-nuevo"})
+        assert other.headers["location"] == "/app/profile"
+        assert backend.by_sub["dev-nuevo"] != user_id
+
+
+@pytest.mark.parametrize("value", ["demo-ana", "dev-mallory", "", "DEV-ANA"])
+def test_dev_login_rejects_anything_outside_the_enum(
+    backend: MemoryBackend,
+    clock: FixedClock,
+    config: WebConfig,
+    profiles: MemoryProfiles,
+    value: str,
+) -> None:
+    app = _dev_app(backend, clock, config, profiles)
+    with TestClient(app, base_url=BASE, follow_redirects=False) as c:
+        assert c.get(DEV_LOGIN, params={"as": value}).status_code == 422
+        assert c.get(DEV_LOGIN).status_code == 422
+        assert COOKIE not in c.cookies
+    assert backend.by_sub == {}  # nothing was signed in or created
+
+
+def test_dev_login_does_not_exist_without_the_flag(
+    app: FastAPI, client: TestClient, backend: MemoryBackend, clock: FixedClock, config: WebConfig
+) -> None:
+    from tutor.web.routing import iter_api_routes
+
+    assert DEV_LOGIN not in {route.path for route in iter_api_routes(app)}
+    assert client.get(DEV_LOGIN, params={"as": "dev-ana"}).status_code == 404
+    prod = create_app(memory_deps(backend, clock), replace(config, env="prod", test_login=False))
+    assert DEV_LOGIN not in {route.path for route in iter_api_routes(prod)}
+    with TestClient(prod, base_url=BASE, follow_redirects=False) as c:
+        assert c.get(DEV_LOGIN, params={"as": "dev-ana"}).status_code == 404
+        assert COOKIE not in c.cookies
+
+
+def test_dev_login_is_get_only_and_needs_no_csrf_exemption(
+    backend: MemoryBackend, clock: FixedClock, config: WebConfig, profiles: MemoryProfiles
+) -> None:
+    from tutor.web.deps import csrf_exempt_paths
+    from tutor.web.routing import iter_api_routes
+
+    app = _dev_app(backend, clock, config, profiles)
+    [route] = [r for r in iter_api_routes(app) if r.path == DEV_LOGIN]
+    assert route.methods == {"GET"}
+    assert csrf_exempt_paths(app.state.config) == frozenset()  # the walker is unchanged
+    with TestClient(app, base_url=BASE, follow_redirects=False) as c:
+        assert c.post(DEV_LOGIN, params={"as": "dev-ana"}).status_code == 405
+
+
+def test_dev_login_of_a_user_who_asked_for_deletion_shows_the_pending_page(
+    backend: MemoryBackend, clock: FixedClock, config: WebConfig, profiles: MemoryProfiles
+) -> None:
+    app = _dev_app(backend, clock, config, profiles)
+    with TestClient(app, base_url=BASE, follow_redirects=False) as c:
+        c.get(DEV_LOGIN, params={"as": "dev-ana"})
+        backend.request_deletion(backend.by_sub["dev-ana"], NOW)
+        c.cookies.clear()
+        response = c.get(DEV_LOGIN, params={"as": "dev-ana"})
+    assert response.status_code == 200
+    assert "Tu cuenta se está eliminando" in response.text
+    assert COOKIE not in c.cookies
 
 
 def _assert_logged_out_response(response: Any) -> None:

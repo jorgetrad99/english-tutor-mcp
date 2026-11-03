@@ -51,6 +51,7 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
+      target: runtime # the product stage; never the dev one
     # alembic upgrade head, then create/update the app login role and tutor_report.
     entrypoint: ["tutor-migrate"]
     restart: "no"
@@ -71,6 +72,7 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
+      target: runtime # the product stage; never the dev one
     restart: unless-stopped
     environment:
       TUTOR_ENV: prod

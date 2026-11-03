@@ -23,6 +23,14 @@ REQUIRED = (
 )
 # Credentials of other roles (migration owner, gate report): the production app never holds them.
 OWNER_ONLY_KEYS = ("MIGRATION_DATABASE_URL", "GATE_REPORT_DATABASE_URL")
+# Keys that only the local dev profile sets; no production env file or compose file carries them
+# (dev-environment design D1, D10). Without the flag the Google keys are required as before.
+DEV_ONLY_KEYS = ("TUTOR_DEV_AUTH",)
+GOOGLE_KEYS = ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET")
+DEV_AUTH_TRUE = frozenset({"1", "true", "yes"})
+DEV_AUTH_GUARD = "TUTOR_DEV_AUTH requires TUTOR_ENV=dev|test and a loopback TUTOR_BASE_URL"
+# FORWARDED_ALLOW_IPS means a proxy (a tunnel) is in front: dev auth must not be reachable.
+DEV_AUTH_PROXY_GUARD = "TUTOR_DEV_AUTH must not run behind a proxy: leave FORWARDED_ALLOW_IPS unset"
 MIN_SIGNING_KEY_CHARS = 32
 DEFAULT_OAUTH_STORAGE_DIR = "data/oauth"
 DEFAULT_PORT = 8000
@@ -56,12 +64,23 @@ def parse_base_url(raw: str) -> str | None:
 
 
 def is_loopback(host: str) -> bool:
-    if host == "localhost":
+    """localhost, a *.localhost name (RFC 6761) or a loopback IP address."""
+    if host == "localhost" or host.endswith(".localhost"):
         return True
     try:
         return ip_address(host).is_loopback
     except ValueError:
         return False
+
+
+def dev_auth_flag(env: Mapping[str, str]) -> bool:
+    """TUTOR_DEV_AUTH is on for 1, true or yes (case-insensitive); anything else is off."""
+    return env.get("TUTOR_DEV_AUTH", "").strip().lower() in DEV_AUTH_TRUE
+
+
+def dev_auth_allowed(tutor_env: str, base_url: str) -> bool:
+    """The guard shared with the website: dev auth only in dev or test on a loopback origin."""
+    return tutor_env in ("dev", "test") and is_loopback(urlsplit(base_url).hostname or "")
 
 
 def _port(raw: str) -> int | None:
@@ -82,23 +101,44 @@ class Settings:
     oauth_storage_key: str = field(repr=False)
     oauth_storage_dir: Path
     port: int = DEFAULT_PORT
+    # Dev-only bearer tokens instead of the Google OAuth proxy (dev-environment design D1).
+    dev_auth: bool = False
+
+    def __post_init__(self) -> None:
+        # The same guard as from_env and WebConfig, so a Settings built directly (or through
+        # dataclasses.replace) cannot carry the flag outside loopback dev either.
+        if self.dev_auth and not dev_auth_allowed(self.env, self.base_url):
+            raise SystemExit(f"Invalid settings: {DEV_AUTH_GUARD}")
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> Settings:
         """Validate every key and exit naming the bad keys; values are never printed."""
-        missing = [key for key in REQUIRED if not env.get(key, "").strip()]
+        tutor_env = env.get("TUTOR_ENV", "dev").strip()
+        raw_base_url = env.get("TUTOR_BASE_URL", "")
+        base_url = parse_base_url(raw_base_url)
+        dev_auth = dev_auth_flag(env)
+        loopback_dev = base_url is not None and dev_auth_allowed(tutor_env, base_url)
+        # Read only under the flag (blank is unset, as compose turns an unset variable into "").
+        behind_proxy = dev_auth and bool(env.get("FORWARDED_ALLOW_IPS", "").strip())
+        # The Google keys are optional only when the flag is on AND allowed: a refused flag
+        # must not loosen anything.
+        dev_auth_ok = dev_auth and loopback_dev and not behind_proxy
+        optional = GOOGLE_KEYS if dev_auth_ok else ()
+        missing = [key for key in REQUIRED if key not in optional and not env.get(key, "").strip()]
         if missing:
             raise SystemExit(f"Missing settings: {', '.join(missing)}")
         problems: list[str] = []
-        tutor_env = env.get("TUTOR_ENV", "dev").strip()
         if tutor_env not in ENVS:
             problems.append("TUTOR_ENV must be dev, test or prod")
-        base_url = parse_base_url(env["TUTOR_BASE_URL"])
         if base_url is None:
             problems.append(
                 "TUTOR_BASE_URL must be an https URL (http only for localhost) "
                 "with no credentials, path, query or fragment"
             )
+        if dev_auth and not loopback_dev:
+            problems.append(DEV_AUTH_GUARD)
+        if behind_proxy:
+            problems.append(DEV_AUTH_PROXY_GUARD)
         jwt_key = env["TUTOR_JWT_SIGNING_KEY"].strip()
         storage_key = env["TUTOR_OAUTH_STORAGE_KEY"].strip()
         if len(jwt_key) < MIN_SIGNING_KEY_CHARS:
@@ -130,12 +170,13 @@ class Settings:
             env=cast(Env, tutor_env),
             base_url=base_url,
             database_url=env["DATABASE_URL"].strip(),
-            google_client_id=env["GOOGLE_CLIENT_ID"].strip(),
-            google_client_secret=env["GOOGLE_CLIENT_SECRET"].strip(),
+            google_client_id=env.get("GOOGLE_CLIENT_ID", "").strip(),
+            google_client_secret=env.get("GOOGLE_CLIENT_SECRET", "").strip(),
             jwt_signing_key=jwt_key,
             oauth_storage_key=storage_key,
             oauth_storage_dir=Path(
                 env.get("TUTOR_OAUTH_STORAGE_DIR", "").strip() or DEFAULT_OAUTH_STORAGE_DIR
             ),
             port=port,
+            dev_auth=dev_auth,
         )
