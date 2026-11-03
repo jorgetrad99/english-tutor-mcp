@@ -20,8 +20,10 @@ from tutor.domain.practice import (
     SELF_RATING_MAX,
     SELF_RATING_MIN,
     Candidate,
+    DrawnItem,
     ItemSource,
     KindResult,
+    PracticeMode,
     SessionSummary,
     SummaryItem,
     answer_to_json,
@@ -50,6 +52,7 @@ from tutor.services.context import Services, local_date, user_zone
 from tutor.services.errors import ServiceError, field_error
 from tutor.services.ports import (
     InstanceRow,
+    OpenPracticeExists,
     PracticeItemRow,
     PracticeSessionRow,
     TemplateRow,
@@ -150,6 +153,35 @@ def _replace_open(uow: UnitOfWork, now: datetime) -> None:
     )
 
 
+def _create_session(
+    uow: UnitOfWork,
+    session_id: UUID,
+    *,
+    subject_id: UUID,
+    plan_id: UUID | None,
+    mode: PracticeMode,
+    items: Sequence[DrawnItem],
+    now: datetime,
+) -> PracticeSessionRow:
+    """Insert the session; if another call opened one in between (the one-open index
+    refused the insert), mark that one incomplete and insert again, once. A second refusal
+    is `practice_conflict` (security review P3, slice B ruling 86)."""
+    for attempt in range(2):
+        try:
+            return uow.practice.create_session(
+                session_id,
+                subject_id=subject_id,
+                plan_id=plan_id,
+                mode=mode,
+                items=items,
+                now=now,
+            )
+        except OpenPracticeExists:
+            if attempt == 0:
+                _replace_open(uow, now)
+    raise ServiceError("practice_conflict")
+
+
 def _instance_and_template(uow: UnitOfWork, instance_id: UUID) -> tuple[InstanceRow, TemplateRow]:
     instance = uow.instances.get(instance_id)
     template = uow.templates.get(instance.template_id) if instance is not None else None
@@ -238,7 +270,8 @@ def start_practice(
         session_id = uuid4()
         items = draw_items(session_id, mix, pool, [uuid4() for _ in range(mix.total)])
         plan = uow.practice.active_plan(subject_id)
-        session = uow.practice.create_session(
+        session = _create_session(
+            uow,
             session_id,
             subject_id=subject_id,
             plan_id=plan.id if plan is not None else None,
@@ -311,7 +344,8 @@ def show_exercise(
         if session is None or session.subject_id != subject_id:
             _replace_open(uow, now)
             plan = uow.practice.active_plan(subject_id)
-            session = uow.practice.create_session(
+            session = _create_session(
+                uow,
                 uuid4(),
                 subject_id=subject_id,
                 plan_id=plan.id if plan is not None else None,

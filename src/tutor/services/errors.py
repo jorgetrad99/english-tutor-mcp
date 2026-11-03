@@ -14,6 +14,7 @@ ErrorCode = Literal[
     "payload_too_large",
     "not_found",
     "limit_exceeded",
+    "practice_conflict",
 ]
 
 

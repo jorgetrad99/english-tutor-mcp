@@ -4,6 +4,8 @@ slice B plan rulings 28-36 and 63, Review Focus 2-6)."""
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import date, timedelta
 from typing import Any
 from uuid import UUID, uuid4
@@ -30,7 +32,8 @@ from tutor.domain.practice import KindResult
 from tutor.domain.templates import TEMPLATE_GUIDE_VERSION, ParamPair, TemplateInput
 from tutor.services.context import Services
 from tutor.services.errors import ServiceError
-from tutor.services.memory import MemoryStore, PracticeItemRecord
+from tutor.services.memory import MemoryStore, PracticeItemRecord, PracticeSessionRecord
+from tutor.services.ports import UnitOfWork
 from tutor.services.practice import (
     end_practice,
     next_exercise,
@@ -653,3 +656,66 @@ def test_show_exercise_refuses_displays_and_foreign_instances(
     with pytest.raises(ServiceError) as info:
         show_exercise(svc, user_id, other_subject, display)  # an instance of another subject
     assert fields_of(info) == ("not_found", ("instance_id",))
+
+
+# --- a concurrent open session (security review P3) ---------------------------------------------
+
+
+def racing(svc: Services, store: MemoryStore, *, every_time: bool) -> Services:
+    """`svc` whose create_session first meets an open session that another call committed in
+    between (once, or on every attempt)."""
+    base = svc.uow
+
+    @contextmanager
+    def unit_of_work(user_id: UUID) -> Iterator[UnitOfWork]:
+        with base(user_id) as uow:
+            create = uow.practice.create_session
+            calls: list[int] = []
+
+            def competing(session_id: UUID, **kwargs: Any) -> Any:
+                calls.append(1)
+                if every_time or len(calls) == 1:
+                    rival = PracticeSessionRecord(
+                        id=uuid4(),
+                        user_id=user_id,
+                        subject_id=kwargs["subject_id"],
+                        plan_id=None,
+                        mode="text",
+                        started_at=kwargs["now"],
+                        item_count=0,
+                    )
+                    store.tables.practice_sessions[rival.id] = rival
+                return create(session_id, **kwargs)
+
+            uow.practice.create_session = competing  # type: ignore[method-assign]
+            yield uow
+
+    return dataclasses.replace(svc, uow=unit_of_work)
+
+
+def test_a_session_opened_concurrently_is_replaced_once(
+    svc: Services, store: MemoryStore, user_id: UUID
+) -> None:
+    subject_id = quiz_subject(svc, user_id)
+    instance_id = next(iter(store.tables.template_instances))
+    started = start_practice(racing(svc, store, every_time=False), user_id, subject_id, "text")
+    statuses = sorted(s.status for s in store.tables.practice_sessions.values())
+    assert statuses == ["incomplete", "open"]
+    assert store.tables.practice_sessions[started.session_id].status == "open"
+    store.tables.practice_sessions.clear()
+    shown = show_exercise(racing(svc, store, every_time=False), user_id, subject_id, instance_id)
+    assert store.tables.practice_sessions[shown.session_id].status == "open"
+
+
+def test_a_session_that_keeps_racing_is_a_practice_conflict(
+    svc: Services, store: MemoryStore, user_id: UUID
+) -> None:
+    subject_id = quiz_subject(svc, user_id)
+    instance_id = next(iter(store.tables.template_instances))
+    contested = racing(svc, store, every_time=True)
+    with pytest.raises(ServiceError) as info:
+        start_practice(contested, user_id, subject_id, "text")
+    assert fields_of(info) == ("practice_conflict", ())
+    with pytest.raises(ServiceError) as info:
+        show_exercise(contested, user_id, subject_id, instance_id)
+    assert fields_of(info) == ("practice_conflict", ())

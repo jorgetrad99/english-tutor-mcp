@@ -27,6 +27,7 @@ from tutor.db.tables import (
     practice_items,
     practice_plans,
     practice_sessions,
+    subjects,
     template_instances,
 )
 from tutor.domain.practice import Candidate, DrawnItem, ItemSource, PracticeMode
@@ -198,7 +199,15 @@ class PgPracticeRepo:
     ) -> PracticePlanRow:
         # Same TypeError as the in-memory store for values JSONB cannot hold, before any write.
         json.dumps(dict(rationale))
-        require_subject(self._conn, self._user_id, subject_id)
+        # Lock the subject row before reading max(version): two saves of one subject then
+        # number their plans one after the other (security review P3, slice B ruling 86).
+        locked = self._conn.execute(
+            select(subjects.c.id)
+            .where(subjects.c.id == subject_id, subjects.c.user_id == self._user_id)
+            .with_for_update()
+        ).scalar_one_or_none()
+        if locked is None:
+            raise LookupError("subject not found")
         mine = (
             practice_plans.c.user_id == self._user_id,
             practice_plans.c.subject_id == subject_id,
