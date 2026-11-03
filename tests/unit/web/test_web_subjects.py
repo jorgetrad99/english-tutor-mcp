@@ -11,10 +11,11 @@ from collections.abc import Callable
 from uuid import UUID, uuid4
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from httpx2 import Response
 from pdf_fixtures import build_pdf
+from starlette.datastructures import UploadFile
 from subject_web_fixtures import SubjectWorld, seed_subject_world
 from template_fixtures import numeric_params
 
@@ -703,3 +704,79 @@ def test_review_focus_3_retiring_a_foreign_or_missing_template_changes_nothing(
         assert _retire(c, tid, htmx=True).status_code == 404, tid
     listed = list_templates(subjects.svc, demo.beto, beto_world.subject_id).templates
     assert beto_world.template_id in [t.template_id for t in listed]
+
+
+# --- refused writes close the parsed form (security review P3) ---------------------------------
+
+
+@pytest.fixture
+def closed_files(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """The field names of uploaded files whose spooled file was closed."""
+    closed: list[str] = []
+    real = UploadFile.close
+
+    async def close(self: UploadFile) -> None:
+        closed.append(self.filename or "")
+        await real(self)
+
+    monkeypatch.setattr(UploadFile, "close", close)
+    return closed
+
+
+def test_a_403_closes_the_spooled_form(
+    login: Login, demo: DemoUsers, ana_world: SubjectWorld, closed_files: list[str]
+) -> None:
+    c = login(demo.ana)
+    response = c.post(
+        f"/app/subjects/{ana_world.subject_id}/pdf",
+        data={"csrf_token": "forged", "title": "x"},
+        files={"file": ("forged.pdf", b"%PDF-1.7", "application/pdf")},
+    )
+    assert response.status_code == 403 and closed_files == ["forged.pdf"]
+
+
+def test_a_429_closes_the_spooled_form(
+    app: FastAPI,
+    login: Login,
+    demo: DemoUsers,
+    ana_world: SubjectWorld,
+    closed_files: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    c = login(demo.ana)
+    monkeypatch.setattr(app.state.write_limits.writes, "allow", lambda key: False)
+    response = _post_pdf(c, ana_world.subject_id, b"%PDF-1.7", name="limited.pdf")
+    assert response.status_code == 429 and closed_files == ["limited.pdf"]
+
+
+def test_a_404_for_a_foreign_subject_closes_the_form_before_reading_it(
+    login: Login, demo: DemoUsers, beto_world: SubjectWorld, closed_files: list[str]
+) -> None:
+    c = login(demo.ana)
+    response = _post_pdf(c, beto_world.subject_id, b"%PDF-1.7", name="theirs.pdf")
+    assert response.status_code == 404 and closed_files == ["theirs.pdf"]
+
+
+def test_the_htmx_header_path_checks_the_subject_before_parsing_the_form(
+    login: Login,
+    demo: DemoUsers,
+    beto_world: SubjectWorld,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Security review P3 3: with the token in the header, nothing parses the body before the
+    # ownership check, so a foreign subject never has its form read.
+    c = login(demo.ana)
+    parsed: list[bool] = []
+    real = Request.form
+
+    def form(self: Request, **kwargs: object) -> object:
+        parsed.append(True)
+        return real(self, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Request, "form", form)
+    response = c.post(
+        f"/app/subjects/{beto_world.subject_id}/pdf",
+        files={"file": ("a.pdf", b"%PDF-1.7", "application/pdf")},
+        headers={"x-csrf-token": csrf_of(c), "hx-request": "true"},
+    )
+    assert response.status_code == 404 and parsed == []

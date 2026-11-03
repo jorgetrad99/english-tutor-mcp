@@ -18,6 +18,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import FormData, UploadFile
 
 from tutor.domain.dashboard.types import User
@@ -108,14 +109,22 @@ def subject_ctx(page: SubjectPage, upload: dict[str, Any] | None) -> dict[str, A
     }
 
 
-def _own_subject(request: Request, user: User, subject_id: str) -> tuple[SubjectsPort, SubjectPage]:
-    """Ownership first: a foreign, missing or malformed subject is 404 before any field."""
+async def owned_subject(
+    subject_id: str, request: Request, user: Annotated[User, Depends(current_user)]
+) -> tuple[SubjectsPort, SubjectPage]:
+    """Ownership first: a foreign, missing or malformed subject is 404 before the route reads
+    its form (a form `require_csrf` already parsed is closed before the 404)."""
     port = get_subjects_port(request)
     sid = parse_uuid(subject_id)
-    page = port.subject(user.id, sid) if sid else None
+    page = await run_in_threadpool(port.subject, user.id, sid) if sid else None
     if page is None:
+        await request.close()
         raise HTTPException(status_code=404)
     return port, page
+
+
+# Declared before the form in each upload route, so FastAPI resolves it first.
+Owned = Annotated[tuple[SubjectsPort, SubjectPage], Depends(owned_subject)]
 
 
 def _field(form: FormData, name: str) -> str:
@@ -188,9 +197,9 @@ def _not_found_or_fields(
 
 @router.post(SUBJECTS_PATH + "/{subject_id}/pdf")
 def subject_add_pdf(
-    subject_id: str, request: Request, user: Annotated[User, Depends(current_user)], form: Form
+    request: Request, user: Annotated[User, Depends(current_user)], owned: Owned, form: Form
 ) -> Response:
-    port, page = _own_subject(request, user, subject_id)
+    port, page = owned
     upload = form.get("file")
     file = upload if isinstance(upload, UploadFile) and upload.filename else None
     title = collapse_name(_field(form, "title")) or default_title(file.filename if file else None)
@@ -216,9 +225,9 @@ def subject_add_pdf(
 
 @router.post(SUBJECTS_PATH + "/{subject_id}/text")
 def subject_add_text(
-    subject_id: str, request: Request, user: Annotated[User, Depends(current_user)], form: Form
+    request: Request, user: Annotated[User, Depends(current_user)], owned: Owned, form: Form
 ) -> Response:
-    port, page = _own_subject(request, user, subject_id)
+    port, page = owned
     values = {
         "title": _field(form, "title"),
         "lesson_ref": _field(form, "lesson_ref"),
