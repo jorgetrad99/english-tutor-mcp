@@ -21,6 +21,9 @@ from tutor.web.security import safe_next
 
 CSRF_HEADER = "x-csrf-token"
 CSRF_FIELD = "csrf_token"
+# A form field may hold a pasted text of up to 400,000 characters (subjects spec 4.1), up to
+# 1.6 MB of UTF-8; Starlette's default is 1 MB. BodySizeGuard bounds every body before this.
+FORM_PART_MAX_BYTES = 2 * 1024 * 1024
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
@@ -92,7 +95,7 @@ async def require_csrf(request: Request) -> None:
     if sent is None and request.headers.get("content-type", "").startswith(
         ("application/x-www-form-urlencoded", "multipart/form-data")
     ):
-        field = (await request.form()).get(CSRF_FIELD)
+        field = (await request.form(max_part_size=FORM_PART_MAX_BYTES)).get(CSRF_FIELD)
         sent = field if isinstance(field, str) else None
     if not expected or not sent or not secrets.compare_digest(sent.encode(), expected.encode()):
         raise HTTPException(status_code=403)

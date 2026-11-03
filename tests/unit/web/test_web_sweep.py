@@ -17,11 +17,14 @@ from fastapi.testclient import TestClient
 from subject_web_fixtures import SubjectWorld
 
 from tutor.domain.dashboard.types import ConnectedClient
+from tutor.services.notes import list_notes
+from tutor.services.templates import list_templates
 from tutor.web.config import WebConfig
 from tutor.web.demo import DemoUsers
 from tutor.web.deps import assert_csrf_everywhere, require_csrf
 from tutor.web.memory import MemoryBackend
 from tutor.web.routing import iter_api_routes
+from tutor.web.subjects import MemorySubjects
 
 from .conftest import csrf_of
 
@@ -60,6 +63,11 @@ POSTPONED_PREFIXES = (
 )
 NOT_USER_OWNED = {"key"}  # admin setting keys are global and guarded by require_admin
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+# The subjects writes (slice D Task 4): the sweeps below must reach each of them.
+SUBJECT_WRITES = {
+    ("POST", "/app/subjects/{subject_id}/pdf"),
+    ("POST", "/app/subjects/{subject_id}/text"),
+}
 PARAM = re.compile(r"{(\w+)(?::\w+)?}")
 
 Login = Callable[[UUID], TestClient]
@@ -124,6 +132,7 @@ def test_protected_pages_redirect_anonymous_visitors(app: FastAPI, client: TestC
 def test_unsafe_methods_need_the_csrf_token(app: FastAPI, login: Login, demo: DemoUsers) -> None:
     c = login(demo.ana)
     checked = 0
+    swept: set[tuple[str, str]] = set()
     for route in _routes(app):
         for method in sorted(_methods(route) & UNSAFE_METHODS):
             if (method, route.path) in CSRF_EXEMPT:
@@ -133,17 +142,33 @@ def test_unsafe_methods_need_the_csrf_token(app: FastAPI, login: Login, demo: De
                 f"{method} {route.path} answered {response.status_code} without a CSRF token"
             )
             checked += 1
+            swept.add((method, route.path))
     assert checked >= 5
+    assert swept >= SUBJECT_WRITES
 
 
 def test_another_users_ids_are_not_found(
-    app: FastAPI, login: Login, demo: DemoUsers, backend: MemoryBackend, beto_world: SubjectWorld
+    app: FastAPI,
+    login: Login,
+    demo: DemoUsers,
+    backend: MemoryBackend,
+    beto_world: SubjectWorld,
+    subjects: MemorySubjects,
 ) -> None:
     beto = _other_users_ids(backend, demo, beto_world)
     c = login(demo.ana)
     token = csrf_of(c)
-    form = {"csrf_token": token, "meaning": "x", "context_sentence": "Una frase.", "value": "1"}
+    form = {
+        "csrf_token": token,
+        "meaning": "x",
+        "context_sentence": "Una frase.",
+        "value": "1",
+        "title": "Un título",
+        "text": "Un texto.",
+    }
+    notes_before = list_notes(subjects.svc, demo.beto, beto_world.subject_id)
     checked = 0
+    swept: set[tuple[str, str]] = set()
     for route in _routes(app):
         names = PARAM.findall(route.path)
         if not names:
@@ -163,8 +188,14 @@ def test_another_users_ids_are_not_found(
                 f"{method} {path} answered {response.status_code} for another learner's id"
             )
             checked += 1
+            swept.add((method, route.path))
     assert backend.clients[demo.beto][-1].id == "beto-only"
     assert checked >= 4
+    assert swept >= SUBJECT_WRITES
+    # Nothing of Beto's changed: no note added, his template still active.
+    assert list_notes(subjects.svc, demo.beto, beto_world.subject_id) == notes_before
+    active = list_templates(subjects.svc, demo.beto, beto_world.subject_id).templates
+    assert beto_world.template_id in [t.template_id for t in active]
 
 
 def test_own_ids_still_work(login: Login, demo: DemoUsers, backend: MemoryBackend) -> None:

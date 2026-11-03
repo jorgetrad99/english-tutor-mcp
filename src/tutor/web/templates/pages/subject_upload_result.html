@@ -1,0 +1,5 @@
+{# The HTMX answer to a saved upload or paste (slice D Task 4): the forms section again, empty,
+   with the outcome and a link to the note; it replaces #upload-forms. Without JavaScript the
+   POST answers 303 to the note instead. #}
+{% include "partials/upload_forms.html" %}
+<div id="live" class="sr-only" aria-live="polite" hx-swap-oob="true">{% if upload["saved"].outcome == "existing" %}{{ _("Ese material ya estaba guardado.") }}{% else %}{{ _("Apunte guardado.") }}{% endif %}</div>

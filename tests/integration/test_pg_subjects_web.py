@@ -1,5 +1,5 @@
 """Materias, Materia and Nota on Postgres: ServicesSubjects end to end under row-level
-security, as production connects (slice D Tasks 1-2; Review Focus 3, 5 and 7)."""
+security, as production connects (slice D Tasks 1-5; Review Focus 3-7)."""
 
 import html
 import re
@@ -7,18 +7,27 @@ import zoneinfo
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pdf_fixtures import build_pdf
 from sqlalchemy import Engine, select
 from subject_web_fixtures import seed_subject_world
-from web_pg_support import BASE, WEB_CONFIG, google_login, pg_settings, pg_web_app
+from web_pg_support import (
+    BASE,
+    WEB_CONFIG,
+    csrf_token,
+    google_login,
+    pg_settings,
+    pg_web_app,
+)
 
 from tutor.app import BodySizeGuard, RequestLog, build_app
-from tutor.db.tables import users
+from tutor.db.tables import notes, users
 from tutor.db.uow import PgIdentity, pg_uow_factory
+from tutor.domain.notes import MAX_WEB_NOTE_CHARS
 from tutor.services.context import Services
 from tutor.services.progress import subject_progress
 from tutor.web.memory import FakeGoogle
@@ -162,3 +171,101 @@ def test_build_app_frames_a_note_on_the_template_origin_with_a_single_use_token(
         assert served.text.count('id="tutor-params"') == 1
         assert templates.get(path).status_code == 404  # single use
         assert dashboard.get(path).status_code == 404  # never on the dashboard host
+
+
+LESSON = "El acorde de septima tiene cuatro notas"
+PASSWORD = "clave"  # noqa: S105 - a fixture's throwaway password
+EXTRA = {"extra": ("", b"", "application/octet-stream")}  # makes the body multipart
+
+
+def test_upload_and_paste_on_postgres_through_build_app(
+    engine: Engine, login_engine: Engine, tmp_path: Path
+) -> None:
+    """Slice D Task 4: real multipart bodies under BodySizeGuard with a session cookie,
+    the PDF parsed in its child process, the rows read back as the owner."""
+    settings = replace(
+        pg_settings(),
+        oauth_storage_dir=tmp_path / "oauth",
+        template_origin=ORIGIN,
+        frame_token_key="f" * 48,
+    )
+    app = build_app(
+        settings, engine=login_engine, web_config=replace(WEB_CONFIG, template_origin=ORIGIN)
+    )
+    logged = app.web_app
+    assert isinstance(logged, RequestLog) and isinstance(logged.app, BodySizeGuard)
+    web = logged.app.app
+    assert isinstance(web, FastAPI)
+    google = FakeGoogle()
+    web.state.deps = replace(web.state.deps, google=google)  # no real Google in tests
+    svc = Services(
+        uow=pg_uow_factory(login_engine),
+        clock=_utc_now,
+        valid_timezones=frozenset(zoneinfo.available_timezones()),
+    )
+    beto = PgIdentity(login_engine).resolve("g-beto-uploads", None, "Beto", _utc_now()).id
+    theirs = seed_subject_world(svc, beto, name="Bajo")
+    long_text = ("Acorde de séptima. " * 30_000)[:MAX_WEB_NOTE_CHARS]  # over 400 KB
+    with TestClient(app, base_url=BASE, follow_redirects=False) as c:
+        identity = GoogleIdentity("g-ana-uploads", "ana-uploads@example.com", "Ana", True)
+        google_login(c, google, identity)
+        with engine.connect() as conn:
+            ana = conn.execute(
+                select(users.c.id).where(users.c.google_sub == "g-ana-uploads")
+            ).scalar_one()
+        world = seed_subject_world(svc, ana)
+        token = csrf_token(engine, c)
+        pdf_path = f"/app/subjects/{world.subject_id}/pdf"
+        text_path = f"/app/subjects/{world.subject_id}/text"
+
+        uploaded = c.post(
+            pdf_path,
+            data={"csrf_token": token, "title": ""},
+            files={"file": ("Armonia.pdf", build_pdf([LESSON]), "application/pdf")},
+        )
+        assert uploaded.status_code == 303, uploaded.text
+        pdf_note = UUID(uploaded.headers["location"].removeprefix("/app/notes/"))
+        again = c.post(
+            pdf_path,
+            data={"csrf_token": token, "title": "Armonia"},
+            files={"file": ("Armonia.pdf", build_pdf([LESSON]), "application/pdf")},
+            headers={"hx-request": "true"},
+        )
+        assert again.status_code == 200 and "Ese material ya estaba guardado." in again.text
+        locked = build_pdf([LESSON], password=PASSWORD)
+        refused = c.post(
+            pdf_path,
+            data={"csrf_token": token, "title": "Cifrado"},
+            files={"file": ("c.pdf", locked, "application/pdf")},
+        )
+        assert refused.status_code == 422 and "protegido con contraseña" in refused.text
+
+        form = {"csrf_token": token, "title": "Clase pegada", "lesson_ref": "L7"}
+        pasted = c.post(text_path, data={**form, "text": long_text}, files=EXTRA)
+        assert pasted.status_code == 303, pasted.text
+        text_note = UUID(pasted.headers["location"].removeprefix("/app/notes/"))
+
+        foreign = c.post(
+            f"/app/subjects/{theirs.subject_id}/text",
+            data={"csrf_token": token, "title": "x", "text": "y"},
+            files=EXTRA,
+        )
+        assert foreign.status_code == 404
+        over = c.post(
+            text_path,
+            data={"csrf_token": token, "title": "x"},
+            files={"text": ("t.txt", b"a" * (2 * 1024 * 1024 + 1), "text/plain")},
+        )
+        assert over.status_code == 413  # the guard's own answer past the route's 2 MB
+
+    with engine.connect() as conn:
+        saved = {
+            r.id: r
+            for r in conn.execute(
+                select(notes.c.id, notes.c.origin, notes.c.raw_text).where(
+                    notes.c.id.in_([pdf_note, text_note])
+                )
+            )
+        }
+    assert saved[pdf_note].origin == "web" and saved[pdf_note].raw_text == LESSON
+    assert saved[text_note].origin == "web" and len(saved[text_note].raw_text) == len(long_text)

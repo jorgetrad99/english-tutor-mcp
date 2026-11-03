@@ -1,0 +1,58 @@
+{# The PDF upload and pasted text forms of the subject page (slice D Task 4, rulings 57, 58, 60).
+   `upload` is None on a plain visit; after a refused POST it holds the form that was sent, its
+   values and its field errors; after a saved HTMX POST, `saved`. Values are autoescaped data. #}
+{% set u = upload if upload is defined and upload else none %}
+{% set pdf_errors = u["errors"] if u and u["form"] == "pdf" else {} %}
+{% set text_errors = u["errors"] if u and u["form"] == "text" else {} %}
+{% set pdf_values = u["values"] if u and u["form"] == "pdf" and not u["saved"] else {} %}
+{% set text_values = u["values"] if u and u["form"] == "text" and not u["saved"] else {} %}
+{% macro too_long(n) %}{% trans n=n|integer %}Máximo {{ n }} caracteres.{% endtrans %}{% endmacro %}
+<section class="card card--wide upload-forms" id="upload-forms" aria-labelledby="upload-title">
+  <h2 id="upload-title" class="card__title">{{ _("Agregar material") }}</h2>
+  {% if u and u["saved"] %}
+  <p class="celebrate" role="status">{% if u["saved"].outcome == "existing" %}{{ _("Ese material ya estaba guardado.") }}{% elif u["saved"].outcome == "superseded" %}{{ _("Apunte guardado; reemplaza la versión anterior.") }}{% else %}{{ _("Apunte guardado.") }}{% endif %}
+    <a href="/app/notes/{{ u["saved"].note_id }}">{{ _("Ver el apunte") }}</a></p>
+  {% endif %}
+  <div class="upload-forms__grid">
+    <form class="upload-form" method="post" action="/app/subjects/{{ subject_id }}/pdf" enctype="multipart/form-data" hx-post="/app/subjects/{{ subject_id }}/pdf" hx-target="#upload-forms" hx-swap="outerHTML">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <h3>{{ _("Subir un PDF") }}</h3>
+      <p class="muted">{{ _("Hasta 20 MB y 200 páginas. Guardamos solo el texto, nunca el archivo.") }}</p>
+      <div class="form-row">
+        <label for="pdf-file">{{ _("Archivo PDF") }}</label>
+        <input id="pdf-file" type="file" name="file" accept="application/pdf" required{% if pdf_errors.get("file") %} aria-invalid="true" aria-describedby="pdf-file-error"{% endif %}>
+        {% set e = pdf_errors.get("file") %}
+        {% if e %}<p class="field-error" id="pdf-file-error">{% if e == "required" %}{{ _("Elige un archivo PDF.") }}{% elif e == "too_large" %}{{ _("El PDF pasa de 20 MB.") }}{% elif e == "not_pdf" %}{{ _("El archivo no es un PDF.") }}{% elif e == "encrypted" %}{{ _("El PDF está protegido con contraseña.") }}{% elif e == "too_many_pages" %}{{ _("El PDF tiene más de 200 páginas.") }}{% elif e == "no_text" %}{{ _("El PDF no tiene texto.") }}{% elif e == "too_long" %}{% trans n=max_text|integer %}El texto del PDF pasa de {{ n }} caracteres.{% endtrans %}{% elif e == "busy" %}{{ _("Hay demasiados PDF procesándose; intenta en un momento.") }}{% elif e == "timeout" %}{{ _("El PDF tardó demasiado en leerse.") }}{% else %}{{ _("No pudimos leer el PDF.") }}{% endif %}</p>{% endif %}
+      </div>
+      <div class="form-row">
+        <label for="pdf-title">{{ _("Título") }}</label>
+        <input id="pdf-title" type="text" name="title" value="{{ pdf_values.get('title', '') }}" maxlength="{{ max_title }}" aria-describedby="pdf-title-hint{% if pdf_errors.get('title') %} pdf-title-error{% endif %}"{% if pdf_errors.get("title") %} aria-invalid="true"{% endif %}>
+        <p class="muted" id="pdf-title-hint">{{ _("Si lo dejas vacío, usamos el nombre del archivo.") }}</p>
+        {% if pdf_errors.get("title") %}<p class="field-error" id="pdf-title-error">{% if pdf_errors["title"] == "required" %}{{ _("Escribe un título.") }}{% else %}{{ too_long(max_title) }}{% endif %}</p>{% endif %}
+      </div>
+      <button class="btn btn--primary">{{ _("Subir PDF") }}</button>
+    </form>
+
+    <form class="upload-form" method="post" action="/app/subjects/{{ subject_id }}/text" enctype="multipart/form-data" hx-post="/app/subjects/{{ subject_id }}/text" hx-target="#upload-forms" hx-swap="outerHTML">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <h3>{{ _("Pegar texto") }}</h3>
+      <div class="form-row">
+        <label for="text-title">{{ _("Título") }}</label>
+        <input id="text-title" type="text" name="title" value="{{ text_values.get('title', '') }}" maxlength="{{ max_title }}" required{% if text_errors.get("title") %} aria-invalid="true" aria-describedby="text-title-error"{% endif %}>
+        {% if text_errors.get("title") %}<p class="field-error" id="text-title-error">{% if text_errors["title"] == "required" %}{{ _("Escribe un título.") }}{% else %}{{ too_long(max_title) }}{% endif %}</p>{% endif %}
+      </div>
+      <div class="form-row">
+        <label for="text-lesson">{{ _("Lección (opcional)") }}</label>
+        <input id="text-lesson" type="text" name="lesson_ref" value="{{ text_values.get('lesson_ref', '') }}" maxlength="{{ max_lesson_ref }}"{% if text_errors.get("lesson_ref") %} aria-invalid="true" aria-describedby="text-lesson-error"{% endif %}>
+        {% if text_errors.get("lesson_ref") %}<p class="field-error" id="text-lesson-error">{{ too_long(max_lesson_ref) }}</p>{% endif %}
+      </div>
+      <div class="form-row">
+        <label for="text-body">{{ _("Texto") }}</label>
+        <textarea id="text-body" name="text" rows="8" maxlength="{{ max_text }}" required aria-describedby="text-body-hint{% if text_errors.get('text') %} text-body-error{% endif %}"{% if text_errors.get("text") %} aria-invalid="true"{% endif %}>{{ text_values.get('text', '') }}</textarea>
+        <p class="muted" id="text-body-hint">{% trans n=max_text|integer %}Hasta {{ n }} caracteres.{% endtrans %}</p>
+        {% if text_errors.get("text") %}<p class="field-error" id="text-body-error">{% if text_errors["text"] == "required" %}{{ _("Pega el texto de tu material.") }}{% else %}{{ too_long(max_text) }}{% endif %}</p>{% endif %}
+      </div>
+      <button class="btn btn--primary">{{ _("Guardar texto") }}</button>
+    </form>
+  </div>
+</section>

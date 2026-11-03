@@ -1,4 +1,5 @@
-"""PDFs built in the test with pypdf's writer (slice D ruling 58): no PDF file is checked in."""
+"""PDFs built in the test with pypdf's writer (slice D ruling 58): no PDF file is checked in. Shared
+by the extraction, website and Postgres tests."""
 
 from __future__ import annotations
 

@@ -19,20 +19,25 @@ from uuid import UUID
 
 from fastapi import FastAPI, Request
 
-from tutor.domain.notes import SourceKind
+from tutor.domain.notes import SourceInput, SourceKind
 from tutor.domain.subject_metrics import SubjectProgress
 from tutor.domain.subjects import SubjectStatus
 from tutor.domain.templates import GradingKind, PracticeKind, TemplatePurpose
 from tutor.services.context import Services
 from tutor.services.errors import ServiceError
 from tutor.services.memory import MemoryStore, UserRecord, memory_uow
-from tutor.services.notes import get_whole_note, list_notes
+from tutor.services.notes import get_whole_note, list_notes, save_web_note
+from tutor.services.pdf_text import PdfProblem, extract
 from tutor.services.ports import NoteListRow
 from tutor.services.practice import history
 from tutor.services.progress import subject_progress
 from tutor.services.subject_views import HistoryRow, NoteView, PlanStatus, SubjectView
 from tutor.services.subjects import get_subjects
-from tutor.services.templates import instance_counts, list_templates, web_instance_document
+from tutor.services.templates import (
+    instance_counts,
+    list_templates,
+    web_instance_document,
+)
 from tutor.web.frames import FrameUrl
 from tutor.web.profile import iana_zones
 
@@ -106,6 +111,15 @@ class WebNoteSaved:
     outcome: Literal["new", "existing", "superseded"]
 
 
+class PdfRefused(Exception):
+    """The uploaded PDF gave no text (slice D ruling 58). Carries the problem code only, never
+    the file's content or name."""
+
+    def __init__(self, problem: PdfProblem) -> None:
+        super().__init__(problem.value)
+        self.problem = problem
+
+
 class SubjectsPort(Protocol):
     def subjects(self, user_id: UUID) -> SubjectsPage: ...
 
@@ -116,13 +130,14 @@ class SubjectsPort(Protocol):
     def instance_document(self, user_id: UUID, instance_id: UUID) -> str | None: ...
 
     def add_pdf(self, user_id: UUID, subject_id: UUID, title: str, data: bytes) -> WebNoteSaved:
-        """Raises ServiceError with field codes."""
+        """Blocking (the PDF is parsed in a child process): call it from a worker thread.
+        Raises PdfRefused when the PDF gives no text, ServiceError with field paths otherwise."""
         ...
 
     def add_text(
         self, user_id: UUID, subject_id: UUID, title: str, lesson_ref: str | None, text: str
     ) -> WebNoteSaved:
-        """Raises ServiceError with field codes."""
+        """Raises ServiceError with field paths (`title`, `lesson_ref`, `raw_text`)."""
         ...
 
     def retire_template(self, user_id: UUID, template_id: UUID) -> RetireOutcome | None: ...
@@ -254,12 +269,28 @@ class ServicesSubjects:
         return web_instance_document(self._svc, user_id, instance_id)
 
     def add_pdf(self, user_id: UUID, subject_id: UUID, title: str, data: bytes) -> WebNoteSaved:
-        raise NotImplementedError  # slice D Task 4 (save_web_note, pdf_text) fills this
+        text = extract(data)
+        if isinstance(text, PdfProblem):
+            raise PdfRefused(text)
+        return self._save(user_id, subject_id, SourceInput("pdf", title), title, None, text)
 
     def add_text(
         self, user_id: UUID, subject_id: UUID, title: str, lesson_ref: str | None, text: str
     ) -> WebNoteSaved:
-        raise NotImplementedError  # slice D Task 4 (save_web_note) fills this
+        source = SourceInput("text", title)
+        return self._save(user_id, subject_id, source, title, lesson_ref, text)
+
+    def _save(
+        self,
+        user_id: UUID,
+        subject_id: UUID,
+        source: SourceInput,
+        title: str,
+        lesson_ref: str | None,
+        raw_text: str,
+    ) -> WebNoteSaved:
+        saved = save_web_note(self._svc, user_id, subject_id, source, title, lesson_ref, raw_text)
+        return WebNoteSaved(note_id=saved.note_id, outcome=saved.outcome)
 
     def retire_template(self, user_id: UUID, template_id: UUID) -> RetireOutcome | None:
         raise NotImplementedError  # slice D Task 5 (templates.retire_template) fills this
@@ -304,12 +335,14 @@ class MemorySubjects(ServicesSubjects):
         return super().instance_document(user_id, instance_id)
 
     def add_pdf(self, user_id: UUID, subject_id: UUID, title: str, data: bytes) -> WebNoteSaved:
-        raise NotImplementedError  # slice D Task 4 fills this
+        self.ensure_user(user_id)
+        return super().add_pdf(user_id, subject_id, title, data)
 
     def add_text(
         self, user_id: UUID, subject_id: UUID, title: str, lesson_ref: str | None, text: str
     ) -> WebNoteSaved:
-        raise NotImplementedError  # slice D Task 4 fills this
+        self.ensure_user(user_id)
+        return super().add_text(user_id, subject_id, title, lesson_ref, text)
 
     def retire_template(self, user_id: UUID, template_id: UUID) -> RetireOutcome | None:
         raise NotImplementedError  # slice D Task 5 fills this

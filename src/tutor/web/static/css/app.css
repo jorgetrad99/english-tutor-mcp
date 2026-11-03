@@ -563,3 +563,8 @@ body[data-reduce-motion] *, body[data-reduce-motion] *::before, body[data-reduce
 }
 .instance-frame--exercise { height: 22rem; }
 .instance-frame--display { height: 28rem; }
+
+/* Upload and paste forms on the subject page (slice D Task 4) */
+.upload-forms__grid { display: grid; gap: 24px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
+.upload-form h3 { margin-top: 0; }
+.upload-form input[type="file"] { max-width: 100%; }

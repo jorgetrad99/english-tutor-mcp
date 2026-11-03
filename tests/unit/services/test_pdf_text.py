@@ -14,6 +14,7 @@ import threading
 import time
 
 import pytest
+from pdf_fixtures import build_pdf
 from pypdf import Configuration
 
 from tutor.domain.notes import MAX_WEB_NOTE_CHARS
@@ -28,8 +29,6 @@ from tutor.services.pdf_text import (
     extract,
     read_answer,
 )
-
-from .pdf_fixtures import build_pdf
 
 pytestmark = pytest.mark.unit
 

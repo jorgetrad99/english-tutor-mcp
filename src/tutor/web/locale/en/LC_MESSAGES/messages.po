@@ -1066,3 +1066,85 @@ msgstr "no data"
 
 msgid "Última práctica: %(day)s"
 msgstr "Last practice: %(day)s"
+
+# Uploads and pasted text (slice D Task 4)
+msgid "Agregar material"
+msgstr "Add material"
+
+msgid "Apunte guardado."
+msgstr "Note saved."
+
+msgid "Apunte guardado; reemplaza la versión anterior."
+msgstr "Note saved; it replaces the previous version."
+
+msgid "Archivo PDF"
+msgstr "PDF file"
+
+msgid "El PDF está protegido con contraseña."
+msgstr "The PDF is password protected."
+
+msgid "El PDF no tiene texto."
+msgstr "The PDF has no text."
+
+msgid "El PDF pasa de 20 MB."
+msgstr "The PDF is over 20 MB."
+
+msgid "El PDF tardó demasiado en leerse."
+msgstr "The PDF took too long to read."
+
+msgid "El PDF tiene más de 200 páginas."
+msgstr "The PDF has more than 200 pages."
+
+msgid "El archivo no es un PDF."
+msgstr "The file is not a PDF."
+
+msgid "El texto del PDF pasa de %(n)s caracteres."
+msgstr "The PDF's text is over %(n)s characters."
+
+msgid "Elige un archivo PDF."
+msgstr "Choose a PDF file."
+
+msgid "Escribe un título."
+msgstr "Write a title."
+
+msgid "Ese material ya estaba guardado."
+msgstr "That material was already saved."
+
+msgid "Guardar texto"
+msgstr "Save text"
+
+msgid "Hasta %(n)s caracteres."
+msgstr "Up to %(n)s characters."
+
+msgid "Hasta 20 MB y 200 páginas. Guardamos solo el texto, nunca el archivo."
+msgstr "Up to 20 MB and 200 pages. We keep only the text, never the file."
+
+msgid "Hay demasiados PDF procesándose; intenta en un momento."
+msgstr "Too many PDFs are being processed; try again in a moment."
+
+msgid "Lección (opcional)"
+msgstr "Lesson (optional)"
+
+msgid "No pudimos leer el PDF."
+msgstr "We could not read the PDF."
+
+msgid "Pega el texto de tu material."
+msgstr "Paste the text of your material."
+
+msgid "Pegar texto"
+msgstr "Paste text"
+
+msgid "Si lo dejas vacío, usamos el nombre del archivo."
+msgstr "If you leave it empty, we use the file name."
+
+msgid "Subir PDF"
+msgstr "Upload PDF"
+
+msgid "Subir un PDF"
+msgstr "Upload a PDF"
+
+msgid "Título"
+msgstr "Title"
+
+msgid "Ver el apunte"
+msgstr "See the note"
