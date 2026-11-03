@@ -7,6 +7,7 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from tutor.domain.glossary import CONTEXT_MAX, MEANING_MAX, TEXT_MAX, IncomingItem
+from tutor.domain.practice import SELF_RATING_MAX, SELF_RATING_MIN
 from tutor.domain.profile import (
     GOAL_TEXT_MAX,
     MAX_DAYS_PER_WEEK,
@@ -14,7 +15,20 @@ from tutor.domain.profile import (
     MIN_DAYS_PER_WEEK,
     MINUTES_CHOICES,
 )
-from tutor.domain.templates import GUIDE_SECTIONS
+from tutor.domain.templates import (
+    ANSWER_NUMBER_MAX,
+    ANSWER_SEQUENCE_MAX,
+    ANSWER_VALUE_MAX,
+    ANSWER_VALUES_MAX,
+    GUIDE_SECTIONS,
+    LIST_MAX_ITEMS,
+    MINUTES_MAX,
+    MINUTES_MIN,
+    RATING_MAX,
+    RATING_MIN,
+    TEMPO_MAX,
+    TEMPO_MIN,
+)
 from tutor.domain.templates import PARAM_TYPES as _PARAM_TYPES
 from tutor.domain.validation import ReportedError
 from tutor.mcp import schemas
@@ -436,6 +450,29 @@ def create_args() -> dict[str, Any]:
     return {"subject_id": str(uuid4()), **instance_args()}
 
 
+# One valid answer per answer_kind (spec 15.8; slice B ruling 83).
+ANSWERS: dict[str, dict[str, Any]] = {
+    "choice_index": {"answer_kind": "choice_index", "option_number": 1},
+    "value": {"answer_kind": "value", "value": "la cuenta"},
+    "values": {"answer_kind": "values", "values": ["C", "E", "G"]},
+    "sequence": {"answer_kind": "sequence", "values": ["1810", "1821", "1857"]},
+    "number": {"answer_kind": "number", "value": "3,14"},
+    "self_report": {"answer_kind": "self_report", "rating": 3, "tempo_bpm": 80, "minutes": 10},
+}
+
+
+def record_args(kind: str = "choice_index") -> dict[str, Any]:
+    return {
+        "session_id": str(uuid4()),
+        "item_id": str(uuid4()),
+        "answer": copy.deepcopy(ANSWERS[kind]),
+    }
+
+
+def practice_session() -> dict[str, Any]:
+    return {"session_id": str(uuid4())}
+
+
 # (tool, valid minimal payload, where the unknown key goes; "" means the top level)
 UNKNOWN_KEY_CASES: list[tuple[str, dict[str, Any], str]] = [
     ("get_profile", {}, ""),
@@ -467,6 +504,14 @@ UNKNOWN_KEY_CASES: list[tuple[str, dict[str, Any], str]] = [
     ("get_instance_view", {"instance_id": str(uuid4())}, ""),
     ("search_notes", {"query": "acorde"}, ""),
     ("get_note", {"note_id": str(uuid4())}, ""),
+    # Practice and progress (slice B Task 4).
+    ("start_practice", {"subject_id": str(uuid4())}, ""),
+    ("next_exercise", practice_session(), ""),
+    ("show_exercise", {"subject_id": str(uuid4()), "instance_id": str(uuid4())}, ""),
+    ("end_practice", practice_session(), ""),
+    ("get_subject_progress", {"subject_id": str(uuid4())}, ""),
+    ("record_result", record_args(), ""),
+    *(("record_result", record_args(kind), "answer") for kind in ANSWERS),
 ]
 
 
@@ -685,6 +730,44 @@ EDGE_CASES: list[tuple[str, dict[str, Any], tuple[Any, ...], Any]] = [
     ("search_notes", {"query": "acorde"}, ("limit",), 11),
     ("get_note", {"note_id": str(uuid4())}, ("passage_from",), 0),
     ("get_note", {"note_id": str(uuid4())}, ("passage_to",), 0),
+    # Practice (slice B Task 4).
+    ("start_practice", {"subject_id": str(uuid4())}, ("practice_mode",), "class"),
+    ("end_practice", practice_session(), ("self_rating",), SELF_RATING_MIN - 1),
+    ("end_practice", practice_session(), ("self_rating",), SELF_RATING_MAX + 1),
+    ("record_result", record_args(), ("answer", "answer_kind"), "essay"),
+    ("record_result", record_args(), ("answer", "option_number"), 0),
+    ("record_result", record_args(), ("answer", "option_number"), LIST_MAX_ITEMS + 1),
+    ("record_result", record_args("value"), ("answer", "value"), "x" * (ANSWER_VALUE_MAX + 1)),
+    (
+        "record_result",
+        record_args("values"),
+        ("answer", "values"),
+        ["a"] * (ANSWER_VALUES_MAX + 1),
+    ),
+    (
+        "record_result",
+        record_args("values"),
+        ("answer", "values"),
+        ["x" * (ANSWER_VALUE_MAX + 1)],
+    ),
+    (
+        "record_result",
+        record_args("sequence"),
+        ("answer", "values"),
+        ["a"] * (ANSWER_SEQUENCE_MAX + 1),
+    ),
+    (
+        "record_result",
+        record_args("number"),
+        ("answer", "value"),
+        "1" * (ANSWER_NUMBER_MAX + 1),
+    ),
+    ("record_result", record_args("self_report"), ("answer", "rating"), RATING_MIN - 1),
+    ("record_result", record_args("self_report"), ("answer", "rating"), RATING_MAX + 1),
+    ("record_result", record_args("self_report"), ("answer", "tempo_bpm"), TEMPO_MIN - 1),
+    ("record_result", record_args("self_report"), ("answer", "tempo_bpm"), TEMPO_MAX + 1),
+    ("record_result", record_args("self_report"), ("answer", "minutes"), MINUTES_MIN - 1),
+    ("record_result", record_args("self_report"), ("answer", "minutes"), MINUTES_MAX + 1),
 ]
 
 
@@ -710,6 +793,20 @@ def test_edge_values_are_rejected(
         ("save_profile", profile_args(), ("days_per_week",), MAX_DAYS_PER_WEEK),
         ("end_session", end_args(), ("hints_given",), 3),
         ("end_session", end_args(), ("cefr_estimate", "evidence"), ["x" * 200] * 5),
+        ("end_practice", practice_session(), ("self_rating",), SELF_RATING_MIN),
+        ("end_practice", practice_session(), ("self_rating",), SELF_RATING_MAX),
+        ("record_result", record_args("value"), ("answer", "value"), "x" * ANSWER_VALUE_MAX),
+        ("record_result", record_args("values"), ("answer", "values"), ["a"] * ANSWER_VALUES_MAX),
+        (
+            "record_result",
+            record_args("sequence"),
+            ("answer", "values"),
+            ["a"] * ANSWER_SEQUENCE_MAX,
+        ),
+        ("record_result", record_args("number"), ("answer", "value"), "1" * ANSWER_NUMBER_MAX),
+        ("record_result", record_args("self_report"), ("answer", "tempo_bpm"), TEMPO_MAX),
+        ("record_result", record_args("self_report"), ("answer", "minutes"), MINUTES_MAX),
+        ("record_result", record_args(), ("answer", "option_number"), LIST_MAX_ITEMS),
     ],
 )
 def test_limit_values_themselves_are_accepted(
