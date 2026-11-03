@@ -12,12 +12,13 @@ import httpx
 import pytest
 import sqlalchemy
 from cryptography.fernet import Fernet
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from key_value.aio.stores.memory import MemoryStore
 from mcp_lesson import NOW
 
 from tutor.app import (
     MAX_BODY_BYTES,
+    MAX_CONCURRENT_UPLOADS,
     BodySizeGuard,
     Message,
     PathDispatch,
@@ -27,6 +28,7 @@ from tutor.app import (
     Send,
     body_limit,
     build_app,
+    has_session_cookie,
     send_json,
 )
 from tutor.auth.mcp_auth import build_google_provider
@@ -245,11 +247,12 @@ def test_build_app_installs_the_profile_port(tmp_path: Path) -> None:
     assert isinstance(web.state.profiles, ServicesProfiles)
 
 
-# --- per-path body limits (slice D controller decision Q5) -----------------------------------
+# --- per-path body limits (slice D controller decision Q5, security review P2-2) -------------
 
 SUBJECT = "0b5e7c1a-3f2d-4e6b-9a8c-1d2e3f4a5b6c"
 PDF_LIMIT = 20 * 1024 * 1024 + MAX_BODY_BYTES
 TEXT_LIMIT = 2 * 1024 * 1024
+SESSION = {"cookie": "lang=es; __Host-tutor_session=opaque-value"}
 
 
 async def read_body(scope: Scope, receive: Receive, send: Send) -> None:
@@ -263,24 +266,31 @@ async def read_body(scope: Scope, receive: Receive, send: Send) -> None:
     await send_json(send, 200, {"size": size})
 
 
-async def post_sizes(path: str, *sizes: int, method: str = "POST") -> list[int]:
+async def post_sizes(
+    path: str, *sizes: int, method: str = "POST", headers: dict[str, str] | None = None
+) -> list[int]:
     transport = httpx.ASGITransport(app=BodySizeGuard(read_body))
     async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
         return [
-            (await client.request(method, path, content=b"x" * size)).status_code for size in sizes
+            (await client.request(method, path, content=b"x" * size, headers=headers)).status_code
+            for size in sizes
         ]
 
 
 def test_the_upload_limits_are_a_fixed_table() -> None:
-    assert body_limit("POST", f"/app/subjects/{SUBJECT}/pdf") == PDF_LIMIT
-    assert body_limit("POST", f"/app/subjects/{SUBJECT}/text") == TEXT_LIMIT
+    for subject in (SUBJECT, SUBJECT.upper(), SUBJECT.replace("-", "")):  # UUIDConvertor forms
+        assert body_limit("POST", f"/app/subjects/{subject}/pdf", session=True) == PDF_LIMIT
+        assert body_limit("POST", f"/app/subjects/{subject}/text", session=True) == TEXT_LIMIT
     near_misses = [
         f"/app/subjects/{SUBJECT}/pdf/",
         f"/app/subjects/{SUBJECT}/pdfx",
         f"/app/subjects/{SUBJECT}/text/extra",
         f"/x/app/subjects/{SUBJECT}/pdf",
-        f"/app/subjects/{SUBJECT.upper()}/pdf",
+        f"/APP/subjects/{SUBJECT}/pdf",
+        f"/app/subjects/{SUBJECT}/PDF",
         f"/app/subjects/{SUBJECT[:-1]}/pdf",
+        f"/app/subjects/{{{SUBJECT}}}/pdf",  # braces: a UUID parser takes it, the table does not
+        f"/app/subjects/urn:uuid:{SUBJECT}/pdf",
         "/app/subjects/------------------------------------/pdf",
         f"/app/subjects/{SUBJECT}/../{SUBJECT}/pdf",
         f"/app/notes/{SUBJECT}/pdf",
@@ -289,22 +299,48 @@ def test_the_upload_limits_are_a_fixed_table() -> None:
         "/app/lang",
     ]
     for path in near_misses:
-        assert body_limit("POST", path) == MAX_BODY_BYTES, path
+        assert body_limit("POST", path, session=True) == MAX_BODY_BYTES, path
     for method in ("PUT", "PATCH", "DELETE", "GET"):
-        assert body_limit(method, f"/app/subjects/{SUBJECT}/pdf") == MAX_BODY_BYTES
+        assert body_limit(method, f"/app/subjects/{SUBJECT}/pdf", session=True) == MAX_BODY_BYTES
+    # Without a session cookie the upload routes keep 64 KB too.
+    assert body_limit("POST", f"/app/subjects/{SUBJECT}/pdf", session=False) == MAX_BODY_BYTES
+
+
+def test_only_a_non_empty_session_cookie_counts() -> None:
+    assert has_session_cookie(b"__Host-tutor_session=abc")
+    assert has_session_cookie(b"lang=es;  __Host-tutor_session=abc ; other=1")
+    for header in (
+        None,
+        b"",
+        b"__Host-tutor_session=",
+        b"__Host-tutor_session",
+        b"tutor_session=abc",
+        b"x__Host-tutor_session=abc",
+        b"lang=__Host-tutor_session=abc",
+    ):
+        assert not has_session_cookie(header), header
 
 
 @pytest.mark.asyncio
 async def test_the_pdf_route_takes_20_mb_and_64_kb() -> None:
     path = f"/app/subjects/{SUBJECT}/pdf"
-    assert await post_sizes(path, PDF_LIMIT, PDF_LIMIT + 1) == [200, 413]
-    assert await post_sizes(path, 70_000, method="PUT") == [413]
+    assert await post_sizes(path, PDF_LIMIT, PDF_LIMIT + 1, headers=SESSION) == [200, 413]
+    assert await post_sizes(path, 70_000, method="PUT", headers=SESSION) == [413]
 
 
 @pytest.mark.asyncio
 async def test_the_text_route_takes_2_mb() -> None:
     path = f"/app/subjects/{SUBJECT}/text"
-    assert await post_sizes(path, TEXT_LIMIT, TEXT_LIMIT + 1) == [200, 413]
+    assert await post_sizes(path, TEXT_LIMIT, TEXT_LIMIT + 1, headers=SESSION) == [200, 413]
+
+
+@pytest.mark.asyncio
+async def test_an_upload_without_a_session_cookie_keeps_64_kb() -> None:
+    for path in (f"/app/subjects/{SUBJECT}/pdf", f"/app/subjects/{SUBJECT}/text"):
+        sizes = (MAX_BODY_BYTES, MAX_BODY_BYTES + 1)
+        assert await post_sizes(path, *sizes) == [200, 413]
+        empty = {"cookie": "__Host-tutor_session="}
+        assert await post_sizes(path, *sizes, headers=empty) == [200, 413]
 
 
 @pytest.mark.asyncio
@@ -316,19 +352,151 @@ async def test_every_other_path_keeps_64_kb() -> None:
         f"/app/subjects/{SUBJECT}/pdf/",
         f"/app/templates/{SUBJECT}/retire",
     ):
-        assert await post_sizes(path, MAX_BODY_BYTES, MAX_BODY_BYTES + 1) == [200, 413], path
+        sizes = (MAX_BODY_BYTES, MAX_BODY_BYTES + 1)
+        assert await post_sizes(path, *sizes, headers=SESSION) == [200, 413], path
+
+
+def chunks_of(count: int, size: int) -> AsyncIterator[bytes]:
+    async def generate() -> AsyncIterator[bytes]:
+        for _ in range(count):
+            yield b"x" * size
+
+    return generate()
 
 
 @pytest.mark.asyncio
-async def test_a_streamed_upload_over_the_limit_is_413() -> None:
-    async def chunks() -> AsyncIterator[bytes]:
-        for _ in range(3):
-            yield b"x" * (TEXT_LIMIT // 2)
+async def test_an_upload_streams_to_the_app_without_buffering() -> None:
+    seen: list[tuple[int, bool]] = []
 
-    transport = httpx.ASGITransport(app=BodySizeGuard(read_body))
+    async def record(scope: Scope, receive: Receive, send: Send) -> None:
+        while True:
+            message = await receive()
+            seen.append((len(message.get("body", b"")), message.get("more_body", False)))
+            if not message.get("more_body", False):
+                break
+        await send_json(send, 200, {})
+
+    transport = httpx.ASGITransport(app=BodySizeGuard(record))
     async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
-        response = await client.post(f"/app/subjects/{SUBJECT}/text", content=chunks())
+        response = await client.post(
+            f"/app/subjects/{SUBJECT}/text", content=chunks_of(3, 100_000), headers=SESSION
+        )
+    assert response.status_code == 200
+    # The chunks arrive as sent, not joined into one message.
+    assert [size for size, _ in seen if size] == [100_000] * 3
+
+
+@pytest.mark.asyncio
+async def test_a_streamed_upload_over_the_limit_is_cut_and_413() -> None:
+    received: list[str] = []
+
+    async def keep_reading(scope: Scope, receive: Receive, send: Send) -> None:
+        while True:
+            message = await receive()
+            received.append(message["type"])
+            if message["type"] == "http.disconnect" or not message.get("more_body", False):
+                break
+        await send_json(send, 200, {"ok": True})  # dropped by the guard
+
+    transport = httpx.ASGITransport(app=BodySizeGuard(keep_reading))
+    async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
+        response = await client.post(
+            f"/app/subjects/{SUBJECT}/text",
+            content=chunks_of(3, TEXT_LIMIT // 2),
+            headers=SESSION,
+        )
+    assert (response.status_code, response.json()) == (413, {"error": "payload_too_large"})
+    assert received == ["http.request", "http.request", "http.disconnect"]
+
+
+@pytest.mark.asyncio
+async def test_an_app_that_raises_on_the_cut_body_still_gets_413() -> None:
+    async def form_parser(scope: Scope, receive: Receive, send: Send) -> None:
+        while (await receive())["type"] != "http.disconnect":
+            pass
+        raise RuntimeError("client disconnected")  # what Starlette's ClientDisconnect does
+
+    transport = httpx.ASGITransport(app=BodySizeGuard(form_parser))
+    async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
+        response = await client.post(
+            f"/app/subjects/{SUBJECT}/text",
+            content=chunks_of(3, TEXT_LIMIT // 2),
+            headers=SESSION,
+        )
     assert response.status_code == 413
+
+
+@pytest.mark.asyncio
+async def test_an_app_error_within_the_limit_is_not_swallowed() -> None:
+    async def broken(scope: Scope, receive: Receive, send: Send) -> None:
+        await receive()
+        raise RuntimeError("boom")
+
+    guard = BodySizeGuard(broken)
+    transport = httpx.ASGITransport(app=guard)
+    async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
+        with pytest.raises(RuntimeError, match="boom"):
+            await client.post(f"/app/subjects/{SUBJECT}/text", content=b"x", headers=SESSION)
+    assert guard._uploads == 0
+
+
+@pytest.mark.asyncio
+async def test_a_real_multipart_upload_over_the_limit_is_413() -> None:
+    web = FastAPI()
+
+    @web.post("/app/subjects/{subject_id}/text")
+    async def upload(request: Request) -> dict[str, int]:
+        form = await request.form()
+        return {"fields": len(form)}
+
+    transport = httpx.ASGITransport(app=BodySizeGuard(web))
+    async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
+        small = await client.post(
+            f"/app/subjects/{SUBJECT}/text",
+            files={"file": ("a.pdf", b"x" * 1000, "application/pdf")},
+            headers=SESSION,
+        )
+        big = await client.post(
+            f"/app/subjects/{SUBJECT}/text",
+            files={"file": ("a.pdf", b"x" * (TEXT_LIMIT + 1), "application/pdf")},
+            headers=SESSION,
+        )
+    assert (small.status_code, small.json()) == (200, {"fields": 1})
+    assert big.status_code == 413
+
+
+@pytest.mark.asyncio
+async def test_more_uploads_at_once_than_the_cap_get_503() -> None:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    inside = 0
+
+    async def slow(scope: Scope, receive: Receive, send: Send) -> None:
+        nonlocal inside
+        await receive()
+        inside += 1
+        if inside == MAX_CONCURRENT_UPLOADS:
+            entered.set()
+        await release.wait()
+        await send_json(send, 200, {})
+
+    guard = BodySizeGuard(slow)
+    transport = httpx.ASGITransport(app=guard)
+    path = f"/app/subjects/{SUBJECT}/pdf"
+    async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
+        held = [
+            asyncio.create_task(client.post(path, content=b"x", headers=SESSION))
+            for _ in range(MAX_CONCURRENT_UPLOADS)
+        ]
+        await asyncio.wait_for(entered.wait(), 5)
+        extra = await client.post(path, content=b"x", headers=SESSION)
+        release.set()
+        statuses = [(await task).status_code for task in held]
+        after = await client.post(path, content=b"x", headers=SESSION)
+    assert (extra.status_code, extra.json()) == (503, {"error": "busy"})
+    assert statuses == [200] * MAX_CONCURRENT_UPLOADS
+    assert after.status_code == 200
+    assert guard._uploads == 0
 
 
 @pytest.mark.asyncio
@@ -343,7 +511,13 @@ async def test_build_app_keeps_64_kb_on_mcp_and_lets_an_upload_past_the_guard(
         upload = await client.post(
             f"/app/subjects/{SUBJECT}/text",
             content=b"x" * 1_000_000,
+            headers={"content-type": "application/x-www-form-urlencoded", **SESSION},
+        )
+        anonymous = await client.post(
+            f"/app/subjects/{SUBJECT}/text",
+            content=b"x" * 1_000_000,
             headers={"content-type": "application/x-www-form-urlencoded"},
         )
     assert mcp.status_code == 413
     assert upload.status_code != 413  # past the guard; the website answers (no route yet)
+    assert anonymous.status_code == 413

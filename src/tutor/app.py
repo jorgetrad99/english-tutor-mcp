@@ -43,7 +43,7 @@ from tutor.web.pg import (
     pg_web_deps,
 )
 from tutor.web.profile import ServicesProfiles, install_profiles
-from tutor.web.sessions import ANONYMOUS_LIFETIME
+from tutor.web.sessions import ANONYMOUS_LIFETIME, COOKIE
 
 Scope = MutableMapping[str, Any]
 Message = MutableMapping[str, Any]
@@ -102,18 +102,36 @@ class RejectProxyHeaders:
         await self.app(scope, receive, send)
 
 
-_UUID_PART = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+# Starlette's UUIDConvertor form: either case, hyphens optional. Any other spelling a UUID
+# parser might accept (braces, `urn:uuid:`) does not match and keeps 64 KB: it fails closed.
+_UUID_PART = "[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}"
 # Fixed per-path body limits (slice D controller decision Q5): a POST whose whole path matches
 # gets that limit; every other request keeps MAX_BODY_BYTES. Nothing in a request changes it.
 UPLOAD_BODY_LIMITS: tuple[tuple[re.Pattern[str], int], ...] = (
     (re.compile(rf"/app/subjects/{_UUID_PART}/pdf"), 20 * 1024 * 1024 + MAX_BODY_BYTES),
     (re.compile(rf"/app/subjects/{_UUID_PART}/text"), 2 * 1024 * 1024),
 )
+MAX_CONCURRENT_UPLOADS = 4  # large bodies in flight at once per process; one more gets 503
+_SESSION_COOKIE = COOKIE.encode("ascii") + b"="
 
 
-def body_limit(method: str | None, path: str, default: int = MAX_BODY_BYTES) -> int:
-    """The body limit for one request: an upload route's from the table, else `default`."""
-    if method == "POST":
+def has_session_cookie(cookie_header: bytes | None) -> bool:
+    """Whether the request carries a non-empty session cookie. Presence only: the session
+    itself is checked by the website after the body is read."""
+    if not cookie_header:
+        return False
+    return any(
+        part.strip().startswith(_SESSION_COOKIE) and len(part.strip()) > len(_SESSION_COOKIE)
+        for part in cookie_header.split(b";")
+    )
+
+
+def body_limit(
+    method: str | None, path: str, *, session: bool, default: int = MAX_BODY_BYTES
+) -> int:
+    """The body limit for one request: an upload route's from the table when the request
+    carries a session cookie, else `default`."""
+    if method == "POST" and session:
         for pattern, limit in UPLOAD_BODY_LIMITS:
             if pattern.fullmatch(path):
                 return limit
@@ -121,8 +139,13 @@ def body_limit(method: str | None, path: str, default: int = MAX_BODY_BYTES) -> 
 
 
 class BodySizeGuard:
-    """Rejects bodies over the limit (POST, PUT, PATCH, DELETE) with 413 before the app reads
-    them: 64 KB, except the two upload routes of UPLOAD_BODY_LIMITS.
+    """Rejects bodies over the limit (POST, PUT, PATCH, DELETE) with 413: 64 KB, except the
+    two upload routes of UPLOAD_BODY_LIMITS for a request with a session cookie.
+
+    A 64 KB body is read whole before the app runs, so the app never sees a partial one. An
+    upload body is not buffered: it streams to the app (Starlette spools file parts to disk)
+    through a counter that, once the limit passes, tells the app the client left and answers
+    413 itself; at most MAX_CONCURRENT_UPLOADS stream at once, the next gets 503.
 
     Spec section 5. It wraps both the MCP app and the website.
     """
@@ -130,17 +153,64 @@ class BodySizeGuard:
     def __init__(self, app: ASGIApp, limit: int = MAX_BODY_BYTES) -> None:
         self.app = app
         self._limit = limit
+        self._uploads = 0
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or scope.get("method") not in BODY_METHODS:
             await self.app(scope, receive, send)
             return
-        limit = body_limit(scope.get("method"), scope.get("path", ""), self._limit)
         headers = {k.decode("latin-1").lower(): v for k, v in scope.get("headers", [])}
+        session = has_session_cookie(headers.get("cookie"))
+        path = scope.get("path", "")
+        limit = body_limit(scope.get("method"), path, session=session, default=self._limit)
         declared = headers.get("content-length")
         if declared is not None and (not declared.isdigit() or int(declared) > limit):
             await send_json(send, 413, {"error": "payload_too_large"})
             return
+        if limit > self._limit:
+            await self._stream(scope, receive, send, limit)
+            return
+        await self._buffered(scope, receive, send, limit)
+
+    async def _stream(self, scope: Scope, receive: Receive, send: Send, limit: int) -> None:
+        if self._uploads >= MAX_CONCURRENT_UPLOADS:
+            await send_json(send, 503, {"error": "busy"})
+            return
+        self._uploads += 1
+        size = 0
+        over = False
+        started = False
+
+        async def counted() -> Message:
+            nonlocal size, over
+            if over:
+                return {"type": "http.disconnect"}
+            message = await receive()
+            if message["type"] == "http.request":
+                size += len(message.get("body", b""))
+                if size > limit:
+                    over = True
+                    return {"type": "http.disconnect"}
+            return message
+
+        async def guarded(message: Message) -> None:
+            nonlocal started
+            if over and not started:
+                return  # the app's answer to the cut body is dropped; the 413 is ours
+            started = True
+            await send(message)
+
+        try:
+            await self.app(scope, counted, guarded)
+        except Exception:
+            if not over:
+                raise
+        finally:
+            self._uploads -= 1
+        if over and not started:
+            await send_json(send, 413, {"error": "payload_too_large"})
+
+    async def _buffered(self, scope: Scope, receive: Receive, send: Send, limit: int) -> None:
         chunks: list[bytes] = []
         size = 0
         while True:
