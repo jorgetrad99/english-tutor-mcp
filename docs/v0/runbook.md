@@ -61,6 +61,12 @@ The website shows template instances only in sandboxed frames loaded from a **se
    - Both are optional **as a pair**. Both empty is the current production state: the website shows notes without frames, and the dashboard CSP has `frame-src 'none'`. One without the other stops the server.
 5. **Smoke check.** `curl -si https://templates.<host>/login` and `curl -si https://templates.<host>/mcp` return `404 Not found` with the `sandbox allow-scripts` CSP and no `Set-Cookie`. `https://<host>/login` carries `frame-src https://templates.<host>` in its CSP.
 
+## Uploads
+
+The subject page adds notes from a PDF or a pasted text. The app accepts bodies up to **20 MB + 64 KB** on `POST /app/subjects/<uuid>/pdf` and **2 MB** on `POST /app/subjects/<uuid>/text`, and only with a session cookie; every other request is capped at 64 KB (spec amendment A72). The Cloudflare tunnel (100 MB on Free) and the Coolify proxy must let at least these sizes through on those two paths: check any body-size or buffering middleware on the `app` service. A 413 without the app's `{"error": "payload_too_large"}` body comes from the edge.
+
+PDFs are **never stored**. The app parses each one in a short-lived subprocess (20 s, two at a time) and keeps only the extracted text, as the note's `raw_text`. Neither the file nor its name is logged, so no PDF reaches the volume or a backup.
+
 ## First deploy
 
 1. Install Docker Engine with the Compose plugin. Create the deploy user and `/opt/tutor`. `git clone <repo> /opt/tutor && cd /opt/tutor && git checkout <release tag>`.
