@@ -19,7 +19,9 @@ CSP = (
 # The policy every route that serves a composed template sends (the web frame and slice C's
 # app_frame), from its own origin with no cookies (ADR 0005 decision 8, spec 9 and 10). Scripts
 # and styles inline only, images only as data: URLs built by the template's own script, no
-# network, no forms, an opaque origin. `navigate-to` is left out: no browser implements it.
+# network (WebRTC and DNS prefetch excepted: CSP cannot block them, accepted because the payload
+# holds no answer key), no forms, an opaque origin. `navigate-to` is left out: no browser
+# implements it.
 TEMPLATE_FRAME_CSP = (
     "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; "
     "style-src 'unsafe-inline'; img-src data:; connect-src 'none'; form-action 'none'"
