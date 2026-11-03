@@ -11,6 +11,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import time
 import zoneinfo
 from collections.abc import Awaitable, Callable, Mapping, MutableMapping
@@ -101,8 +102,27 @@ class RejectProxyHeaders:
         await self.app(scope, receive, send)
 
 
+_UUID_PART = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+# Fixed per-path body limits (slice D controller decision Q5): a POST whose whole path matches
+# gets that limit; every other request keeps MAX_BODY_BYTES. Nothing in a request changes it.
+UPLOAD_BODY_LIMITS: tuple[tuple[re.Pattern[str], int], ...] = (
+    (re.compile(rf"/app/subjects/{_UUID_PART}/pdf"), 20 * 1024 * 1024 + MAX_BODY_BYTES),
+    (re.compile(rf"/app/subjects/{_UUID_PART}/text"), 2 * 1024 * 1024),
+)
+
+
+def body_limit(method: str | None, path: str, default: int = MAX_BODY_BYTES) -> int:
+    """The body limit for one request: an upload route's from the table, else `default`."""
+    if method == "POST":
+        for pattern, limit in UPLOAD_BODY_LIMITS:
+            if pattern.fullmatch(path):
+                return limit
+    return default
+
+
 class BodySizeGuard:
-    """Rejects bodies over 64 KB (POST, PUT, PATCH, DELETE) with 413 before the app reads them.
+    """Rejects bodies over the limit (POST, PUT, PATCH, DELETE) with 413 before the app reads
+    them: 64 KB, except the two upload routes of UPLOAD_BODY_LIMITS.
 
     Spec section 5. It wraps both the MCP app and the website.
     """
@@ -115,9 +135,10 @@ class BodySizeGuard:
         if scope["type"] != "http" or scope.get("method") not in BODY_METHODS:
             await self.app(scope, receive, send)
             return
+        limit = body_limit(scope.get("method"), scope.get("path", ""), self._limit)
         headers = {k.decode("latin-1").lower(): v for k, v in scope.get("headers", [])}
         declared = headers.get("content-length")
-        if declared is not None and (not declared.isdigit() or int(declared) > self._limit):
+        if declared is not None and (not declared.isdigit() or int(declared) > limit):
             await send_json(send, 413, {"error": "payload_too_large"})
             return
         chunks: list[bytes] = []
@@ -130,7 +151,7 @@ class BodySizeGuard:
                 break
             chunk = message.get("body", b"")
             size += len(chunk)
-            if size > self._limit:
+            if size > limit:
                 await send_json(send, 413, {"error": "payload_too_large"})
                 return
             chunks.append(chunk)
@@ -317,7 +338,7 @@ def dev_mcp_hosts(settings: Settings) -> list[str]:
 def build_app(
     settings: Settings, *, engine: Engine | None = None, web_config: WebConfig | None = None
 ) -> PathDispatch:
-    """MCP + OAuth proxy and the website, both behind the 64 KB guard and the request log.
+    """MCP + OAuth proxy and the website, both behind the body-size guard and the request log.
 
     On Postgres the login role is checked first (RLS must bind it), and the server lifespan
     purges expired web sessions at startup and then hourly. With TUTOR_DEV_AUTH (loopback dev
