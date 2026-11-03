@@ -127,7 +127,7 @@ def test_the_guide_says_its_examples_are_illustrations_and_the_contract_is_neutr
     text = guide_section("choosing_exercises")
     assert "illustrations from different fields" in text
     assert "the contract itself is field-neutral" in text
-    assert TEMPLATE_GUIDE_VERSION == 4
+    assert TEMPLATE_GUIDE_VERSION == 5
 
 
 def test_the_contract_puts_the_marker_first_in_the_head() -> None:
@@ -137,6 +137,14 @@ def test_the_contract_puts_the_marker_first_in_the_head() -> None:
     for part in ("`<!doctype html>`", "`<html>`", "`<head>`", '`<meta charset="utf-8">`'):
         assert part in text
     assert "outside any template" not in text  # the version 3 rule
+
+
+def test_the_contract_requires_the_meta_charset_and_only_once() -> None:
+    # Amendment A52 (guide version 5): the meta is required, and `charset` appears only there.
+    text = guide_section("contract")
+    assert 'each optional, then the required `<meta charset="utf-8">`' in text
+    assert "do not write `charset` anywhere after it" in text
+    assert "in this order, each optional" not in text  # the version 4 rule
 
 
 def test_inline_guide_is_the_decision_path_only_and_fits_the_cap() -> None:

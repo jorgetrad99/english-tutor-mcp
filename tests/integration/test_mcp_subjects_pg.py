@@ -156,7 +156,7 @@ async def test_subjects_tools_on_postgres_with_the_login_role(login_engine: Engi
 
 def sized_html(size: int) -> str:
     """A template of exactly `size` UTF-8 bytes, mostly two-byte characters."""
-    head = f"<!doctype html><html><head>{TEMPLATE_MARKER}</head><body><p>"
+    head = f"<!doctype html><html><head><meta charset='utf-8'>{TEMPLATE_MARKER}</head><body><p>"
     tail = "</p></body></html>"
     room = size - len(head) - len(tail)
     return head + "é" * (room // 2) + "a" * (room % 2) + tail
