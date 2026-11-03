@@ -109,8 +109,8 @@ ANSWER_KINDS: tuple[AnswerKind, ...] = (
 # contract constants, every rendered guide section and every worked-example file. A test
 # recomputes it (tutor.services.template_files.guide_sha256); change both together (plan
 # rulings 21 and 31).
-TEMPLATE_GUIDE_VERSION = 3
-TEMPLATE_CONTRACT_SHA256 = "85ed20e51123370814a393808d4bef126ed9e0a82278c153723b7d2f728ef508"
+TEMPLATE_GUIDE_VERSION = 4
+TEMPLATE_CONTRACT_SHA256 = "39fb0d78870fd993394e548c6b98bb0e43a3df251575c70308470d4125d70318"
 
 # Caps (plan ruling 24; spec 15.3, 15.4). The MCP schemas and migration 0006 restate them.
 NAME_MAX = 80

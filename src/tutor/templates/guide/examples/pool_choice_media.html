@@ -2,6 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
+<script type="application/json" id="tutor-params"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Nota de oído</title>
 <style>
@@ -23,7 +24,6 @@ input{font:inherit;padding:8px;border:1px solid var(--line);border-radius:6px;ba
 <div role="group" aria-labelledby="task" id="options"></div>
 <p role="status" id="result"></p>
 </main>
-<script type="application/json" id="tutor-params"></script>
 <script>
 (function () {
   // choice_index with pool_draw "one_of_choices": the server sends drawn.cue and drawn.options

@@ -14,8 +14,8 @@ from typing import Literal
 MAX_TEMPLATE_BYTES = 40_000
 
 # The one empty element a template must contain: the server puts the parameters (as JSON) in it
-# and its bridge script right after it (spec 15.5). The parser must see this exact start tag as
-# the one tutor-params element, at the offset of the marker text (security review P3).
+# and its bridge script right after it (spec 15.5). It must be the first content of <head>
+# (amendment A51), so no parser has to decide whether a browser would see it.
 MARKER_START_TAG = '<script type="application/json" id="tutor-params">'
 TEMPLATE_MARKER = MARKER_START_TAG + "</script>"
 _RESERVED_IDS = frozenset({"tutor-params", "tutor-bridge"})
@@ -43,50 +43,36 @@ _FORBIDDEN_TAGS = frozenset(
 _URL_ATTRS = frozenset(
     {"src", "href", "srcset", "poster", "data", "action", "formaction", "xlink:href"}
 )
-# Elements whose content a browser never runs as a script: inert (template), raw text or
-# escapable raw text, or not rendered (noscript with scripting on). A marker under one of them
-# is not the params element the bridge reads (security re-review P3, plan ruling 43).
-_INERT_TAGS = frozenset(
-    {
-        "template",
-        "noscript",
-        "plaintext",
-        "textarea",
-        "title",
-        "xmp",
-        "noembed",
-        "iframe",
-        "noframes",
-        "style",
-        "script",  # only reachable as `<script/>`, which a browser leaves open
-    }
-)
-# Elements with no end tag; they never become anyone's ancestor.
-_VOID_TAGS = frozenset(
-    {
-        "area",
-        "base",
-        "br",
-        "col",
-        "embed",
-        "hr",
-        "img",
-        "input",
-        "keygen",
-        "link",
-        "meta",
-        "param",
-        "source",
-        "track",
-        "wbr",
-    }
-)
 _CSS_TOKENS = ("url(", "@import", "expression(")
 _ATTR_TOKENS = ("url(", "@import")
 _DOCUMENT_START = re.compile(r"\s*(?:<!doctype\s+html\b|<html\b)", re.IGNORECASE)
 _SAFE_NAME = re.compile(r"[a-z][a-z0-9:_.-]{0,31}")
 _WHITESPACE = re.compile(r"\s+")
 _BOM = chr(0xFEFF)
+
+# What may precede the marker (amendment A51): each part optional, in this order, with ASCII
+# whitespace only around them: one BOM, `<!doctype html>`, `<html>` with plain attributes,
+# `<head>` without attributes, `<meta charset=utf-8>`. No comment, text or other tag, so the
+# marker is the first content of the head however the rest of the document parses. Written by
+# hand rather than with html.parser, whose quirks differ from browsers and between Python
+# patch releases (security pass P2, P3). re.ASCII keeps IGNORECASE from folding non-ASCII
+# letters (such as U+017F, long s) into ASCII ones.
+_WS = r"[\t\n\f\r ]"
+_ATTR_VALUE = r"""(?:"[^"<>\x00]*"|'[^'<>\x00]*'|[^\t\n\f\r "'=<>`\x00]+)"""
+_HTML_ATTR = rf"{_WS}+[a-z][a-z0-9-]*(?:{_WS}*={_WS}*{_ATTR_VALUE})?"
+_CHARSET = r"""(?:"utf-8"|'utf-8'|utf-8)"""  # another charset could re-decode the page
+_MARKER_PREFIX = re.compile(
+    "".join(
+        (
+            rf"\A{_BOM}?{_WS}*",
+            rf"(?:<!doctype html>{_WS}*)?",
+            rf"(?:<html(?:{_HTML_ATTR})*{_WS}*>{_WS}*)?",
+            rf"(?:<head>{_WS}*)?",
+            rf"(?:<meta{_WS}+charset{_WS}*={_WS}*{_CHARSET}{_WS}*/?>{_WS}*)?",
+        )
+    ),
+    re.ASCII | re.IGNORECASE,
+)
 
 
 def _safe(name: str, fallback: str) -> str:
@@ -98,20 +84,18 @@ def _has_css_token(value: str) -> bool:
     return any(token in compact for token in _CSS_TOKENS)
 
 
+def _marker_comes_first(html: str) -> bool:
+    """True when the marker text sits right after an allowed prefix (`_MARKER_PREFIX`)."""
+    prefix = _MARKER_PREFIX.match(html)
+    return prefix is not None and html.startswith(TEMPLATE_MARKER, prefix.end())
+
+
 class _Guard(HTMLParser):
-    def __init__(self, html: str) -> None:
+    def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.problems: list[HtmlProblem] = []
         self._style: list[str] | None = None
         self.reserved_ids: list[str] = []  # tutor-params / tutor-bridge elements, in order
-        self.params_tags: list[tuple[str, int]] = []  # (start tag text, offset) of tutor-params
-        self.params_inert = False  # some tutor-params element has an open inert ancestor
-        self._open: list[str] = []  # open elements, outermost first
-        self._line_starts = [0] + [i + 1 for i, ch in enumerate(html) if ch == "\n"]
-
-    def _offset(self) -> int:
-        line, column = self.getpos()  # the parser counts lines by "\n", from 1
-        return self._line_starts[line - 1] + column
 
     def _add(self, code: HtmlProblemCode, detail: str) -> None:
         problem = HtmlProblem(code, detail)
@@ -119,14 +103,7 @@ class _Guard(HTMLParser):
             self.problems.append(problem)
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        ids = [v for n, v in attrs if n == "id" and v in _RESERVED_IDS]
-        self.reserved_ids += ids
-        if "tutor-params" in ids:
-            self.params_tags.append((self.get_starttag_text() or "", self._offset()))
-            if _INERT_TAGS.intersection(self._open):
-                self.params_inert = True
-        if tag not in _VOID_TAGS:
-            self._open.append(tag)
+        self.reserved_ids += [v for n, v in attrs if n == "id" and v in _RESERVED_IDS]
         if tag in _FORBIDDEN_TAGS:
             self._add("tag_forbidden", tag)
             return
@@ -140,16 +117,11 @@ class _Guard(HTMLParser):
             self._style = []
 
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        # A browser ignores the slash of `<textarea/>`: a non-void element stays open.
         self.handle_starttag(tag, attrs)
-        if tag in _VOID_TAGS:
-            self.handle_endtag(tag)
-        elif tag == "style":
-            self._flush_style()  # the parser saw no content; the element stays open
+        if tag == "style":
+            self._flush_style()  # the parser saw no content
 
     def handle_endtag(self, tag: str) -> None:
-        if tag in self._open:  # close it and whatever it left open; a stray end tag is ignored
-            del self._open[len(self._open) - 1 - self._open[::-1].index(tag) :]
         if tag == "style":
             self._flush_style()
 
@@ -204,7 +176,7 @@ def check_html(html: str) -> tuple[HtmlProblem, ...]:
 def _check(html: str) -> tuple[tuple[HtmlProblem, ...], _Guard | None]:
     if len(html.encode("utf-8", "surrogatepass")) > MAX_TEMPLATE_BYTES:
         return (HtmlProblem("too_large", "html"),), None
-    guard = _Guard(html)
+    guard = _Guard()
     if not _DOCUMENT_START.match(html.lstrip(_BOM)):
         guard.problems.append(HtmlProblem("not_document", "doctype"))
     guard.feed(html)
@@ -213,26 +185,22 @@ def _check(html: str) -> tuple[tuple[HtmlProblem, ...], _Guard | None]:
 
 
 def check_template_html(html: str) -> tuple[HtmlProblem, ...]:
-    """`check_html` plus the marker rule (spec 15.5): exactly one empty
-    `<script type="application/json" id="tutor-params"></script>` and no other element with id
-    `tutor-params` or `tutor-bridge`; otherwise `marker_missing` (detail `tutor-params`).
+    """`check_html` plus the marker rule (spec 15.5, amendment A51): exactly one empty
+    `<script type="application/json" id="tutor-params"></script>`, as the first content of the
+    head, and no other element with id `tutor-params` or `tutor-bridge`; otherwise
+    `marker_missing` (detail `tutor-params`).
 
-    The marker text must also be the element the parser sees: the one tutor-params start tag
-    is exactly `MARKER_START_TAG` and starts where the marker text starts, so a marker inside
-    a script string, an attribute or a comment cannot stand in for it (compose_document fills
-    the first marker text). It must not sit under an open inert element (`_INERT_TAGS`), where
-    a browser would not parse it as a script."""
+    Only `<!doctype html>`, `<html ...>`, `<head>` and `<meta charset="utf-8">` may precede the
+    marker, in that order and with ASCII whitespace between (`_MARKER_PREFIX`). A browser then
+    builds the marker as the head's first element before anything that could hide or swallow
+    it, and compose_document fills that same first marker text."""
     problems, guard = _check(html)
     if guard is None:
         return problems
-    bound = (
-        guard.params_tags == [(MARKER_START_TAG, html.find(TEMPLATE_MARKER))]
-        and not guard.params_inert
-    )
     if (
-        html.count(TEMPLATE_MARKER) != 1
+        not _marker_comes_first(html)
+        or html.count(TEMPLATE_MARKER) != 1
         or tuple(guard.reserved_ids) != ("tutor-params",)
-        or not bound
     ):
         return (*problems, HtmlProblem("marker_missing", "tutor-params"))
     return problems
