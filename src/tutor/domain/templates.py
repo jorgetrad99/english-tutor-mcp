@@ -19,7 +19,7 @@ from typing import Any, Literal, TypeGuard
 from uuid import UUID
 
 from tutor.domain.errors import FieldError, FieldErrorCode
-from tutor.domain.html_guard import MAX_TEMPLATE_BYTES, TEMPLATE_MARKER
+from tutor.domain.html_guard import MAX_TEMPLATE_BYTES, TEMPLATE_MARKER, marker_comes_first
 from tutor.domain.subjects import collapse_name
 
 TemplatePurpose = Literal["exercise", "display"]
@@ -1403,10 +1403,11 @@ def encode_payload(payload: Mapping[str, object]) -> str:
 
 def compose_document(template_html: str, payload_json: str, bridge_js: str) -> str:
     """Put the payload inside the marker and the bridge right after it: the only two changes
-    to the template's text. ValueError unless the marker is there exactly once, or when the
-    payload or the bridge could end their element (callers pass validated HTML only)."""
-    if template_html.count(TEMPLATE_MARKER) != 1:
-        raise ValueError("the template must contain the parameter marker exactly once")
+    to the template's text. ValueError unless the marker is there exactly once and comes first
+    (the prefix check of check_template_html, amendments A51 and A52), or when the payload or
+    the bridge could end their element (callers pass validated HTML only)."""
+    if template_html.count(TEMPLATE_MARKER) != 1 or not marker_comes_first(template_html):
+        raise ValueError("the template must contain the parameter marker once, first in <head>")
     if "<" in payload_json or "</script" in bridge_js.lower():
         raise ValueError("payload or bridge would end its script element")
     filled = (
