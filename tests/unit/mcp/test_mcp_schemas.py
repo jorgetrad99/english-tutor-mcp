@@ -171,6 +171,10 @@ def test_output_closed_sets_are_enums_not_open_strings() -> None:
     assert enums["instance_outcome"] == {"new", "existing", "superseded"}
     assert enums["guide_section"] == set(GUIDE_SECTIONS)
     assert "artifact_kind" not in enums and "exercise_kind" not in enums
+    # Practice and progress (slice B rulings 37, 71).
+    assert enums["practice_mode"] == {"app", "text", "class"}
+    assert enums["result_outcome"] == {"new", "existing"}
+    assert enums["concept_rank"] == {"ranked", "few_attempts", "not_practised"}
 
 
 def test_enums_are_closed_and_match_the_contract() -> None:
@@ -220,6 +224,16 @@ def test_enums_are_closed_and_match_the_contract() -> None:
         "param_type": PARAM_TYPES,
         "param_role": {"prompt", "answer_key", "reveal", "pool"},
         "learner_confirmed": {True},
+        # Practice (slice B ruling 37; slice A ruling 1: no English name).
+        "practice_mode": {"app", "text"},
+        "answer_kind": {
+            "choice_index",
+            "value",
+            "values",
+            "sequence",
+            "number",
+            "self_report",
+        },
     }
     assert enums["minutes_per_day"] == set(MINUTES_CHOICES)
 

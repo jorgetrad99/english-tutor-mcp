@@ -30,6 +30,13 @@ SUBJECT_TOOLS = {
     "save_template",
     "create_instance",
     "get_instance_view",
+    # Slice B: practice and progress (subjects spec 15.9, 16.8).
+    "start_practice",
+    "next_exercise",
+    "show_exercise",
+    "record_result",
+    "end_practice",
+    "get_subject_progress",
 }
 MUSIC_WORDS = ("music", "guitar", "ear", "pitch", "tablature")
 
@@ -55,6 +62,15 @@ def all_rules() -> list[str]:
         rules.SAVE_TEMPLATE,
         rules.SHOW_INSTANCE,
         rules.GET_NOTE,
+        rules.START_PRACTICE,
+        rules.NEXT_EXERCISE,
+        rules.NEXT_EXERCISE_DONE,
+        rules.SHOW_EXERCISE,
+        rules.RECORD_RESULT,
+        rules.END_PRACTICE,
+        rules.GET_SUBJECT_PROGRESS,
+        rules.PRACTICE_SESSION_CLOSED,
+        *rules.FIELD_ERRORS.values(),
     ]
     for mode, prov, due, done in itertools.product(
         MODES, (True, False), (True, False), (True, False)

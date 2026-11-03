@@ -1,5 +1,5 @@
-"""FastMCP server: six English tools, ten subjects tools, the start-lesson prompt and the
-instructions (spec section 8; subjects spec 7.1, 15.9).
+"""FastMCP server: six English tools, sixteen subjects tools, the start-lesson prompt and the
+instructions (spec section 8; subjects spec 7.1, 15.9, 16.8).
 
 Tools are plain `def` functions: FastMCP runs them in a worker thread with contextvars
 copied, so the blocking services and get_access_token() work inside them.
@@ -34,7 +34,9 @@ from tutor.mcp.ratelimit import SlidingWindowLimiter
 from tutor.services import glossary as glossary_svc
 from tutor.services import lesson as lesson_svc
 from tutor.services import notes as notes_svc
+from tutor.services import practice as practice_svc
 from tutor.services import profile as profile_svc
+from tutor.services import progress as progress_svc
 from tutor.services import session_end as end_svc
 from tutor.services import subjects as subjects_svc
 from tutor.services import templates as templates_svc
@@ -403,6 +405,89 @@ def _register_subject_tools(mcp: FastMCP, svc: Services) -> None:
         ),
     )
     _register(mcp, get_instance_view, s.GetInstanceViewInput, read("Get instance view"))
+    _register_practice_tools(mcp, svc)
+
+
+def _register_practice_tools(mcp: FastMCP, svc: Services) -> None:
+    """The five practice tools and get_subject_progress (subjects spec 6.2, 15.9, 16.8)."""
+
+    def start_practice(
+        subject_id: s.SubjectIdField, practice_mode: s.StartModeField = "app"
+    ) -> s.StartPracticeOutput:
+        def run() -> s.StartPracticeOutput:
+            try:
+                started = practice_svc.start_practice(svc, _user(), subject_id, practice_mode)
+            except ServiceError as exc:  # the service's `mode` is this tool's practice_mode
+                fields = tuple("practice_mode" if f == "mode" else f for f in exc.fields)
+                raise ServiceError(exc.code, fields) from None
+            return s.StartPracticeOutput.of(started, rules.START_PRACTICE)
+
+        return _guard("start_practice", run)
+
+    def next_exercise(session_id: s.PracticeSessionIdField) -> s.NextExerciseOutput:
+        def run() -> s.NextExerciseOutput:
+            step = practice_svc.next_exercise(svc, _user(), session_id)
+            chosen = rules.NEXT_EXERCISE_DONE if step.done else rules.NEXT_EXERCISE
+            return s.NextExerciseOutput.of(step, chosen)
+
+        return _guard("next_exercise", run)
+
+    def show_exercise(
+        subject_id: s.SubjectIdField, instance_id: s.InstanceIdField
+    ) -> s.ShowExerciseOutput:
+        def run() -> s.ShowExerciseOutput:
+            shown = practice_svc.show_exercise(svc, _user(), subject_id, instance_id)
+            return s.ShowExerciseOutput.of(shown, rules.SHOW_EXERCISE)
+
+        return _guard("show_exercise", run)
+
+    def record_result(
+        session_id: s.PracticeSessionIdField, item_id: s.ItemIdField, answer: s.AnswerField
+    ) -> s.RecordResultOutput:
+        def run() -> s.RecordResultOutput:
+            args = s.RecordResultInput(session_id=session_id, item_id=item_id, answer=answer)
+            # Every call reaches the server as the chat's own tool call: the practice app
+            # (slice C) has no channel of its own yet, so the source is always the chat.
+            graded = practice_svc.record_result(
+                svc, _user(), session_id, item_id, args.answer_data(), source="chat"
+            )
+            return s.RecordResultOutput.of(graded, rules.RECORD_RESULT)
+
+        return _guard("record_result", run)
+
+    def end_practice(
+        session_id: s.PracticeSessionIdField, self_rating: s.SelfRatingField = None
+    ) -> s.EndPracticeOutput:
+        def run() -> s.EndPracticeOutput:
+            summary = practice_svc.end_practice(svc, _user(), session_id, self_rating)
+            return s.EndPracticeOutput.of(summary, rules.END_PRACTICE)
+
+        return _guard("end_practice", run)
+
+    def get_subject_progress(subject_id: s.SubjectIdField) -> s.GetSubjectProgressOutput:
+        def run() -> s.GetSubjectProgressOutput:
+            progress = progress_svc.subject_progress(svc, _user(), subject_id)
+            return s.GetSubjectProgressOutput.of(subject_id, progress, rules.GET_SUBJECT_PROGRESS)
+
+        return _guard("get_subject_progress", run)
+
+    def write(title: str, *, idempotent: bool) -> ToolAnnotations:
+        return ToolAnnotations(
+            title=title, idempotent_hint=idempotent, destructive_hint=False, open_world_hint=False
+        )
+
+    _register(mcp, start_practice, s.StartPracticeInput, write("Start practice", idempotent=False))
+    # next_exercise only reads, except that it stamps shown_at once (the first call wins).
+    _register(mcp, next_exercise, s.NextExerciseInput, write("Next exercise", idempotent=True))
+    _register(mcp, show_exercise, s.ShowExerciseInput, write("Show exercise", idempotent=False))
+    _register(mcp, record_result, s.RecordResultInput, write("Record result", idempotent=True))
+    _register(mcp, end_practice, s.EndPracticeInput, write("End practice", idempotent=True))
+    _register(
+        mcp,
+        get_subject_progress,
+        s.GetSubjectProgressInput,
+        ToolAnnotations(title="Get subject progress", read_only_hint=True, open_world_hint=False),
+    )
 
 
 def build_mcp(

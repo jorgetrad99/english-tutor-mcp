@@ -249,3 +249,12 @@ async def test_valid_calls_pass_through() -> None:
         )
     assert not result.is_error
     assert result.structured_content == {"ok": True}
+
+
+def test_a_tagged_answer_path_drops_its_tag() -> None:
+    # record_result.answer is a union tagged by answer_kind: the tag is not a field the
+    # caller sent, so the path names the field itself (slice B Task 4).
+    loc = ("answer", "choice_index", "option_number")
+    assert field_path(loc, "greater_than_equal") == "answer.option_number"
+    assert field_path(("answer", "value", "value"), "string_too_long") == "answer.value"
+    assert field_path(("choice_index", "x"), "missing") == "choice_index.x"

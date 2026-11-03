@@ -172,6 +172,49 @@ GET_NOTE_DESCRIPTION = (
     "(at most 10 passages, numbered from 1) to read part of a long note. Read only."
 )
 
+START_PRACTICE_DESCRIPTION = (
+    "Call when the learner wants to practise a subject. Send practice_mode 'app' when the "
+    "interactive view can show items, otherwise 'text'. The server closes any open practice "
+    "session, draws this session's items from the subject's stored exercises by its plan and "
+    "preference, and returns the session_id and the first item as text (and as a document "
+    "outside text mode). Present items one at a time and send each answer to record_result; "
+    "the server grades, never you."
+)
+NEXT_EXERCISE_DESCRIPTION = (
+    "Call after record_result to get the session's next unanswered item, or done when every "
+    "item is answered. Returns the item as text (and as a document outside text mode) with "
+    "its item_id. Calling it again returns the same item until it is answered."
+)
+SHOW_EXERCISE_DESCRIPTION = (
+    "Call during a class when you want the learner to try one chosen exercise now: send its "
+    "subject_id and instance_id from get_note or create_instance. The server adds a new item "
+    "for it to the open practice session of that subject, or opens a class session, and "
+    "returns the item to present. Displays cannot be shown this way. Grade nothing yourself: "
+    "send the learner's answer to record_result."
+)
+RECORD_RESULT_DESCRIPTION = (
+    "Call with the learner's answer to the item just presented: the session_id, the item_id "
+    "and the answer in the shape of the item's grading_kind (for a choice, the number printed "
+    "beside the option). The server grades it against the stored item and returns correct, "
+    "a score from 0 to 100 and any explanation to share. The first answer counts: sending the "
+    "same item again returns the stored grade."
+)
+END_PRACTICE_DESCRIPTION = (
+    "Call when the practice session ends, including when the learner has to go, with its "
+    "session_id and, only if the learner gave one, a self_rating from 1 to 4. The server "
+    "closes the session and returns the summary it computed (items answered, results by "
+    "practice kind, minutes), the subject's plan status and its practice streak. Calling it "
+    "again returns the same summary."
+)
+GET_SUBJECT_PROGRESS_DESCRIPTION = (
+    "Call when the learner asks how they are doing in a subject, or before suggesting what to "
+    "practise next. Returns progress the server computed from recorded practice: accuracy per "
+    "concept with partial credit, weakest first; time per item by template and concept, "
+    "measured by the server; the practice streak; and weekly counts of notes, templates, "
+    "instances, searches and practice sessions. Report these numbers as given; never "
+    "estimate, recompute or add one that is not in the result."
+)
+
 TOOL_DESCRIPTIONS: dict[str, str] = {
     "get_profile": GET_PROFILE_DESCRIPTION,
     "save_profile": SAVE_PROFILE_DESCRIPTION,
@@ -189,6 +232,12 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     "save_template": SAVE_TEMPLATE_DESCRIPTION,
     "create_instance": CREATE_INSTANCE_DESCRIPTION,
     "get_instance_view": GET_INSTANCE_VIEW_DESCRIPTION,
+    "start_practice": START_PRACTICE_DESCRIPTION,
+    "next_exercise": NEXT_EXERCISE_DESCRIPTION,
+    "show_exercise": SHOW_EXERCISE_DESCRIPTION,
+    "record_result": RECORD_RESULT_DESCRIPTION,
+    "end_practice": END_PRACTICE_DESCRIPTION,
+    "get_subject_progress": GET_SUBJECT_PROGRESS_DESCRIPTION,
 }
 
 START_LESSON_PROMPT_NAME = "start-lesson"

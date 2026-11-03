@@ -49,6 +49,13 @@ SUBJECT_TOOLS = {
     "save_template",
     "create_instance",
     "get_instance_view",
+    # Slice B: practice and progress (subjects spec 15.9, 16.8).
+    "start_practice",
+    "next_exercise",
+    "show_exercise",
+    "record_result",
+    "end_practice",
+    "get_subject_progress",
 }
 
 

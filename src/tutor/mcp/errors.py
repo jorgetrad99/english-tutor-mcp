@@ -24,6 +24,7 @@ from mcp.shared.exceptions import MCPError
 from mcp.types import INVALID_PARAMS, INVALID_REQUEST
 from pydantic import ValidationError as PydanticValidationError
 
+from tutor.domain.templates import ANSWER_KINDS
 from tutor.mcp.rules import McpErrorCode, error_rules
 from tutor.services.errors import ServiceError
 
@@ -37,6 +38,8 @@ _UNKNOWN_FIELD_TYPES = frozenset({"extra_forbidden", "unexpected_keyword_argumen
 # Lists whose max_length is a per-call count cap of the subjects payload (plan rulings 10, 12).
 COUNT_CAP_TOOLS = frozenset({"save_notes"})
 COUNT_CAP_FIELDS = frozenset({"notes", "concepts", "links", "instances"})
+# Fields that are a union tagged by answer_kind (record_result.answer).
+TAGGED_UNIONS = frozenset({"answer"})
 
 
 class TutorToolError(ToolError):
@@ -59,7 +62,13 @@ def _cap(path: str) -> str:
 
 def field_path(loc: Sequence[int | str], error_type: str) -> str:
     """One format for the model: `items[0].kind`. The name of an unknown field is the
-    caller's text, so it is replaced."""
+    caller's text, so it is replaced. A tagged union's tag (`answer.choice_index.option_number`)
+    is dropped, so the path is the field the caller sent (`answer.option_number`)."""
+    loc = [
+        part
+        for index, part in enumerate(loc)
+        if not (index > 0 and loc[index - 1] in TAGGED_UNIONS and part in ANSWER_KINDS)
+    ]
     segments: list[str] = []
     for index, part in enumerate(loc):
         if isinstance(part, int):
@@ -77,8 +86,9 @@ def field_path(loc: Sequence[int | str], error_type: str) -> str:
 
 def error_text(code: McpErrorCode, fields: Sequence[str] = (), tool: str | None = None) -> str:
     safe = [p for p in (_cap(".".join(_part(x) for x in f.split("."))) for f in fields) if p]
+    kept = safe[:MAX_FIELDS]
     return json.dumps(
-        {"code": code, "fields": safe[:MAX_FIELDS], "response_rules": error_rules(code, tool)}
+        {"code": code, "fields": kept, "response_rules": error_rules(code, tool, kept)}
     )
 
 
