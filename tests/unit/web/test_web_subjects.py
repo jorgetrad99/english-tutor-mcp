@@ -227,7 +227,7 @@ def test_review_focus_7_progreso_shows_the_servers_numbers(
     progress = subject_progress(subjects.svc, demo.ana, ana_world.subject_id)
     section = _section(html, 'id="progress-title"', 'id="notes-title"')
     assert f'<span class="streak__num" aria-hidden="true">{progress.streak.current_days}' in section
-    assert f"Máxima: {progress.streak.longest_days} días" in section
+    assert f"Racha máxima, en días: {progress.streak.longest_days}" in section
     unassigned = progress.unassigned.all_time
     assert unassigned.attempts == 1 and unassigned.mean_score == 100
     assert "Sin concepto" in section and "100 de 100" in section

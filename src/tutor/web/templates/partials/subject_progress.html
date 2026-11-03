@@ -2,7 +2,7 @@
 {% import "macros/subjects.html" as sl %}
 {% set p = progress %}
 <p class="streak"><span class="streak__num" aria-hidden="true">{{ p.streak.current_days|integer }}</span> <span aria-hidden="true">{{ _("día seguido") if p.streak.current_days == 1 else _("días seguidos") }}</span><span class="sr-only">{% trans n=p.streak.current_days|integer %}Días seguidos: {{ n }}{% endtrans %}</span></p>
-<p class="muted">{% trans n=p.streak.longest_days|integer %}Máxima: {{ n }} días{% endtrans %}{% if p.streak.last_practice_day %} · {% trans day=p.streak.last_practice_day|day("long") %}Última práctica: {{ day }}{% endtrans %}{% endif %}</p>
+<p class="muted">{% trans n=p.streak.longest_days|integer %}Racha máxima, en días: {{ n }}{% endtrans %}{% if p.streak.last_practice_day %} · {% trans day=p.streak.last_practice_day|day("long") %}Última práctica: {{ day }}{% endtrans %}{% endif %}</p>
 {% if p.overall.all_time.attempts %}
 <dl class="facts">
   <dt>{{ _("Aciertos, últimos 14 días") }}</dt><dd>{{ sl.share(p.overall.recent.accuracy) }}</dd>

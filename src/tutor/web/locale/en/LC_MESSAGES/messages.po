@@ -929,8 +929,8 @@ msgstr "Minutes"
 msgid "Minutos por sesión"
 msgstr "Minutes per session"
 
-msgid "Máxima: %(n)s días"
-msgstr "Longest: %(n)s days"
+msgid "Racha máxima, en días: %(n)s"
+msgstr "Longest streak, in days: %(n)s"
 
 msgid "No"
 msgstr "No"
