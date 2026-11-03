@@ -64,7 +64,7 @@ Procedure: `uv run just inspector`, transport Streamable HTTP, URL `https://<hos
 | Authorization-server metadata | `authorization_endpoint` `https://<host>/authorize`; `code_challenge_methods_supported` `["S256"]` | pending (author) | |
 | Dynamic client registration | `/register` returns a client id | pending (author) | |
 | Google consent and callback | The tutor's consent screen, then Google redirects to `https://<host>/oauth/callback`, then to the Inspector | pending (author) | |
-| Token works | `tools/list` shows exactly `get_profile`, `save_profile`, `start_lesson`, `record_review`, `save_glossary`, `end_session` | pending (author) | |
+| Token works | `tools/list` shows exactly `get_profile`, `save_profile`, `start_lesson`, `record_review`, `save_glossary`, `end_session`; on a release that includes Subjects v0 (E37), also the ten subject tools of subjects spec Amendment A45 | pending (author) | |
 | Refresh | "Refresh token" in the Inspector issues a new access token; the old refresh token is refused (rotation) | pending (author) | |
 | Audit | `SELECT event FROM audit_log ORDER BY at DESC LIMIT 5` (as the owner, `PSQL_HISTORY=/dev/null`) shows `user_created`, `mcp_first_use` for the Inspector's account | pending (author) | |
 
