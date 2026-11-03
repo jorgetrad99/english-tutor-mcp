@@ -364,6 +364,54 @@ async def test_build_app_picks_the_dev_verifier_only_with_the_flag(tmp_path: Pat
     assert discovery.status_code == 200
 
 
+@pytest.mark.parametrize("host", ["localhost:8000", "127.0.0.1:8000", "[::1]:8000", "localhost"])
+@pytest.mark.asyncio
+async def test_dev_mcp_serves_loopback_hosts(tmp_path: Path, host: str) -> None:
+    settings = dev_settings(tmp_path)
+    app = build_app(settings, engine=sqlalchemy.create_engine("sqlite://"), web_config=WEB_CONFIG)
+    token = mint_dev_token(settings, "dev-ana", now=datetime.now(UTC))
+    auth = {**HEADERS, "authorization": f"Bearer {token}", "host": host}
+    async with serving(app) as client:
+        accepted = await client.post("/mcp", json=INIT, headers=auth)
+    assert accepted.status_code == 200, host
+
+
+@pytest.mark.parametrize("path", ["/mcp", "/.well-known/oauth-protected-resource"])
+@pytest.mark.asyncio
+async def test_dev_mcp_refuses_a_forwarded_public_host(tmp_path: Path, path: str) -> None:
+    # A host-side tunnel (cloudflared -> localhost:8000) forwards the public Host: under dev auth
+    # the MCP side answers 400 before any token check, as the website's TrustedHost does.
+    settings = dev_settings(tmp_path)
+    app = build_app(settings, engine=sqlalchemy.create_engine("sqlite://"), web_config=WEB_CONFIG)
+    token = mint_dev_token(settings, "dev-ana", now=datetime.now(UTC))
+    tunnel = {
+        **HEADERS,
+        "authorization": f"Bearer {token}",
+        "host": "tutor.develancoders.com",
+        "x-forwarded-host": "tutor.develancoders.com",
+        "x-forwarded-proto": "https",
+        "x-forwarded-for": "203.0.113.7",
+    }
+    async with serving(app) as client:
+        refused = await client.post(path, json=INIT, headers=tunnel)
+    assert refused.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_the_mcp_host_check_is_dev_only(tmp_path: Path) -> None:
+    # Production MCP traffic carries the public Host (the tunnel); the Google path never checks it.
+    google = build_app(
+        google_settings(tmp_path),
+        engine=sqlalchemy.create_engine("sqlite://"),
+        web_config=WEB_CONFIG,
+    )
+    async with serving(google) as client:
+        public = await client.post(
+            "/mcp", json=INIT, headers={**HEADERS, "host": "tutor.example.com"}
+        )
+    assert public.status_code == 401
+
+
 # --- the CLI ------------------------------------------------------------------------------------
 
 

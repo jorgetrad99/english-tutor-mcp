@@ -29,6 +29,8 @@ DEV_ONLY_KEYS = ("TUTOR_DEV_AUTH",)
 GOOGLE_KEYS = ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET")
 DEV_AUTH_TRUE = frozenset({"1", "true", "yes"})
 DEV_AUTH_GUARD = "TUTOR_DEV_AUTH requires TUTOR_ENV=dev|test and a loopback TUTOR_BASE_URL"
+# FORWARDED_ALLOW_IPS means a proxy (a tunnel) is in front: dev auth must not be reachable.
+DEV_AUTH_PROXY_GUARD = "TUTOR_DEV_AUTH must not run behind a proxy: leave FORWARDED_ALLOW_IPS unset"
 MIN_SIGNING_KEY_CHARS = 32
 DEFAULT_OAUTH_STORAGE_DIR = "data/oauth"
 DEFAULT_PORT = 8000
@@ -115,9 +117,12 @@ class Settings:
         raw_base_url = env.get("TUTOR_BASE_URL", "")
         base_url = parse_base_url(raw_base_url)
         dev_auth = dev_auth_flag(env)
+        loopback_dev = base_url is not None and dev_auth_allowed(tutor_env, base_url)
+        # Read only under the flag (blank is unset, as compose turns an unset variable into "").
+        behind_proxy = dev_auth and bool(env.get("FORWARDED_ALLOW_IPS", "").strip())
         # The Google keys are optional only when the flag is on AND allowed: a refused flag
         # must not loosen anything.
-        dev_auth_ok = dev_auth and base_url is not None and dev_auth_allowed(tutor_env, base_url)
+        dev_auth_ok = dev_auth and loopback_dev and not behind_proxy
         optional = GOOGLE_KEYS if dev_auth_ok else ()
         missing = [key for key in REQUIRED if key not in optional and not env.get(key, "").strip()]
         if missing:
@@ -130,8 +135,10 @@ class Settings:
                 "TUTOR_BASE_URL must be an https URL (http only for localhost) "
                 "with no credentials, path, query or fragment"
             )
-        if dev_auth and not dev_auth_ok:
+        if dev_auth and not loopback_dev:
             problems.append(DEV_AUTH_GUARD)
+        if behind_proxy:
+            problems.append(DEV_AUTH_PROXY_GUARD)
         jwt_key = env["TUTOR_JWT_SIGNING_KEY"].strip()
         storage_key = env["TUTOR_OAUTH_STORAGE_KEY"].strip()
         if len(jwt_key) < MIN_SIGNING_KEY_CHARS:

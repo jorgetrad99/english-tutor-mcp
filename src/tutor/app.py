@@ -16,11 +16,13 @@ import zoneinfo
 from collections.abc import Awaitable, Callable, Mapping, MutableMapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import urlsplit
 from uuid import UUID
 
 import anyio.to_thread
 from fastmcp.server.auth import AuthProvider
 from sqlalchemy import Engine
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from tutor.auth.dev_auth import build_dev_verifier
 from tutor.auth.mcp_auth import MCP_CALLBACK_PATH, build_google_provider
@@ -56,6 +58,9 @@ MAX_BODY_BYTES = 65_536
 BODY_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 MAX_LOGGED_PATH = 200
 PURGE_EVERY_S = 3600.0
+# Under dev auth only loopback names reach the MCP side (Starlette keeps IPv6 brackets), so a
+# host-side tunnel forwarding a public Host to localhost:8000 gets 400, as on the website.
+DEV_MCP_HOSTS = ("localhost", "127.0.0.1", "[::1]")
 
 _routes = logging.getLogger("tutor.http")
 _web_log = logging.getLogger("tutor.web")
@@ -282,6 +287,13 @@ def web_config_from_env(environ: Mapping[str, str]) -> WebConfig:
         raise SystemExit(str(invalid)) from None
 
 
+def dev_mcp_hosts(settings: Settings) -> list[str]:
+    """The loopback names, plus the base URL's host (loopback too: the dev auth guard)."""
+    host = urlsplit(settings.base_url).hostname or "localhost"
+    host = f"[{host}]" if ":" in host else host
+    return list(dict.fromkeys((*DEV_MCP_HOSTS, host)))
+
+
 def build_app(
     settings: Settings, *, engine: Engine | None = None, web_config: WebConfig | None = None
 ) -> PathDispatch:
@@ -289,7 +301,8 @@ def build_app(
 
     On Postgres the login role is checked first (RLS must bind it), and the server lifespan
     purges expired web sessions at startup and then hourly. With TUTOR_DEV_AUTH (loopback dev
-    only) the OAuth proxy and its discovery routes are replaced by the dev token verifier."""
+    only) the OAuth proxy and its discovery routes are replaced by the dev token verifier, and
+    the MCP side answers only loopback Host names (TrustedHost, as the website does)."""
     engine = engine if engine is not None else make_engine(settings.database_url)
     on_postgres = engine.dialect.name == "postgresql"
     if on_postgres:
@@ -305,7 +318,10 @@ def build_app(
     )
     mcp = build_mcp(svc, PgIdentity(engine), auth=auth)
     deps = pg_web_deps(engine, settings, config)
-    mcp_app: ASGIApp = RequestLog(BodySizeGuard(mcp.http_app(path=MCP_PATH)))
+    mcp_app: ASGIApp = BodySizeGuard(mcp.http_app(path=MCP_PATH))
+    if settings.dev_auth:
+        mcp_app = TrustedHostMiddleware(mcp_app, allowed_hosts=dev_mcp_hosts(settings))
+    mcp_app = RequestLog(mcp_app)
     if on_postgres and isinstance(deps.sessions, PgWebBackend):
         mcp_app = PeriodicPurge(mcp_app, _session_purge(deps.sessions, config, deps.clock))
     web = create_app(deps, config)

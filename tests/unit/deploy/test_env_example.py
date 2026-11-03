@@ -153,11 +153,14 @@ def _parse(path: Path) -> dict[str, str]:
 def test_dev_example_lists_exactly_what_the_dev_profile_reads() -> None:
     # Compose sets TUTOR_DEV_AUTH on the services; the file carries everything else the app
     # (Settings, WebConfig) and migrate-dev (provision_roles) read. uvicorn is started by the
-    # image's CMD, so run_kwargs (TUTOR_HOST, FORWARDED_ALLOW_IPS) is not involved.
+    # image's CMD, so run_kwargs (TUTOR_HOST) is not involved. Settings reads FORWARDED_ALLOW_IPS
+    # under the flag only to refuse it (a proxy in front), so the dev file must never carry it.
     env = Recording({**DEV_FULL, "TUTOR_DEV_AUTH": "1"})
     Settings.from_env(env)
     WebConfig.from_env(env)
-    assert set(_pairs("dev")) == (env.read - {"TUTOR_DEV_AUTH"}) | set(MIGRATE_KEYS)
+    assert "FORWARDED_ALLOW_IPS" in env.read and "FORWARDED_ALLOW_IPS" not in _pairs("dev")
+    refused_only = {"TUTOR_DEV_AUTH", "FORWARDED_ALLOW_IPS"}
+    assert set(_pairs("dev")) == (env.read - refused_only) | set(MIGRATE_KEYS)
 
 
 def test_dev_example_is_loopback_dev_without_google_and_cannot_start_as_is() -> None:

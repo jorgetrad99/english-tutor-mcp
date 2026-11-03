@@ -80,9 +80,14 @@ def test_dev_factory_builds_the_app_from_the_environment(
     }
     for key, value in values.items():
         monkeypatch.setenv(key, value)
+    monkeypatch.delenv("FORWARDED_ALLOW_IPS", raising=False)
     app = dev.create()
     assert isinstance(app, PathDispatch)
     assert tutor_logger.level == logging.INFO and not tutor_logger.propagate
+    # A proxy in front (FORWARDED_ALLOW_IPS) and the dev factory refuses to start.
+    monkeypatch.setenv("FORWARDED_ALLOW_IPS", "172.30.10.3")
+    with pytest.raises(SystemExit, match="FORWARDED_ALLOW_IPS"):
+        dev.create()
 
 
 def test_logging_is_configured_once(tutor_logger: logging.Logger) -> None:

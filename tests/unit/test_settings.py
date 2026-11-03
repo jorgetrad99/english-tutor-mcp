@@ -266,3 +266,20 @@ def test_settings_built_directly_accept_dev_auth_on_loopback_dev_and_replace_rec
     assert not Settings(env="prod", base_url="https://tutor.example.com", **_fields()).dev_auth
     with pytest.raises(SystemExit, match="TUTOR_DEV_AUTH requires TUTOR_ENV"):
         replace(ok, env="prod")
+
+
+@pytest.mark.parametrize("allowed", ["172.30.10.3", "127.0.0.1", "*"])
+def test_dev_auth_is_refused_behind_a_proxy(allowed: str) -> None:
+    # FORWARDED_ALLOW_IPS means a proxy (a tunnel) is in front: dev auth must never be reachable.
+    with pytest.raises(SystemExit, match="FORWARDED_ALLOW_IPS") as info:
+        Settings.from_env(
+            env(TUTOR_DEV_AUTH="1", TUTOR_BASE_URL=LOOPBACK, FORWARDED_ALLOW_IPS=allowed)
+        )
+    assert PRIVATE_MARKER not in str(info.value)
+
+
+def test_a_blank_forwarded_allow_ips_is_unset_and_prod_keeps_it() -> None:
+    blank = env(TUTOR_DEV_AUTH="1", TUTOR_BASE_URL=LOOPBACK, FORWARDED_ALLOW_IPS=" ")
+    assert Settings.from_env(blank).dev_auth
+    prod = env(TUTOR_ENV="prod", FORWARDED_ALLOW_IPS="172.30.10.3")
+    assert Settings.from_env(prod).env == "prod"
