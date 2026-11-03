@@ -1576,11 +1576,22 @@ class RepoContract:
         with uow_factory(other_user_id) as uow:
             theirs = uow.subjects.create(sample_subject("Theirs"), now).id
             their_source = uow.notes.upsert_source(theirs, valid_source(), now).id
-            their_note = add_note(uow, theirs, valid_note("Theirs", long_paragraph("ajeno.")), now)
+            their_note = add_note(
+                uow,
+                theirs,
+                valid_note("Theirs", long_paragraph("ajeno."), lesson_ref="L9"),
+                now,
+                source_id=their_source,
+            )
         with uow_factory(user_id) as uow:
             mine = uow.subjects.create(sample_subject("Mine"), now).id
             other_subject = uow.subjects.create(sample_subject("Other"), now).id
             my_source = uow.notes.upsert_source(mine, valid_source(), now).id
+            # Their rows are invisible, not only unwritable.
+            assert uow.notes.by_idempotency_key(their_note.idempotency_key) is None
+            assert uow.notes.source(their_source) is None
+            assert uow.notes.latest_by_lesson(theirs, their_source, "L9") is None
+            assert uow.notes.get(their_note.id) is None
         note = valid_note("Intento", long_paragraph("propio."), lesson_ref="L1")
         attempts: list[tuple[UUID, UUID | None, UUID | None]] = [
             (theirs, None, None),  # another user's subject
@@ -1601,6 +1612,8 @@ class RepoContract:
         with uow_factory(other_user_id) as uow:
             assert uow.notes.search("propio", None, 10) == ()
             assert [h.note_id for h in uow.notes.search("ajeno", None, 10)] == [their_note.id]
+            assert uow.notes.by_idempotency_key(their_note.idempotency_key) == their_note
+            assert uow.notes.latest_by_lesson(theirs, their_source, "L9") == their_note
 
     def test_concepts_merge_by_name_norm_within_a_subject(
         self, uow_factory: UowFactory, user_id: UUID, now: datetime

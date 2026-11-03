@@ -376,8 +376,10 @@ class ArtifactRow:
 @dataclass(frozen=True, slots=True)
 class SearchHit:
     """One note found by `NoteRepo.search`: how many passages matched, which concept hops
-    reached it (names) at what minimum depth, whether the title fallback produced it, and the
-    excerpts (plain text with `[[` `]]` around matches) of the matched passages."""
+    reached it (names) at what minimum depth, whether only approximate matching reached it
+    (the title fallback, or on Postgres a concept named like the query by trigram similarity
+    without an exact one), and the excerpts (plain text with `[[` `]]` around matches) of the
+    matched passages."""
 
     note_id: UUID
     passages: int

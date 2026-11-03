@@ -7,16 +7,17 @@ app.web_session with set_config(..., true), so the settings and the role end wit
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Any
 from uuid import UUID
 
 from sqlalchemy import Connection, Engine, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from tutor.db.repos.glossary import PgGlossaryRepo, PgReviewRepo
+from tutor.db.repos.notes import PgNoteRepo
 from tutor.db.repos.people import PgAuditRepo, PgProfileRepo, PgUserRepo
 from tutor.db.repos.plans import PgPlanRepo
 from tutor.db.repos.sessions import PgSessionRepo
+from tutor.db.repos.subjects import PgSubjectRepo
 from tutor.db.repos.track import PgTrackRepo
 from tutor.db.tables import users
 from tutor.services.ports import (
@@ -76,17 +77,6 @@ def scoped_connection(
         yield conn
 
 
-class _NotYetMigrated:
-    """Stands in for the subjects and notes repositories until migration 0006 lands (subjects
-    slice A, Task 3); every call raises NotImplementedError."""
-
-    def __init__(self, name: str) -> None:
-        self._name = name
-
-    def __getattr__(self, attr: str) -> Any:
-        raise NotImplementedError(f"{self._name}.{attr} arrives with migration 0006")
-
-
 class PgUnitOfWork:
     """One transaction for one user; every repository shares the connection."""
 
@@ -113,8 +103,8 @@ class PgUnitOfWork:
         self.glossary = PgGlossaryRepo(conn, user_id)
         self.reviews = PgReviewRepo(conn, user_id)
         self.audit = PgAuditRepo(conn, user_id)
-        self.subjects = _NotYetMigrated("PgSubjectRepo")
-        self.notes = _NotYetMigrated("PgNoteRepo")
+        self.subjects = PgSubjectRepo(conn, user_id)
+        self.notes = PgNoteRepo(conn, user_id)
 
 
 def pg_uow_factory(engine: Engine) -> UowFactory:

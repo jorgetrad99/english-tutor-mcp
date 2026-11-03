@@ -18,6 +18,14 @@ from .conftest import run_alembic, truncate_user_tables
 pytestmark = pytest.mark.integration
 
 TRACK_ID = "zz-rls-01"
+# Composite (col, user_id) foreign keys: 7 from 0002 (plan_items.plan_id, sessions.plan_item_id,
+# session_metrics.session_id, session_errors.session_id, review_states.glossary_item_id,
+# review_logs.glossary_item_id, review_logs.session_id) plus 14 from 0006 (sources.subject_id,
+# notes.subject_id, notes.source_id, notes.supersedes_note_id, note_passages.note_id,
+# note_artifacts.note_id, exercises.note_id, quiz_items.note_id, quiz_items.concept_id,
+# concepts.subject_id, note_concepts.note_id, note_concepts.concept_id, concept_links.from_id,
+# concept_links.to_id).
+COMPOSITE_FKS = 21
 
 # One row in every user table for one user, inserted as the owner (superuser bypasses RLS).
 _SEED_SQL = (
@@ -47,6 +55,30 @@ _SEED_SQL = (
     "INSERT INTO audit_log (user_id, event, meta, at) VALUES (:u, 'user_created', '{}', now())",
     "INSERT INTO web_sessions (token_hash, user_id, csrf_token, created_at, last_seen_at)"
     " VALUES (:h, :u, 'csrf', now(), now())",
+    # Subjects and notes (0006); concept_links needs two concepts, so concepts has two rows.
+    "INSERT INTO subjects (id, user_id, name, preference, exercise_kinds, minutes_per_session,"
+    " sessions_per_week, status, created_at, updated_at)"
+    " VALUES (:subj, :u, 'Guitar', 'balanced', ARRAY['quiz'], 30, 3, 'active', now(), now())",
+    "INSERT INTO sources (id, user_id, subject_id, kind, title, created_at)"
+    " VALUES (:src, :u, :subj, 'course', 'Course', now())",
+    "INSERT INTO notes (id, user_id, subject_id, source_id, title, title_norm, raw_text,"
+    " raw_sha256, clean_text, idempotency_key, origin, created_at, updated_at)"
+    " VALUES (:n, :u, :subj, :src, 'Clase', 'clase', 'texto', repeat('a', 64), 'texto', :h,"
+    " 'mcp', now(), now())",
+    "INSERT INTO note_passages (note_id, seq, user_id, text) VALUES (:n, 1, :u, 'texto')",
+    "INSERT INTO note_artifacts (id, user_id, note_id, kind, title, html, html_sha256, bytes,"
+    " created_at) VALUES (:art, :u, :n, 'other', 'Vista', '<!doctype html>', repeat('b', 64),"
+    " 15, now())",
+    "INSERT INTO exercises (user_id, note_id, seq, name, instructions, kind)"
+    " VALUES (:u, :n, 1, 'Ej', 'Toca.', 'technique')",
+    "INSERT INTO concepts (id, user_id, subject_id, name, name_norm)"
+    " VALUES (:c, :u, :subj, 'Ritmo', 'ritmo')",
+    "INSERT INTO concepts (id, user_id, subject_id, name, name_norm)"
+    " VALUES (:c2, :u, :subj, 'Compás', 'compas')",
+    "INSERT INTO quiz_items (user_id, note_id, seq, question, options, answer_index, concept_id)"
+    " VALUES (:u, :n, 1, '¿Qué es?', ARRAY['a', 'b'], 0, :c)",
+    "INSERT INTO note_concepts (note_id, concept_id, user_id) VALUES (:n, :c, :u)",
+    "INSERT INTO concept_links (from_id, to_id, kind, user_id) VALUES (:c, :c2, 'related', :u)",
 )
 
 
@@ -61,6 +93,12 @@ def _seed_user(conn: Connection, sub: str, track_item_id: str) -> UUID:
         "s": uuid4(),
         "g": uuid4(),
         "h": hashlib.sha256(sub.encode()).hexdigest(),
+        "subj": uuid4(),
+        "src": uuid4(),
+        "n": uuid4(),
+        "art": uuid4(),
+        "c": uuid4(),
+        "c2": uuid4(),
     }
     for sql in _SEED_SQL:
         conn.execute(text(sql), params)
@@ -138,10 +176,11 @@ def test_rls_shows_only_the_scoped_users_rows(
 ) -> None:
     count = text(f"SELECT count(*) FROM {table}")  # noqa: S608 - names from USER_TABLES
     with engine.connect() as conn:
-        assert conn.execute(count).scalar_one() == 2  # owner sees both
+        total = conn.execute(count).scalar_one()  # the owner sees both users' seed rows
+    assert total >= 2 and total % 2 == 0
     for uid in two_users:
         with scoped_connection(engine, user_id=uid) as conn:
-            assert conn.execute(count).scalar_one() == 1
+            assert conn.execute(count).scalar_one() == total // 2
     with scoped_connection(engine) as conn:
         assert conn.execute(count).scalar_one() == 0  # no user set: nothing
 
@@ -202,23 +241,32 @@ def test_anonymous_web_session_is_visible_only_with_its_hash(engine: Engine) -> 
         assert conn.execute(count).scalar_one() == 0
 
 
+_PARENT_IDS = {
+    "plan": "SELECT id FROM plans WHERE user_id = :u",
+    "item": "SELECT id FROM plan_items WHERE user_id = :u",
+    "s": "SELECT id FROM sessions WHERE user_id = :u",
+    "g": "SELECT id FROM glossary_items WHERE user_id = :u",
+    "subj": "SELECT id FROM subjects WHERE user_id = :u",
+    "src": "SELECT id FROM sources WHERE user_id = :u",
+    "n": "SELECT id FROM notes WHERE user_id = :u",
+    "c": "SELECT id FROM concepts WHERE user_id = :u AND name_norm = 'ritmo'",
+}
+
+
 def _ids(engine: Engine, uid: UUID) -> dict[str, UUID]:
     with engine.connect() as conn:
-        pick = {
-            "plan": "plans",
-            "item": "plan_items",
-            "s": "sessions",
-            "g": "glossary_items",
-        }
         return {
-            key: conn.execute(
-                text(f"SELECT id FROM {table} WHERE user_id = :u"),  # noqa: S608
-                {"u": uid},
-            ).scalar_one()
-            for key, table in pick.items()
+            key: conn.execute(text(sql), {"u": uid}).scalar_one()
+            for key, sql in _PARENT_IDS.items()
         }
 
 
+_NOTE_INSERT = (
+    "INSERT INTO notes (user_id, subject_id, source_id, title, title_norm, raw_text, raw_sha256,"
+    " clean_text, idempotency_key, origin, supersedes_note_id, created_at, updated_at)"
+    " VALUES (:b, {subject}, {source}, 'x', 'x', 'x', repeat('a', 64), 'x', repeat('c', 64),"
+    " 'mcp', {supersedes}, now(), now())"
+)
 _METRICS_INSERT = (
     "INSERT INTO session_metrics (session_id, user_id, user_words, turns, words_per_turn,"
     " duration_min, user_words_per_min, errors_total, errors_rejected, errors_by_category,"
@@ -242,6 +290,35 @@ _CROSS_USER_CHILDREN = {
     " session_id, rating, reviewed_at, state_before) VALUES (:a_g, :b, :b_s, 3, now(), '{}')",
     "review_logs.session_id": "INSERT INTO review_logs (glossary_item_id, user_id, session_id,"
     " rating, reviewed_at, state_before) VALUES (:b_g, :b, :a_s, 3, now(), '{}')",
+    # Subjects and notes (0006).
+    "sources.subject_id": "INSERT INTO sources (user_id, subject_id, kind, title, created_at)"
+    " VALUES (:b, :a_subj, 'text', 'x', now())",
+    "notes.subject_id": _NOTE_INSERT.format(subject=":a_subj", source="NULL", supersedes="NULL"),
+    "notes.source_id": _NOTE_INSERT.format(subject=":b_subj", source=":a_src", supersedes="NULL"),
+    "notes.supersedes_note_id": _NOTE_INSERT.format(
+        subject=":b_subj", source="NULL", supersedes=":a_n"
+    ),
+    "note_passages.note_id": "INSERT INTO note_passages (note_id, seq, user_id, text)"
+    " VALUES (:a_n, 2, :b, 'x')",
+    "note_artifacts.note_id": "INSERT INTO note_artifacts (user_id, note_id, kind, title, html,"
+    " html_sha256, bytes, created_at) VALUES (:b, :a_n, 'other', 'x', 'x', repeat('b', 64), 1,"
+    " now())",
+    "exercises.note_id": "INSERT INTO exercises (user_id, note_id, seq, name, instructions, kind)"
+    " VALUES (:b, :a_n, 2, 'x', 'x', 'other')",
+    "quiz_items.note_id": "INSERT INTO quiz_items (user_id, note_id, seq, question, options,"
+    " answer_index) VALUES (:b, :a_n, 2, 'x', ARRAY['a', 'b'], 0)",
+    "quiz_items.concept_id": "INSERT INTO quiz_items (user_id, note_id, seq, question, options,"
+    " answer_index, concept_id) VALUES (:b, :b_n, 2, 'x', ARRAY['a', 'b'], 0, :a_c)",
+    "concepts.subject_id": "INSERT INTO concepts (user_id, subject_id, name, name_norm)"
+    " VALUES (:b, :a_subj, 'x', 'x')",
+    "note_concepts.note_id": "INSERT INTO note_concepts (note_id, concept_id, user_id)"
+    " VALUES (:a_n, :b_c, :b)",
+    "note_concepts.concept_id": "INSERT INTO note_concepts (note_id, concept_id, user_id)"
+    " VALUES (:b_n, :a_c, :b)",
+    "concept_links.from_id": "INSERT INTO concept_links (from_id, to_id, kind, user_id)"
+    " VALUES (:a_c, :b_c, 'prerequisite', :b)",
+    "concept_links.to_id": "INSERT INTO concept_links (from_id, to_id, kind, user_id)"
+    " VALUES (:b_c, :a_c, 'prerequisite', :b)",
 }
 
 
@@ -263,6 +340,13 @@ def test_composite_foreign_keys_reject_another_users_parent(
         "a_g": a_ids["g"],
         "b_s": b_ids["s"],
         "b_g": b_ids["g"],
+        "a_subj": a_ids["subj"],
+        "a_src": a_ids["src"],
+        "a_n": a_ids["n"],
+        "a_c": a_ids["c"],
+        "b_subj": b_ids["subj"],
+        "b_n": b_ids["n"],
+        "b_c": b_ids["c"],
     }
     with pytest.raises(DBAPIError) as err, scoped_connection(engine, user_id=b) as conn:
         conn.execute(text(_CROSS_USER_CHILDREN[reference]), params)
@@ -325,8 +409,8 @@ def test_migration_0002_round_trip(engine: Engine) -> None:
             )
             return {r[0] for r in rows}
 
-    assert len(composite_fks()) == 7
+    assert len(composite_fks()) == COMPOSITE_FKS
     run_alembic(engine, "downgrade", "0001")
     assert composite_fks() == set()
     run_alembic(engine, "upgrade", "head")
-    assert len(composite_fks()) == 7
+    assert len(composite_fks()) == COMPOSITE_FKS

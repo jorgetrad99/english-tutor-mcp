@@ -186,7 +186,8 @@ INSERT INTO audit_log (user_id, event, meta, at)
 VALUES (NULL, 'user_deleted',
         jsonb_build_object('user_hash', left(encode(sha256(convert_to(:'uid', 'UTF8')), 'hex'), 12)),
         now());
--- Cascades to profiles, plans, sessions, glossary, reviews and web_sessions; audit_log.user_id becomes NULL.
+-- Cascades to profiles, plans, sessions, glossary, reviews, web_sessions and the subjects tables (subjects, sources, notes,
+-- note_passages, note_artifacts, exercises, quiz_items, concepts, note_concepts, concept_links); audit_log.user_id becomes NULL.
 DELETE FROM users WHERE id = :'uid';
 COMMIT;
 ```
