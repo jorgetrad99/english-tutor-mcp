@@ -8,6 +8,7 @@ identity resolver, with seeded track ids, so the same tests run on memory and on
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable, Sequence
 from dataclasses import replace
 from datetime import date, datetime, timedelta
@@ -15,6 +16,16 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from template_fixtures import (
+    CHOICE,
+    FLASHCARD,
+    HTML,
+    KEY_NAME,
+    NUMERIC,
+    REVEAL_NAME,
+    TABLE,
+    spec,
+)
 
 from tutor.content import load_track
 from tutor.domain.fsrs import FsrsState, new_state
@@ -34,10 +45,9 @@ from tutor.domain.levels import CefrLevel
 from tutor.domain.metrics import SessionMetrics
 from tutor.domain.notes import (
     ConceptLinkInput,
-    ExerciseInput,
+    ConceptName,
     NoteInput,
     Origin,
-    QuizItemInput,
     SourceKind,
     ValidNote,
     ValidNotes,
@@ -48,18 +58,20 @@ from tutor.domain.notes import (
 from tutor.domain.plan_lite import PlannedItem
 from tutor.domain.profile import DEFAULT_TIMEZONE, Profile
 from tutor.domain.subjects import Subject, SubjectStatus
+from tutor.domain.templates import content_key, spec_hash
 from tutor.domain.text import normalize
 from tutor.domain.track import TrackItem
 from tutor.domain.validation import Evidence, ReportedError, SessionOutcome, ValidError
 from tutor.services.ports import (
-    ArtifactRow,
     GlossaryRowData,
     IdentityResolver,
+    InstanceRow,
     NoteRow,
     OpenSessionExists,
     PassageRow,
     ReviewLogRow,
     SessionRow,
+    TemplateRow,
     UnitOfWork,
     UowFactory,
 )
@@ -329,8 +341,6 @@ def valid_note(
     position: int | None = None,
     concepts: Sequence[str] = (),
     links: Sequence[ConceptLinkInput] = (),
-    exercises: Sequence[ExerciseInput] = (),
-    quiz_items: Sequence[QuizItemInput] = (),
 ) -> ValidNote:
     """A note validated by the domain, its paragraphs separated by blank lines."""
     data = NoteInput(
@@ -340,8 +350,6 @@ def valid_note(
         raw_text="\n\n".join(paragraphs),
         concepts=concepts,
         links=links,
-        exercises=exercises,
-        quiz_items=quiz_items,
     )
     result = validate_notes(None, [data], origin="web")
     assert isinstance(result, ValidNotes)
@@ -1428,20 +1436,10 @@ class RepoContract:
 
     # Notes
 
-    def test_note_insert_stores_text_passages_items_and_concepts(
+    def test_note_insert_stores_text_passages_and_concepts(
         self, uow_factory: UowFactory, user_id: UUID, now: datetime
     ) -> None:
         link = ConceptLinkInput("Quinto traste", "Acorde de séptima", "prerequisite")
-        exercise = ExerciseInput(
-            "Cambio C7-G7", "Cambia entre C7 y G7 cada compás.", "technique", 60, 5
-        )
-        quiz = QuizItemInput(
-            "¿Cuántas notas tiene un acorde de séptima?",
-            ("Tres", "Cuatro"),
-            1,
-            "La séptima se suma.",
-            "Acorde de séptima",
-        )
         note = valid_note(
             "Clase 3",
             long_paragraph("acorde de séptima."),
@@ -1450,8 +1448,6 @@ class RepoContract:
             position=3,
             concepts=["Acorde de séptima", "Blues"],
             links=[link],
-            exercises=[exercise],
-            quiz_items=[quiz],
         )
         assert len(note.passages) == 2
         with uow_factory(user_id) as uow:
@@ -1484,37 +1480,12 @@ class RepoContract:
             assert uow.notes.passages(row.id, 1, 10) == tuple(
                 PassageRow(seq, text) for seq, text in enumerate(note.passages, start=1)
             )
-            [stored] = uow.notes.exercises(row.id)
-            assert (
-                stored.seq,
-                stored.name,
-                stored.instructions,
-                stored.kind,
-                stored.tempo_bpm,
-                stored.duration_min,
-            ) == (1, "Cambio C7-G7", "Cambia entre C7 y G7 cada compás.", "technique", 60, 5)
-            [item] = uow.notes.quiz_items(row.id)
-            assert (
-                item.seq,
-                item.question,
-                item.options,
-                item.answer_index,
-                item.explanation,
-                item.concept,
-            ) == (
-                1,
-                quiz.question,
-                ("Tres", "Cuatro"),
-                1,
-                "La séptima se suma.",
-                "Acorde de séptima",
-            )
             # Link endpoints ("Quinto traste") exist as concepts but are not attached to the note.
             assert [(c.subject_id, c.name, c.name_norm) for c in uow.notes.concepts(row.id)] == [
                 (subject_id, "Acorde de séptima", "acorde de septima"),
                 (subject_id, "Blues", "blues"),
             ]
-            assert uow.notes.artifacts(row.id) == ()
+            assert uow.instances.for_note(row.id) == ()
 
     def test_review_focus_1_same_lesson_twice_then_with_a_typo_fixed(
         self, uow_factory: UowFactory, user_id: UUID, now: datetime
@@ -1653,48 +1624,340 @@ class RepoContract:
         assert (cc.subject_id, cc.name) == (piano, "Pentatónica menor")
         assert cc.id != ca.id  # another subject: another concept
 
-    # Artifacts
+    # Templates (spec 15.3)
 
-    def test_artifacts_round_trip_and_list_without_html(
+    def test_template_create_get_and_list_active_by_name(
         self, uow_factory: UowFactory, user_id: UUID, other_user_id: UUID, now: datetime
     ) -> None:
-        html = "<!doctype html><html><body><p>Canción</p></body></html>"
+        with uow_factory(user_id) as uow:
+            subject_id = uow.subjects.create(sample_subject(), now).id
+            other_subject = uow.subjects.create(sample_subject("Piano"), now).id
+            numeric = uow.templates.create(subject_id, spec(NUMERIC), HTML, 1, now)
+            table = uow.templates.create(subject_id, spec(TABLE), HTML + " ", 1, now)
+            choice = uow.templates.create(other_subject, spec(CHOICE), HTML, 1, now)
+        encoded = HTML.encode("utf-8")
+        assert numeric == TemplateRow(
+            id=numeric.id,
+            subject_id=subject_id,
+            spec=spec(NUMERIC),
+            html=HTML,
+            html_sha256=hashlib.sha256(encoded).hexdigest(),
+            bytes=len(encoded),
+            guide_version=1,
+            status="active",
+            supersedes_template_id=None,
+            created_at=now,
+            updated_at=now,
+            retired_at=None,
+        )
+        assert (table.bytes, table.spec.practice_kind) == (len(encoded) + 1, None)
+        with uow_factory(user_id) as uow:
+            assert uow.templates.get(numeric.id) == numeric
+            assert uow.templates.get(uuid4()) is None
+            # By name_norm: "respuesta numerica" < "tabla de la leccion"; no html in the list.
+            assert uow.templates.list_active(subject_id) == (
+                replace(numeric, html=None),
+                replace(table, html=None),
+            )
+            assert [t.id for t in uow.templates.list_active(other_subject)] == [choice.id]
+            assert uow.templates.list_active(uuid4()) == ()
+            same = uow.templates.find_same(
+                subject_id, spec_hash(spec(NUMERIC)), numeric.html_sha256
+            )
+            assert same == numeric
+            assert (
+                uow.templates.find_same(
+                    other_subject, spec_hash(spec(NUMERIC)), numeric.html_sha256
+                )
+                is None
+            )
+            assert (
+                uow.templates.find_same(subject_id, spec_hash(spec(TABLE)), numeric.html_sha256)
+                is None
+            )
+            assert uow.templates.active_by_name(subject_id, "respuesta numerica") == replace(
+                numeric, html=None
+            )
+            assert uow.templates.active_by_name(other_subject, "respuesta numerica") is None
+        with uow_factory(other_user_id) as uow:  # Review Focus 5
+            assert uow.templates.get(numeric.id) is None
+            assert uow.templates.list_active(subject_id) == ()
+            assert uow.templates.active_by_name(subject_id, "respuesta numerica") is None
+            with pytest.raises(LookupError):
+                uow.templates.create(subject_id, spec(NUMERIC), HTML, 1, now)
+
+    def test_template_replacement_retires_the_old_row(
+        self, uow_factory: UowFactory, user_id: UUID, other_user_id: UUID, now: datetime
+    ) -> None:
+        later = now + timedelta(minutes=5)
+        with uow_factory(user_id) as uow:
+            subject_id = uow.subjects.create(sample_subject(), now).id
+            other_subject = uow.subjects.create(sample_subject("Piano"), now).id
+            old = uow.templates.create(subject_id, spec(NUMERIC), HTML, 1, now)
+        with uow_factory(user_id) as uow:
+            # Same name: allowed because the old row is retired first, in the same call.
+            new = uow.templates.create(
+                subject_id, spec(NUMERIC), HTML + " ", 1, later, supersedes=old.id
+            )
+        assert (new.supersedes_template_id, new.status) == (old.id, "active")
+        with uow_factory(user_id) as uow:
+            retired = present(uow.templates.get(old.id))
+            assert (retired.status, retired.retired_at, retired.updated_at) == (
+                "retired",
+                later,
+                later,
+            )
+            assert retired.created_at == now
+            assert [t.id for t in uow.templates.list_active(subject_id)] == [new.id]
+            assert (
+                uow.templates.find_same(subject_id, spec_hash(spec(NUMERIC)), old.html_sha256)
+                is None
+            )
+        with uow_factory(other_user_id) as uow:
+            theirs = uow.subjects.create(sample_subject("Theirs"), now).id
+            their_template = uow.templates.create(theirs, spec(TABLE), HTML, 1, now)
+        attempts = [
+            (subject_id, uuid4()),  # a missing template
+            (subject_id, their_template.id),  # another user's template
+            (other_subject, new.id),  # a template of another subject of mine
+        ]
+        for target, supersedes in attempts:
+            with pytest.raises(LookupError), uow_factory(user_id) as uow:
+                uow.templates.create(target, spec(CHOICE), HTML, 1, later, supersedes=supersedes)
+        with pytest.raises(ValueError, match="name"), uow_factory(user_id) as uow:
+            uow.templates.create(subject_id, spec(NUMERIC), HTML + "  ", 1, later)
+        with uow_factory(user_id) as uow:
+            assert [t.id for t in uow.templates.list_active(subject_id)] == [new.id]
+            assert present(uow.templates.get(new.id)).status == "active"
+
+    # Instances (spec 15.4; plan ruling 28)
+
+    def test_instance_insert_with_a_note_and_a_repeat(
+        self, uow_factory: UowFactory, user_id: UUID, now: datetime
+    ) -> None:
+        params: dict[str, Any] = {"problem": "2 + 2", KEY_NAME: 4.0, REVEAL_NAME: "Porque."}
+        with uow_factory(user_id) as uow:
+            subject_id = uow.subjects.create(sample_subject(), now).id
+            note = add_note(uow, subject_id, valid_note("Clase", long_paragraph("uno.")), now)
+            template = uow.templates.create(subject_id, spec(NUMERIC), HTML, 1, now)
+            key = content_key(subject_id, template.id, params, "Suma.", note.id)
+            first, created = uow.instances.insert(
+                subject_id=subject_id,
+                note_id=note.id,
+                template=template,
+                params=params,
+                prompt_text="Suma.",
+                concept=ConceptName("Suma", "suma"),
+                origin="ingest",
+                key=key,
+                now=now,
+            )
+            second, _ = uow.instances.insert(
+                subject_id=subject_id,
+                note_id=note.id,
+                template=template,
+                params={**params, KEY_NAME: 5.0},
+                prompt_text="Suma otra vez.",
+                concept=None,
+                origin="ingest",
+                key="b" * 64,
+                now=now,
+            )
+            loose, _ = uow.instances.insert(
+                subject_id=subject_id,
+                note_id=None,
+                template=template,
+                params=params,
+                prompt_text="Suma.",
+                concept=ConceptName("suma", "suma"),
+                origin="class",
+                key="c" * 64,
+                now=now,
+            )
+        assert created is True
+        assert first == InstanceRow(
+            id=first.id,
+            subject_id=subject_id,
+            note_id=note.id,
+            seq=1,
+            template_id=template.id,
+            purpose="exercise",
+            practice_kind="quiz",
+            grading_kind="numeric",
+            params=params,
+            prompt_text="Suma.",
+            concept_id=first.concept_id,
+            concept="Suma",
+            origin="ingest",
+            content_key=key,
+            status="active",
+            supersedes_instance_id=None,
+            created_at=now,
+            retired_at=None,
+        )
+        assert (second.seq, second.concept, loose.seq, loose.note_id) == (2, None, None, None)
+        assert loose.concept_id == first.concept_id  # one concept per name_norm in the subject
+        with uow_factory(user_id) as uow:
+            assert uow.instances.get(first.id) == first
+            assert uow.instances.get(uuid4()) is None
+            assert [i.id for i in uow.instances.for_note(note.id)] == [first.id, second.id]
+            again, created = uow.instances.insert(
+                subject_id=subject_id,
+                note_id=note.id,
+                template=template,
+                params=params,
+                prompt_text="Suma.",
+                concept=None,
+                origin="ingest",
+                key=key,
+                now=now + timedelta(minutes=1),
+            )
+            assert (again, created) == (first, False)
+            assert len(uow.instances.for_note(note.id)) == 2  # nothing inserted
+            # The note's concept list is unchanged by instance concepts.
+            assert uow.notes.concepts(note.id) == ()
+
+    def test_instance_replacement_retires_the_old_row(
+        self, uow_factory: UowFactory, user_id: UUID, now: datetime
+    ) -> None:
+        # Plan ruling 28: a retired instance leaves the note's list; its content may come back.
         later = now + timedelta(minutes=1)
         with uow_factory(user_id) as uow:
             subject_id = uow.subjects.create(sample_subject(), now).id
-            note = add_note(uow, subject_id, valid_note("Clase", long_paragraph("texto.")), now)
-            first = uow.notes.add_artifact(note.id, "lesson_view", "Vista", html, now)
-            second = uow.notes.add_artifact(note.id, "other", "Otra", html + " ", later)
-        assert first == ArtifactRow(
-            id=first.id,
-            note_id=note.id,
-            kind="lesson_view",
-            title="Vista",
-            html=html,
-            bytes=len(html.encode("utf-8")),
-            created_at=now,
-        )
-        assert (second.kind, second.bytes, second.created_at) == ("other", first.bytes + 1, later)
+            note = add_note(uow, subject_id, valid_note("Clase", long_paragraph("uno.")), now)
+            template = uow.templates.create(subject_id, spec(TABLE), HTML, 1, now)
+
+            def put(rows: str, key: str, replaces: UUID | None = None) -> tuple[InstanceRow, bool]:
+                return uow.instances.insert(
+                    subject_id=subject_id,
+                    note_id=note.id,
+                    template=template,
+                    params={"rows": [[rows]]},
+                    prompt_text="Mira.",
+                    concept=None,
+                    origin="ingest",
+                    key=key * 64,
+                    now=later,
+                    replaces=replaces,
+                )
+
+            old, _ = put("a", "a")
+            same, created = put("a", "a", replaces=old.id)  # the same content: nothing changes
+            assert (same.id, created) == (old.id, False)
+            new, created = put("b", "b", replaces=old.id)
+            assert created is True
+        assert (new.supersedes_instance_id, new.seq) == (old.id, 2)
         with uow_factory(user_id) as uow:
-            assert uow.notes.artifacts(note.id) == (
-                replace(first, html=None),
-                replace(second, html=None),
+            retired = present(uow.instances.get(old.id))
+            assert (retired.status, retired.retired_at) == ("retired", later)
+            assert [i.id for i in uow.instances.for_note(note.id)] == [new.id]
+            back, created = uow.instances.insert(
+                subject_id=subject_id,
+                note_id=note.id,
+                template=template,
+                params={"rows": [["a"]]},
+                prompt_text="Mira.",
+                concept=None,
+                origin="ingest",
+                key="a" * 64,
+                now=later,
             )
-            assert uow.notes.artifact(first.id) == first
-            assert uow.notes.artifact(uuid4()) is None
+            assert created is True and back.id != old.id and back.seq == 3
+            assert [i.id for i in uow.instances.for_note(note.id)] == [new.id, back.id]
+
+    def test_instance_insert_with_foreign_or_mismatched_rows_raises_lookup_error(
+        self, uow_factory: UowFactory, user_id: UUID, other_user_id: UUID, now: datetime
+    ) -> None:
+        # Review Focus 5 and plan ruling 16: same user and same subject, or LookupError.
         with uow_factory(other_user_id) as uow:
-            assert uow.notes.artifact(first.id) is None
-            assert uow.notes.artifacts(note.id) == ()
-            assert uow.notes.get(note.id) is None
-            assert uow.notes.passage_count(note.id) == 0
-            assert uow.notes.passages(note.id, 1, 10) == ()
-            assert uow.notes.exercises(note.id) == ()
-            assert uow.notes.quiz_items(note.id) == ()
-            assert uow.notes.concepts(note.id) == ()
-            with pytest.raises(LookupError):
-                uow.notes.add_artifact(note.id, "other", "Ajena", html, now)
+            theirs = uow.subjects.create(sample_subject("Theirs"), now).id
+            their_note = add_note(uow, theirs, valid_note("T", long_paragraph("ajeno.")), now)
+            their_template = uow.templates.create(theirs, spec(TABLE), HTML, 1, now)
+            their_instance, _ = uow.instances.insert(
+                subject_id=theirs,
+                note_id=their_note.id,
+                template=their_template,
+                params={"rows": [["x"]]},
+                prompt_text="Mira.",
+                concept=None,
+                origin="ingest",
+                key="t" * 64,
+                now=now,
+            )
         with uow_factory(user_id) as uow:
-            assert len(uow.notes.artifacts(note.id)) == 2
+            mine = uow.subjects.create(sample_subject("Mine"), now).id
+            other = uow.subjects.create(sample_subject("Other"), now).id
+            my_note = add_note(uow, mine, valid_note("M", long_paragraph("propio.")), now)
+            other_note = add_note(uow, other, valid_note("O", long_paragraph("otro.")), now)
+            template = uow.templates.create(mine, spec(TABLE), HTML, 1, now)
+            other_template = uow.templates.create(other, spec(TABLE), HTML, 1, now)
+            retired = uow.templates.create(mine, spec(CHOICE), HTML, 1, now)
+            uow.templates.create(mine, spec(FLASHCARD), HTML, 1, now, supersedes=None)
+            uow.templates.create(
+                mine,
+                replace(spec(CHOICE), name="Opción múltiple 2"),
+                HTML,
+                1,
+                now,
+                supersedes=retired.id,
+            )
+            other_instance, _ = uow.instances.insert(
+                subject_id=other,
+                note_id=None,
+                template=other_template,
+                params={"rows": [["x"]]},
+                prompt_text="Mira.",
+                concept=None,
+                origin="class",
+                key="o" * 64,
+                now=now,
+            )
+            assert uow.instances.get(their_instance.id) is None
+            assert uow.instances.for_note(their_note.id) == ()
+        attempts: list[dict[str, Any]] = [
+            {"subject_id": theirs},
+            {"subject_id": uuid4()},
+            {"note_id": their_note.id},
+            {"note_id": other_note.id},
+            {"note_id": uuid4()},
+            {"template": their_template},
+            {"template": other_template},
+            {"template": retired},
+            {"replaces": their_instance.id},
+            {"replaces": other_instance.id},
+            {"replaces": uuid4()},
+        ]
+        for changes in attempts:
+            args: dict[str, Any] = {
+                "subject_id": mine,
+                "note_id": my_note.id,
+                "template": template,
+                "params": {"rows": [["y"]]},
+                "prompt_text": "Mira.",
+                "concept": None,
+                "origin": "ingest",
+                "key": "m" * 64,
+                "now": now,
+                **changes,
+            }
+            with pytest.raises(LookupError), uow_factory(user_id) as uow:
+                uow.instances.insert(**args)
+        with uow_factory(user_id) as uow:
+            assert uow.instances.for_note(my_note.id) == ()
+            assert present(uow.instances.get(other_instance.id)).status == "active"
+        with uow_factory(other_user_id) as uow:
+            assert present(uow.instances.get(their_instance.id)).status == "active"
+            assert [i.id for i in uow.instances.for_note(their_note.id)] == [their_instance.id]
+
+    def test_subject_get_for_update_reads_the_users_subject(
+        self, uow_factory: UowFactory, user_id: UUID, other_user_id: UUID, now: datetime
+    ) -> None:
+        with uow_factory(user_id) as uow:
+            row = uow.subjects.create(sample_subject(), now)
+            assert uow.subjects.get_for_update(row.id) == row
+            assert uow.subjects.get_for_update(uuid4()) is None
+        with uow_factory(other_user_id) as uow:
+            assert uow.subjects.get_for_update(row.id) is None
 
     # Search
 

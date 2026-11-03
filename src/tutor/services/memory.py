@@ -1,13 +1,15 @@
 """In-memory repositories and unit of work for unit tests and local work.
 
 The store enforces what Postgres enforces: one open session per user, unique (user, text_norm),
-one review log per (session, item), JSON-only JSON columns and per-user isolation. A unit of work
-deep-copies the tables on enter and restores the copy if the block raises.
+one review log per (session, item), JSON-only JSON columns, one active template per subject and
+name, one active instance per content key, and per-user isolation. A unit of work deep-copies the
+tables on enter and restores the copy if the block raises.
 """
 
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import re
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
@@ -31,7 +33,6 @@ from tutor.domain.glossary import (
     Reject,
     SetStatus,
 )
-from tutor.domain.html_guard import ArtifactKind
 from tutor.domain.lesson import BriefVariant, DueCandidate, RecentResult
 from tutor.domain.levels import CefrLevel
 from tutor.domain.metrics import SessionMetrics
@@ -39,7 +40,6 @@ from tutor.domain.notes import (
     CLEAN_VERSION,
     ConceptName,
     LinkKind,
-    NoteExerciseKind,
     Origin,
     SourceKind,
     ValidNote,
@@ -50,19 +50,21 @@ from tutor.domain.notes import (
 from tutor.domain.plan_lite import PlannedItem, Variant
 from tutor.domain.profile import DEFAULT_TIMEZONE, Domain, Profile
 from tutor.domain.subjects import Subject
+from tutor.domain.templates import InstanceStatus, TemplateSpec, TemplateStatus, spec_hash
+from tutor.domain.templates import Origin as InstanceOrigin
 from tutor.domain.track import TrackItem
 from tutor.domain.validation import Category, Evidence, SessionOutcome, ValidError
 from tutor.services.ports import (
     ActivePlan,
-    ArtifactRow,
     AuditEvent,
     AuditRepo,
     ClientName,
     ConceptRow,
-    ExerciseRow,
     GlossaryRepo,
     GlossaryRowData,
     IdentityResolver,
+    InstanceRepo,
+    InstanceRow,
     Mode,
     NoteRepo,
     NoteRow,
@@ -72,7 +74,6 @@ from tutor.services.ports import (
     PlanItemStatus,
     PlanRepo,
     ProfileRepo,
-    QuizItemRow,
     ResolvedUser,
     ReviewLogRow,
     ReviewRepo,
@@ -83,6 +84,8 @@ from tutor.services.ports import (
     SourceRow,
     SubjectRepo,
     SubjectRow,
+    TemplateRepo,
+    TemplateRow,
     TrackRepo,
     UnitOfWork,
     UowFactory,
@@ -263,32 +266,6 @@ class PassageRecord:
     text: str
 
 
-@dataclass(frozen=True, slots=True)
-class ExerciseRecord:
-    id: UUID
-    user_id: UUID
-    note_id: UUID
-    seq: int
-    name: str
-    instructions: str
-    kind: NoteExerciseKind
-    tempo_bpm: int | None
-    duration_min: int | None
-
-
-@dataclass(frozen=True, slots=True)
-class QuizItemRecord:
-    id: UUID
-    user_id: UUID
-    note_id: UUID
-    seq: int
-    question: str
-    options: tuple[str, ...]
-    answer_index: int
-    explanation: str | None
-    concept_id: UUID | None
-
-
 @dataclass(slots=True)
 class ConceptRecord:
     id: UUID
@@ -313,16 +290,42 @@ class ConceptLinkRecord:
     kind: LinkKind
 
 
-@dataclass(frozen=True, slots=True)
-class ArtifactRecord:
+@dataclass(slots=True)
+class TemplateRecord:
     id: UUID
     user_id: UUID
-    note_id: UUID
-    kind: ArtifactKind
-    title: str
+    subject_id: UUID
+    spec: TemplateSpec
+    name_norm: str
     html: str
+    html_sha256: str
     bytes: int
+    guide_version: int
+    status: TemplateStatus
+    supersedes_template_id: UUID | None
     created_at: datetime
+    updated_at: datetime
+    retired_at: datetime | None
+
+
+@dataclass(slots=True)
+class InstanceRecord:
+    id: UUID
+    user_id: UUID
+    subject_id: UUID
+    note_id: UUID | None
+    seq: int | None
+    template_id: UUID
+    template: TemplateSpec  # the purpose and kinds are copied from it at creation
+    params: dict[str, Any]
+    prompt_text: str
+    concept_id: UUID | None
+    origin: InstanceOrigin
+    content_key: str
+    status: InstanceStatus
+    supersedes_instance_id: UUID | None
+    created_at: datetime
+    retired_at: datetime | None
 
 
 @dataclass(slots=True)
@@ -342,12 +345,11 @@ class Tables:
     sources: dict[UUID, SourceRecord] = field(default_factory=dict)
     notes: dict[UUID, NoteRecord] = field(default_factory=dict)
     note_passages: list[PassageRecord] = field(default_factory=list)
-    note_exercises: list[ExerciseRecord] = field(default_factory=list)
-    quiz_items: list[QuizItemRecord] = field(default_factory=list)
     concepts: dict[UUID, ConceptRecord] = field(default_factory=dict)
     note_concepts: list[NoteConceptRecord] = field(default_factory=list)
     concept_links: list[ConceptLinkRecord] = field(default_factory=list)
-    note_artifacts: dict[UUID, ArtifactRecord] = field(default_factory=dict)
+    exercise_templates: dict[UUID, TemplateRecord] = field(default_factory=dict)
+    template_instances: dict[UUID, InstanceRecord] = field(default_factory=dict)
 
 
 class MemoryStore:
@@ -952,15 +954,40 @@ def _note_row(rec: NoteRecord) -> NoteRow:
     )
 
 
-def _artifact_row(rec: ArtifactRecord, *, with_html: bool) -> ArtifactRow:
-    return ArtifactRow(
+def _upsert_concept(tables: Tables, user_id: UUID, subject_id: UUID, concept: ConceptName) -> UUID:
+    """The subject's concept with this name_norm, created with this spelling if new."""
+    for rec in tables.concepts.values():
+        if (
+            rec.user_id == user_id
+            and rec.subject_id == subject_id
+            and rec.name_norm == concept.name_norm
+        ):
+            return rec.id
+    new = ConceptRecord(
+        id=uuid4(),
+        user_id=user_id,
+        subject_id=subject_id,
+        name=concept.name,
+        name_norm=concept.name_norm,
+    )
+    tables.concepts[new.id] = new
+    return new.id
+
+
+def _template_row(rec: TemplateRecord, *, with_html: bool) -> TemplateRow:
+    return TemplateRow(
         id=rec.id,
-        note_id=rec.note_id,
-        kind=rec.kind,
-        title=rec.title,
+        subject_id=rec.subject_id,
+        spec=rec.spec,
         html=rec.html if with_html else None,
+        html_sha256=rec.html_sha256,
         bytes=rec.bytes,
+        guide_version=rec.guide_version,
+        status=rec.status,
+        supersedes_template_id=rec.supersedes_template_id,
         created_at=rec.created_at,
+        updated_at=rec.updated_at,
+        retired_at=rec.retired_at,
     )
 
 
@@ -981,6 +1008,9 @@ class MemorySubjectRepo(_Repo):
     def get(self, subject_id: UUID) -> SubjectRow | None:
         rec = self._record(subject_id)
         return None if rec is None else _subject_row(rec)
+
+    def get_for_update(self, subject_id: UUID) -> SubjectRow | None:
+        return self.get(subject_id)  # one writer at a time in memory: a plain read
 
     def create(self, subject: Subject, now: datetime) -> SubjectRow:
         rec = SubjectRecord(
@@ -1019,23 +1049,7 @@ class MemoryNoteRepo(_Repo):
         return rec if rec is not None and rec.user_id == self._uid else None
 
     def _concept_id(self, subject_id: UUID, concept: ConceptName) -> UUID:
-        """The subject's concept with this name_norm, created with this spelling if new."""
-        for rec in self._t.concepts.values():
-            if (
-                rec.user_id == self._uid
-                and rec.subject_id == subject_id
-                and rec.name_norm == concept.name_norm
-            ):
-                return rec.id
-        rec = ConceptRecord(
-            id=uuid4(),
-            user_id=self._uid,
-            subject_id=subject_id,
-            name=concept.name,
-            name_norm=concept.name_norm,
-        )
-        self._t.concepts[rec.id] = rec
-        return rec.id
+        return _upsert_concept(self._t, self._uid, subject_id, concept)
 
     # --- sources and notes -------------------------------------------------------------------
 
@@ -1127,38 +1141,6 @@ class MemoryNoteRepo(_Repo):
         self._t.notes[rec.id] = rec
         for seq, text in enumerate(note.passages, start=1):
             self._t.note_passages.append(PassageRecord(self._uid, rec.id, seq, text))
-        for seq, exercise in enumerate(note.exercises, start=1):
-            self._t.note_exercises.append(
-                ExerciseRecord(
-                    id=uuid4(),
-                    user_id=self._uid,
-                    note_id=rec.id,
-                    seq=seq,
-                    name=exercise.name,
-                    instructions=exercise.instructions,
-                    kind=exercise.kind,
-                    tempo_bpm=exercise.tempo_bpm,
-                    duration_min=exercise.duration_min,
-                )
-            )
-        for seq, item in enumerate(note.quiz_items, start=1):
-            self._t.quiz_items.append(
-                QuizItemRecord(
-                    id=uuid4(),
-                    user_id=self._uid,
-                    note_id=rec.id,
-                    seq=seq,
-                    question=item.question,
-                    options=item.options,
-                    answer_index=item.answer_index,
-                    explanation=item.explanation,
-                    concept_id=(
-                        self._concept_id(subject_id, item.concept)
-                        if item.concept is not None
-                        else None
-                    ),
-                )
-            )
         for concept in note.concepts:
             self._t.note_concepts.append(
                 NoteConceptRecord(self._uid, rec.id, self._concept_id(subject_id, concept))
@@ -1192,42 +1174,6 @@ class MemoryNoteRepo(_Repo):
     def passage_count(self, note_id: UUID) -> int:
         return len(self._passages_of(note_id))
 
-    def exercises(self, note_id: UUID) -> tuple[ExerciseRow, ...]:
-        rows = sorted(
-            (e for e in self._t.note_exercises if e.user_id == self._uid and e.note_id == note_id),
-            key=lambda e: e.seq,
-        )
-        return tuple(
-            ExerciseRow(
-                id=e.id,
-                seq=e.seq,
-                name=e.name,
-                instructions=e.instructions,
-                kind=e.kind,
-                tempo_bpm=e.tempo_bpm,
-                duration_min=e.duration_min,
-            )
-            for e in rows
-        )
-
-    def quiz_items(self, note_id: UUID) -> tuple[QuizItemRow, ...]:
-        rows = sorted(
-            (q for q in self._t.quiz_items if q.user_id == self._uid and q.note_id == note_id),
-            key=lambda q: q.seq,
-        )
-        return tuple(
-            QuizItemRow(
-                id=q.id,
-                seq=q.seq,
-                question=q.question,
-                options=q.options,
-                answer_index=q.answer_index,
-                explanation=q.explanation,
-                concept=(self._t.concepts[q.concept_id].name if q.concept_id is not None else None),
-            )
-            for q in rows
-        )
-
     def concepts(self, note_id: UUID) -> tuple[ConceptRow, ...]:
         rows = sorted(
             (
@@ -1241,43 +1187,6 @@ class MemoryNoteRepo(_Repo):
             ConceptRow(id=c.id, subject_id=c.subject_id, name=c.name, name_norm=c.name_norm)
             for c in rows
         )
-
-    # --- artifacts ---------------------------------------------------------------------------
-
-    def artifacts(self, note_id: UUID) -> tuple[ArtifactRow, ...]:
-        rows = sorted(
-            (
-                a
-                for a in self._t.note_artifacts.values()
-                if a.user_id == self._uid and a.note_id == note_id
-            ),
-            key=lambda a: (a.created_at, a.id),
-        )
-        return tuple(_artifact_row(a, with_html=False) for a in rows)
-
-    def add_artifact(
-        self, note_id: UUID, kind: ArtifactKind, title: str, html: str, now: datetime
-    ) -> ArtifactRow:
-        if self._note(note_id) is None:
-            raise LookupError("note not found")
-        rec = ArtifactRecord(
-            id=uuid4(),
-            user_id=self._uid,
-            note_id=note_id,
-            kind=kind,
-            title=title,
-            html=html,
-            bytes=len(html.encode("utf-8")),
-            created_at=now,
-        )
-        self._t.note_artifacts[rec.id] = rec
-        return _artifact_row(rec, with_html=True)
-
-    def artifact(self, artifact_id: UUID) -> ArtifactRow | None:
-        rec = self._t.note_artifacts.get(artifact_id)
-        if rec is None or rec.user_id != self._uid:
-            return None
-        return _artifact_row(rec, with_html=True)
 
     # --- search ------------------------------------------------------------------------------
 
@@ -1372,6 +1281,196 @@ def _neighbours(edge: ConceptLinkRecord, concept_id: UUID) -> tuple[UUID, ...]:
     return ()
 
 
+class MemoryTemplateRepo(_Repo):
+    def _mine(self, subject_id: UUID) -> list[TemplateRecord]:
+        return [
+            t
+            for t in self._t.exercise_templates.values()
+            if t.user_id == self._uid and t.subject_id == subject_id
+        ]
+
+    def list_active(self, subject_id: UUID) -> tuple[TemplateRow, ...]:
+        rows = sorted(
+            (t for t in self._mine(subject_id) if t.status == "active"),
+            key=lambda t: (t.name_norm, t.id),
+        )
+        return tuple(_template_row(t, with_html=False) for t in rows)
+
+    def get(self, template_id: UUID) -> TemplateRow | None:
+        rec = self._t.exercise_templates.get(template_id)
+        if rec is None or rec.user_id != self._uid:
+            return None
+        return _template_row(rec, with_html=True)
+
+    def find_same(self, subject_id: UUID, spec_sha256: str, html_sha256: str) -> TemplateRow | None:
+        for rec in sorted(self._mine(subject_id), key=lambda t: (t.created_at, t.id)):
+            if (
+                rec.status == "active"
+                and rec.html_sha256 == html_sha256
+                and spec_hash(rec.spec) == spec_sha256
+            ):
+                return _template_row(rec, with_html=True)
+        return None
+
+    def active_by_name(self, subject_id: UUID, name_norm: str) -> TemplateRow | None:
+        for rec in self._mine(subject_id):
+            if rec.status == "active" and rec.name_norm == name_norm:
+                return _template_row(rec, with_html=False)
+        return None
+
+    def create(
+        self,
+        subject_id: UUID,
+        spec: TemplateSpec,
+        html: str,
+        guide_version: int,
+        now: datetime,
+        supersedes: UUID | None = None,
+    ) -> TemplateRow:
+        subject = self._t.subjects.get(subject_id)
+        if subject is None or subject.user_id != self._uid:
+            raise LookupError("subject not found")
+        old = None
+        if supersedes is not None:
+            old = self._t.exercise_templates.get(supersedes)
+            if old is None or old.user_id != self._uid or old.subject_id != subject_id:
+                raise LookupError("template not found")
+            if old.status == "active":
+                old.status, old.retired_at, old.updated_at = "retired", now, now
+        norm = name_norm(spec.name)
+        if self.active_by_name(subject_id, norm) is not None:
+            raise ValueError("an active template of this subject has this name")
+        encoded = html.encode("utf-8")
+        rec = TemplateRecord(
+            id=uuid4(),
+            user_id=self._uid,
+            subject_id=subject_id,
+            spec=spec,
+            name_norm=norm,
+            html=html,
+            html_sha256=hashlib.sha256(encoded).hexdigest(),
+            bytes=len(encoded),
+            guide_version=guide_version,
+            status="active",
+            supersedes_template_id=supersedes,
+            created_at=now,
+            updated_at=now,
+            retired_at=None,
+        )
+        self._t.exercise_templates[rec.id] = rec
+        return _template_row(rec, with_html=True)
+
+
+class MemoryInstanceRepo(_Repo):
+    def _row(self, rec: InstanceRecord) -> InstanceRow:
+        concept = self._t.concepts.get(rec.concept_id) if rec.concept_id is not None else None
+        return InstanceRow(
+            id=rec.id,
+            subject_id=rec.subject_id,
+            note_id=rec.note_id,
+            seq=rec.seq,
+            template_id=rec.template_id,
+            purpose=rec.template.purpose,
+            practice_kind=rec.template.practice_kind,
+            grading_kind=rec.template.grading_kind,
+            params=_json_copy(rec.params),
+            prompt_text=rec.prompt_text,
+            concept_id=rec.concept_id,
+            concept=concept.name if concept is not None else None,
+            origin=rec.origin,
+            content_key=rec.content_key,
+            status=rec.status,
+            supersedes_instance_id=rec.supersedes_instance_id,
+            created_at=rec.created_at,
+            retired_at=rec.retired_at,
+        )
+
+    def _mine(self) -> list[InstanceRecord]:
+        return [i for i in self._t.template_instances.values() if i.user_id == self._uid]
+
+    def insert(
+        self,
+        *,
+        subject_id: UUID,
+        note_id: UUID | None,
+        template: TemplateRow,
+        params: Mapping[str, Any],
+        prompt_text: str,
+        concept: ConceptName | None,
+        origin: InstanceOrigin,
+        key: str,
+        now: datetime,
+        replaces: UUID | None = None,
+    ) -> tuple[InstanceRow, bool]:
+        subject = self._t.subjects.get(subject_id)
+        if subject is None or subject.user_id != self._uid:
+            raise LookupError("subject not found")
+        if note_id is not None:
+            note = self._t.notes.get(note_id)
+            if note is None or note.user_id != self._uid or note.subject_id != subject_id:
+                raise LookupError("note not found")
+        stored = self._t.exercise_templates.get(template.id)
+        if (
+            stored is None
+            or stored.user_id != self._uid
+            or stored.subject_id != subject_id
+            or stored.status != "active"
+        ):
+            raise LookupError("template not found")
+        old = None
+        if replaces is not None:
+            old = self._t.template_instances.get(replaces)
+            if old is None or old.user_id != self._uid or old.subject_id != subject_id:
+                raise LookupError("instance not found")
+        existing = next(
+            (i for i in self._mine() if i.status == "active" and i.content_key == key), None
+        )
+        if old is not None and old.status == "active" and old is not existing:
+            old.status, old.retired_at = "retired", now
+        if existing is not None:
+            return self._row(existing), False
+        seq = None
+        if note_id is not None:
+            seq = 1 + max((i.seq or 0 for i in self._mine() if i.note_id == note_id), default=0)
+        rec = InstanceRecord(
+            id=uuid4(),
+            user_id=self._uid,
+            subject_id=subject_id,
+            note_id=note_id,
+            seq=seq,
+            template_id=template.id,
+            template=stored.spec,
+            params=_json_copy(params),
+            prompt_text=prompt_text,
+            concept_id=(
+                _upsert_concept(self._t, self._uid, subject_id, concept)
+                if concept is not None
+                else None
+            ),
+            origin=origin,
+            content_key=key,
+            status="active",
+            supersedes_instance_id=replaces,
+            created_at=now,
+            retired_at=None,
+        )
+        self._t.template_instances[rec.id] = rec
+        return self._row(rec), True
+
+    def get(self, instance_id: UUID) -> InstanceRow | None:
+        rec = self._t.template_instances.get(instance_id)
+        if rec is None or rec.user_id != self._uid:
+            return None
+        return self._row(rec)
+
+    def for_note(self, note_id: UUID) -> tuple[InstanceRow, ...]:
+        rows = sorted(
+            (i for i in self._mine() if i.note_id == note_id and i.status == "active"),
+            key=lambda i: (i.seq or 0, i.id),
+        )
+        return tuple(self._row(i) for i in rows)
+
+
 class MemoryAuditRepo(_Repo):
     def record(self, event: AuditEvent, meta: Mapping[str, Any], now: datetime) -> None:
         self._t.audit.append(
@@ -1392,6 +1491,8 @@ class MemoryUnitOfWork:
         self.audit: AuditRepo = MemoryAuditRepo(store, user_id)
         self.subjects: SubjectRepo = MemorySubjectRepo(store, user_id)
         self.notes: NoteRepo = MemoryNoteRepo(store, user_id)
+        self.templates: TemplateRepo = MemoryTemplateRepo(store, user_id)
+        self.instances: InstanceRepo = MemoryInstanceRepo(store, user_id)
 
 
 def memory_uow(store: MemoryStore) -> UowFactory:

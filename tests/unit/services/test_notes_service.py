@@ -1,9 +1,8 @@
-"""save_notes, save_artifact, get_artifact, get_note and search_notes on the in-memory store
-(subjects spec 4, 5; plan rulings 9, 11, 12)."""
+"""save_notes, get_note and search_notes on the in-memory store (subjects spec 4, 5; plan
+rulings 9, 11, 12). Instances in save_notes and get_note: test_templates_service.py."""
 
 from __future__ import annotations
 
-import dataclasses
 from datetime import timedelta
 from typing import Any
 from uuid import UUID, uuid4
@@ -11,37 +10,27 @@ from uuid import UUID, uuid4
 import pytest
 from repo_contract import long_paragraph
 
-from tutor.domain.html_guard import MAX_ARTIFACT_BYTES
 from tutor.domain.notes import (
     MAX_CALL_CHARS,
     MAX_CONCEPTS,
     MAX_NOTES_PER_CALL,
-    MAX_QUIZ_ITEMS,
-    OPTION_MAX,
     ConceptLinkInput,
-    ExerciseInput,
+    InstanceInput,
     NoteInput,
-    QuizItemInput,
     SourceInput,
 )
+from tutor.domain.templates import MAX_INSTANCES
 from tutor.services.context import Services
 from tutor.services.errors import ServiceError
 from tutor.services.memory import MemoryStore
 from tutor.services.notes import (
     MAX_NOTE_TEXT_CHARS,
-    get_artifact,
     get_note,
-    save_artifact,
     save_notes,
     search_notes,
 )
 from tutor.services.subject_views import (
-    ArtifactRef,
-    ArtifactSaved,
-    ArtifactView,
-    ExerciseView,
     NoteOutcome,
-    QuizItemView,
     SaveNotesResult,
     SearchWhy,
 )
@@ -50,12 +39,6 @@ from .conftest import NOW, FixedClock, create_subject
 
 pytestmark = pytest.mark.unit
 
-GOOD_HTML = (
-    "<!doctype html>\n<html><head><style>p { color: red }</style></head>"
-    '<body><h1>Clase 3</h1><p>Canción</p><a href="#top">top</a>'
-    "<script>document.title = 'ok';</script></body></html>"
-)
-BAD_HTML = '<!doctype html><html><body><iframe src="https://example.test"></iframe></body></html>'
 SOURCE = SourceInput("course", "Curso de guitarra", "https://example.test/curso")
 RAW_TEXT = "El acorde de séptima tiene cuatro notas.\n\nSe toca en el quinto traste."
 
@@ -68,18 +51,6 @@ def note(**changes: Any) -> NoteInput:
         "raw_text": RAW_TEXT,
         "concepts": ("Acorde de séptima", "Quinto traste"),
         "links": (ConceptLinkInput("Quinto traste", "Acorde de séptima", "prerequisite"),),
-        "exercises": (
-            ExerciseInput("Cambio C7-G7", "Cambia entre C7 y G7 cada compás.", "technique", 60, 5),
-        ),
-        "quiz_items": (
-            QuizItemInput(
-                "¿Cuántas notas tiene un acorde de séptima?",
-                ("Tres", "Cuatro", "Cinco"),
-                1,
-                "La séptima se suma a la tríada.",
-                "Acorde de séptima",
-            ),
-        ),
     }
     data.update(changes)
     return NoteInput(**data)
@@ -115,6 +86,7 @@ def test_save_notes_stores_new_notes_with_their_source(
             "new": 2,
             "existing": 0,
             "superseded": 0,
+            "instances": 0,
         }
     ]
     view = get_note(svc, user_id, result.notes[0].note_id)
@@ -143,34 +115,13 @@ def test_save_notes_stores_new_notes_with_their_source(
         1,
         (),
     )
-    [exercise] = view.exercises
-    assert exercise == ExerciseView(
-        exercise_id=exercise.exercise_id,
-        name="Cambio C7-G7",
-        instructions="Cambia entre C7 y G7 cada compás.",
-        kind="technique",
-        tempo_bpm=60,
-        duration_min=5,
-    )
-    assert view.quiz_items == (
-        QuizItemView(
-            question="¿Cuántas notas tiene un acorde de séptima?",
-            options=("Tres", "Cuatro", "Cinco"),
-            explanation="La séptima se suma a la tríada.",
-            concept="Acorde de séptima",
-        ),
-    )
     assert view.concepts == ("Acorde de séptima", "Quinto traste")
-    assert (view.artifacts, view.supersedes_note_id, view.created_at, view.updated_at) == (
+    assert (view.instances, view.supersedes_note_id, view.created_at, view.updated_at) == (
         (),
         None,
         NOW,
         NOW,
     )
-
-
-def test_quiz_items_never_carry_the_answer_index() -> None:
-    assert "answer_index" not in {f.name for f in dataclasses.fields(QuizItemView)}
 
 
 def test_review_focus_1_repeat_is_existing_and_a_fixed_typo_supersedes(
@@ -271,16 +222,16 @@ def test_review_focus_6_caps_are_all_or_nothing(
         (
             [
                 note(
-                    quiz_items=tuple(
-                        QuizItemInput(f"q{i}", ("a", "b"), 0) for i in range(MAX_QUIZ_ITEMS + 1)
+                    instances=tuple(
+                        InstanceInput(uuid4(), (), f"p{i}") for i in range(MAX_INSTANCES + 1)
                     )
                 )
             ],
-            ("limit_exceeded", ("notes[0].quiz_items",)),
+            ("limit_exceeded", ("notes[0].instances",)),
         ),
         (
-            [note(), note(quiz_items=(QuizItemInput("q", ("o" * (OPTION_MAX + 1),) * 3, 0),))],
-            ("validation_failed", ("notes[1].quiz_items[0].options",)),
+            [note(), note(instances=(InstanceInput(uuid4(), (), "p" * 501),))],
+            ("validation_failed", ("notes[1].instances[0].prompt_text",)),
         ),
     ]
     for notes, expected in cases:
@@ -345,99 +296,16 @@ def test_get_note_truncates_long_text_and_reads_passage_windows(
         assert (info.value.code, info.value.fields) == ("validation_failed", (field,))
 
 
-# --- artifacts --------------------------------------------------------------------------------
-
-
-def test_save_artifact_stores_the_document_and_returns_its_path(
-    svc: Services, store: MemoryStore, user_id: UUID
-) -> None:
-    note_id = add_lesson(svc, user_id)
-    saved = save_artifact(svc, user_id, note_id, "lesson_view", "  Vista   de la clase ", GOOD_HTML)
-    assert saved == ArtifactSaved(
-        artifact_id=saved.artifact_id,
-        web_path=f"/app/notas/{note_id}/artefactos/{saved.artifact_id}/raw",
-    )
-    assert get_artifact(svc, user_id, saved.artifact_id) == ArtifactView(
-        artifact_id=saved.artifact_id,
-        note_id=note_id,
-        kind="lesson_view",
-        title="Vista de la clase",
-        html=GOOD_HTML,
-    )
-    assert get_note(svc, user_id, note_id).artifacts == (
-        ArtifactRef(saved.artifact_id, "lesson_view", "Vista de la clase"),
-    )
-    assert events(store, user_id, "artifact_saved") == [
-        {
-            "artifact_id": str(saved.artifact_id),
-            "note_id": str(note_id),
-            "artifact_kind": "lesson_view",
-            "bytes": len(GOOD_HTML.encode("utf-8")),
-        }
-    ]
-    assert events(store, user_id, "artifact_rejected") == []
-
-
-def test_review_focus_6_rejected_artifacts_store_nothing_and_audit_the_first_problem(
-    svc: Services, store: MemoryStore, user_id: UUID
-) -> None:
-    # Review Focus 6
-    note_id = add_lesson(svc, user_id)
-    frame = "<!doctype html><html><body></body></html>"
-    too_big = frame.replace("<body>", "<body>" + "a" * (MAX_ARTIFACT_BYTES - len(frame) + 1))
-    assert len(too_big.encode("utf-8")) == MAX_ARTIFACT_BYTES + 1
-    for html in (BAD_HTML, too_big):
-        with pytest.raises(ServiceError) as info:
-            save_artifact(svc, user_id, note_id, "other", "Mala", html)
-        assert (info.value.code, info.value.fields) == ("validation_failed", ("html",))
-    assert store.tables.note_artifacts == {}
-    assert get_note(svc, user_id, note_id).artifacts == ()
-    assert events(store, user_id, "artifact_rejected") == [
-        {"note_id": str(note_id), "problem": "tag_forbidden"},
-        {"note_id": str(note_id), "problem": "too_large"},
-    ]
-    assert events(store, user_id, "artifact_saved") == []
-
-
-def test_save_artifact_validates_kind_and_title_with_the_html(
-    svc: Services, store: MemoryStore, user_id: UUID
-) -> None:
-    note_id = add_lesson(svc, user_id)
-    with pytest.raises(ServiceError) as info:
-        save_artifact(svc, user_id, note_id, "video", "", BAD_HTML)
-    assert (info.value.code, info.value.fields) == (
-        "validation_failed",
-        ("artifact_kind", "title", "html"),
-    )
-    with pytest.raises(ServiceError) as info:
-        save_artifact(svc, user_id, note_id, "other", "t" * 201, GOOD_HTML)
-    assert (info.value.code, info.value.fields) == ("validation_failed", ("title",))
-    assert store.tables.note_artifacts == {}
-    assert len(events(store, user_id, "artifact_rejected")) == 1  # only the call with bad html
-
-
-def test_review_focus_5_notes_and_artifacts_of_another_user_are_not_found(
-    svc: Services, store: MemoryStore, user_id: UUID, other_user_id: UUID
+def test_review_focus_5_notes_of_another_user_are_not_found(
+    svc: Services, user_id: UUID, other_user_id: UUID
 ) -> None:
     # Review Focus 5
     their_note = add_lesson(svc, other_user_id)
-    their_artifact = save_artifact(svc, other_user_id, their_note, "other", "Suya", GOOD_HTML)
-    for html in (GOOD_HTML, BAD_HTML):
-        with pytest.raises(ServiceError) as info:
-            save_artifact(svc, user_id, their_note, "other", "Mía", html)
-        assert (info.value.code, info.value.fields) == ("not_found", ("note_id",))
-    for artifact_id in (their_artifact.artifact_id, uuid4()):
-        with pytest.raises(ServiceError) as info:
-            get_artifact(svc, user_id, artifact_id)
-        assert (info.value.code, info.value.fields) == ("not_found", ("artifact_id",))
     for note_id in (their_note, uuid4()):
         with pytest.raises(ServiceError) as info:
             get_note(svc, user_id, note_id)
         assert (info.value.code, info.value.fields) == ("not_found", ("note_id",))
-    assert len(store.tables.note_artifacts) == 1
-    assert events(store, user_id, "artifact_rejected") == []
-    assert events(store, user_id, "artifact_saved") == []
-    assert get_artifact(svc, other_user_id, their_artifact.artifact_id).html == GOOD_HTML
+    assert get_note(svc, other_user_id, their_note).note_id == their_note
 
 
 # --- search -----------------------------------------------------------------------------------

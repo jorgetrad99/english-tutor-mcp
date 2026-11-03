@@ -23,9 +23,10 @@ from repo_contract import (
     valid_note,
     valid_source,
 )
+from template_fixtures import HTML, KEY_NAME, NUMERIC, REVEAL_NAME, spec
 
 from tutor.domain.glossary import InsertItem
-from tutor.domain.notes import ConceptLinkInput, ExerciseInput, QuizItemInput
+from tutor.domain.notes import ConceptLinkInput, ConceptName
 from tutor.services.context import Services
 from tutor.services.errors import ServiceError
 from tutor.services.memory import MemoryStore, excerpt
@@ -93,17 +94,20 @@ def test_rollback_restores_every_table(
         subject_id = uow.subjects.create(sample_subject(), now).id
         source_id = uow.notes.upsert_source(subject_id, valid_source(), now).id
         link = ConceptLinkInput("Ritmo", "Compás", "related")
-        quiz = QuizItemInput("¿Qué es?", ("a", "b"), 0, None, "Ritmo")
-        note = valid_note(
-            "Clase",
-            long_paragraph("texto."),
-            concepts=["Ritmo"],
-            links=[link],
-            exercises=[ExerciseInput("Ej", "Toca.", "technique")],
-            quiz_items=[quiz],
-        )
+        note = valid_note("Clase", long_paragraph("texto."), concepts=["Ritmo"], links=[link])
         row = add_note(uow, subject_id, note, now, source_id=source_id)
-        uow.notes.add_artifact(row.id, "other", "Vista", "<!doctype html><html></html>", now)
+        template = uow.templates.create(subject_id, spec(NUMERIC), HTML, 1, now)
+        uow.instances.insert(
+            subject_id=subject_id,
+            note_id=row.id,
+            template=template,
+            params={"problem": "2 + 2", KEY_NAME: 4.0, REVEAL_NAME: "r"},
+            prompt_text="Suma.",
+            concept=ConceptName("Ritmo", "ritmo"),
+            origin="ingest",
+            key="k" * 64,
+            now=now,
+        )
         raise RuntimeError("abort")
     assert store.tables == before
 

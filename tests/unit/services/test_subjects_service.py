@@ -12,7 +12,8 @@ from repo_contract import present
 from tutor.domain.subjects import SUBJECT_QUESTIONS, Subject
 from tutor.services.context import Services
 from tutor.services.errors import ServiceError
-from tutor.services.memory import MemoryStore
+from tutor.services.memory import MemoryStore, MemorySubjectRepo
+from tutor.services.ports import SubjectRow
 from tutor.services.subject_views import SaveSubjectResult, SubjectsView, SubjectView
 from tutor.services.subjects import get_subjects, save_subject
 
@@ -235,3 +236,31 @@ def test_a_kept_target_date_is_not_checked_again(
 def test_keep_target_date_on_create_means_no_date(svc: Services, user_id: UUID) -> None:
     created = save_subject(svc, user_id, subject_input(), keep_target_date=True)
     assert created.subject.subject.target_date is None
+
+
+def test_drill_is_a_practice_kind(svc: Services, user_id: UUID) -> None:
+    # Spec 15.13 D1: `drill` replaces `ear`.
+    saved = save_subject(svc, user_id, subject_input(exercise_kinds=["drill", "quiz"]))
+    assert saved.subject.subject.exercise_kinds == ("quiz", "drill")
+    with pytest.raises(ServiceError) as info:
+        save_subject(svc, user_id, subject_input(exercise_kinds=["ear"]))
+    assert (info.value.code, info.value.fields) == ("validation_failed", ("exercise_kinds",))
+
+
+def test_an_update_reads_the_subject_for_update(
+    svc: Services, store: MemoryStore, user_id: UUID, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Plan ruling 27b: the update path locks the row before the merge.
+    subject_id = create_subject(svc, user_id)
+    calls: list[UUID] = []
+    original = MemorySubjectRepo.get_for_update
+
+    def spy(self: MemorySubjectRepo, sid: UUID) -> SubjectRow | None:
+        calls.append(sid)
+        return original(self, sid)
+
+    monkeypatch.setattr(MemorySubjectRepo, "get_for_update", spy)
+    save_subject(svc, user_id, subject_input(goal_text="Tocar"), subject_id)
+    assert calls == [subject_id]
+    create_subject(svc, user_id, name="Piano")
+    assert calls == [subject_id]  # a create locks nothing

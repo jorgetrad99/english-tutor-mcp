@@ -19,14 +19,22 @@ from uuid import UUID
 
 from tutor.domain.fsrs import FsrsState
 from tutor.domain.glossary import GlossaryAction, GlossaryKind, GlossaryStatus, IncomingItem
-from tutor.domain.html_guard import ArtifactKind
 from tutor.domain.lesson import BriefVariant, DueCandidate, RecentResult
 from tutor.domain.levels import CefrLevel
 from tutor.domain.metrics import SessionMetrics
-from tutor.domain.notes import NoteExerciseKind, Origin, SourceKind, ValidNote, ValidSource
+from tutor.domain.notes import ConceptName, Origin, SourceKind, ValidNote, ValidSource
 from tutor.domain.plan_lite import PlannedItem, Variant
 from tutor.domain.profile import Domain, Profile
 from tutor.domain.subjects import Subject
+from tutor.domain.templates import (
+    GradingKind,
+    InstanceStatus,
+    PracticeKind,
+    TemplatePurpose,
+    TemplateSpec,
+    TemplateStatus,
+)
+from tutor.domain.templates import Origin as InstanceOrigin
 from tutor.domain.track import TrackItem
 from tutor.domain.validation import Evidence, SessionOutcome, ValidError
 
@@ -44,8 +52,8 @@ AuditEvent = Literal[
     "glossary_saved",
     "subject_saved",
     "notes_saved",
-    "artifact_saved",
-    "artifact_rejected",
+    "template_saved",
+    "instance_created",
 ]
 
 
@@ -333,28 +341,6 @@ class PassageRow:
 
 
 @dataclass(frozen=True, slots=True)
-class ExerciseRow:
-    id: UUID
-    seq: int
-    name: str
-    instructions: str
-    kind: NoteExerciseKind
-    tempo_bpm: int | None
-    duration_min: int | None
-
-
-@dataclass(frozen=True, slots=True)
-class QuizItemRow:
-    id: UUID
-    seq: int
-    question: str
-    options: tuple[str, ...]
-    answer_index: int
-    explanation: str | None
-    concept: str | None  # the concept's stored name, when the item names one
-
-
-@dataclass(frozen=True, slots=True)
 class ConceptRow:
     id: UUID
     subject_id: UUID
@@ -363,14 +349,46 @@ class ConceptRow:
 
 
 @dataclass(frozen=True, slots=True)
-class ArtifactRow:
+class TemplateRow:
+    """A stored template (spec 15.3). `html` is None from `list_active`, the document otherwise."""
+
     id: UUID
-    note_id: UUID
-    kind: ArtifactKind
-    title: str
-    html: str | None  # None from `artifacts`; the document from `artifact` and `add_artifact`
+    subject_id: UUID
+    spec: TemplateSpec
+    html: str | None
+    html_sha256: str
     bytes: int
+    guide_version: int
+    status: TemplateStatus
+    supersedes_template_id: UUID | None
     created_at: datetime
+    updated_at: datetime
+    retired_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class InstanceRow:
+    """A stored instance (spec 15.4) with its full canonical parameters, answer key included;
+    never send `params` to a client as they are (plan ruling 25)."""
+
+    id: UUID
+    subject_id: UUID
+    note_id: UUID | None
+    seq: int | None
+    template_id: UUID
+    purpose: TemplatePurpose
+    practice_kind: PracticeKind | None
+    grading_kind: GradingKind
+    params: Mapping[str, Any]
+    prompt_text: str
+    concept_id: UUID | None
+    concept: str | None  # the concept's stored name
+    origin: InstanceOrigin
+    content_key: str
+    status: InstanceStatus
+    supersedes_instance_id: UUID | None
+    created_at: datetime
+    retired_at: datetime | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -395,6 +413,10 @@ class SubjectRepo(Protocol):
 
     def get(self, subject_id: UUID) -> SubjectRow | None:
         """The user's subject, or None."""
+
+    def get_for_update(self, subject_id: UUID) -> SubjectRow | None:
+        """As `get`, and locks the row until the unit of work ends (`SELECT ... FOR UPDATE` on
+        Postgres), so a read-merge-update cannot lose a concurrent update (plan ruling 27b)."""
 
     def create(self, subject: Subject, now: datetime) -> SubjectRow:
         """Insert a subject with created_at = updated_at = now."""
@@ -432,10 +454,11 @@ class NoteRepo(Protocol):
         supersedes: UUID | None,
         now: datetime,
     ) -> NoteRow:
-        """Insert the note with its passages (seq from 1), exercises and quiz items (seq from
-        1), concepts (upserted per subject by name_norm, keeping the first spelling; link
-        endpoints and quiz-item concepts are upserted but not attached to the note) and links
-        (duplicates of an existing (from, to, kind) ignored), all in this call. The idempotency
+        """Insert the note with its passages (seq from 1), concepts (upserted per subject by
+        name_norm, keeping the first spelling; link endpoints are upserted but not attached to
+        the note) and links (duplicates of an existing (from, to, kind) ignored), all in this
+        call; its instances go through InstanceRepo.insert in the same unit of work. The
+        idempotency
         key is `idempotency_key(subject_id, source_id, lesson_ref, raw_text)`; created_at =
         updated_at = now. LookupError when the subject, the source (which must belong to the
         subject) or the superseded note is not the user's; ValueError when the key exists."""
@@ -450,27 +473,8 @@ class NoteRepo(Protocol):
     def passage_count(self, note_id: UUID) -> int:
         """How many passages the user's note has; 0 for another user's note."""
 
-    def exercises(self, note_id: UUID) -> tuple[ExerciseRow, ...]:
-        """The note's exercises by seq; () for another user's note."""
-
-    def quiz_items(self, note_id: UUID) -> tuple[QuizItemRow, ...]:
-        """The note's quiz items by seq, with the answer index; () for another user's note."""
-
     def concepts(self, note_id: UUID) -> tuple[ConceptRow, ...]:
         """The concepts attached to the note, by name_norm; () for another user's note."""
-
-    def artifacts(self, note_id: UUID) -> tuple[ArtifactRow, ...]:
-        """The note's artifacts without their html, by (created_at, id); () for another
-        user's note."""
-
-    def add_artifact(
-        self, note_id: UUID, kind: ArtifactKind, title: str, html: str, now: datetime
-    ) -> ArtifactRow:
-        """Insert an artifact (`bytes` = UTF-8 length) and return it with its html.
-        LookupError when the note is not the user's."""
-
-    def artifact(self, artifact_id: UUID) -> ArtifactRow | None:
-        """The user's artifact with its html, or None."""
 
     def search(self, query: str, subject_id: UUID | None, limit: int) -> tuple[SearchHit, ...]:
         """Spec 5.1: passage hits and concept-graph hits (depth <= 2) over the user's notes,
@@ -478,6 +482,67 @@ class NoteRepo(Protocol):
         desc, id; at most `limit`. Empty unions of <= 3 tokens retry on the title (`fuzzy`).
         Postgres uses full text search, trigrams and ts_headline; memory models it with
         whole-token matching (plan rulings 2 and 3). Same data, same query, same order."""
+
+
+class TemplateRepo(Protocol):
+    def list_active(self, subject_id: UUID) -> tuple[TemplateRow, ...]:
+        """The subject's active templates without their html, by name_norm then id; () for
+        another user's or a missing subject."""
+
+    def get(self, template_id: UUID) -> TemplateRow | None:
+        """The user's template in any status, with its html, or None."""
+
+    def find_same(self, subject_id: UUID, spec_sha256: str, html_sha256: str) -> TemplateRow | None:
+        """The subject's active template with this spec hash (`spec_hash`) and html hash."""
+
+    def active_by_name(self, subject_id: UUID, name_norm: str) -> TemplateRow | None:
+        """The subject's active template with this name_norm, or None."""
+
+    def create(
+        self,
+        subject_id: UUID,
+        spec: TemplateSpec,
+        html: str,
+        guide_version: int,
+        now: datetime,
+        supersedes: UUID | None = None,
+    ) -> TemplateRow:
+        """Insert an active template (`html_sha256`, `bytes` = UTF-8 length, created_at =
+        updated_at = now). `supersedes`, a template of the same subject, is retired first in
+        the same call (status retired, retired_at = updated_at = now). LookupError when the
+        subject or the superseded template is not the user's, or is of another subject;
+        ValueError when an active template of the subject has the same name_norm."""
+
+
+class InstanceRepo(Protocol):
+    def insert(
+        self,
+        *,
+        subject_id: UUID,
+        note_id: UUID | None,
+        template: TemplateRow,
+        params: Mapping[str, Any],
+        prompt_text: str,
+        concept: ConceptName | None,
+        origin: InstanceOrigin,
+        key: str,
+        now: datetime,
+        replaces: UUID | None = None,
+    ) -> tuple[InstanceRow, bool]:
+        """Insert an active instance of `template` with these canonical params; its purpose and
+        kinds are copied from the template, its concept upserted in the subject, its seq the
+        note's next one (None without a note). An active instance with content key `key`
+        is returned instead, with False, and nothing is inserted. `replaces` (an instance of
+        the same subject) is retired in the same call unless it is the returned row; the new
+        row records it as supersedes_instance_id. LookupError when the subject, the note, the
+        template (which must be active) or the replaced instance is not the user's or is of
+        another subject."""
+
+    def get(self, instance_id: UUID) -> InstanceRow | None:
+        """The user's instance in any status, or None."""
+
+    def for_note(self, note_id: UUID) -> tuple[InstanceRow, ...]:
+        """The note's active instances by seq; () for another user's note."""
 
 
 class AuditRepo(Protocol):
@@ -497,6 +562,8 @@ class UnitOfWork(Protocol):
     audit: AuditRepo
     subjects: SubjectRepo
     notes: NoteRepo
+    templates: TemplateRepo
+    instances: InstanceRepo
 
 
 # Commits when the block exits cleanly; rolls everything back when it raises.

@@ -1,4 +1,4 @@
-"""get_subjects and save_subject (subjects spec 3.1, 3.2; plan rulings 5, 6, 13)."""
+"""get_subjects and save_subject (subjects spec 3.1, 3.2; plan rulings 5, 6, 13, 27)."""
 
 from __future__ import annotations
 
@@ -38,7 +38,9 @@ def save_subject(
     with svc.uow(user_id) as uow:
         current = None
         if subject_id is not None:
-            found = uow.subjects.get(subject_id)
+            # Locked until the unit of work ends: a concurrent save waits, then merges onto
+            # this one's result instead of overwriting it (plan ruling 27b).
+            found = uow.subjects.get_for_update(subject_id)
             if found is None:
                 raise ServiceError("not_found", ("subject_id",))
             current = found.subject

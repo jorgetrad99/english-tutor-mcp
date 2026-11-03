@@ -1,16 +1,17 @@
-"""save_notes, save_artifact, get_artifact, get_note and search_notes (subjects spec 4, 5).
+"""save_notes, get_note and search_notes (subjects spec 4, 5, 15.9).
 
-One unit of work per call: a payload is stored whole or not at all. Every write records an
-audit event with ids, enums and counts only. Learner text is returned as data.
+One unit of work per call: a payload is stored whole or not at all, its instances included.
+Every write records an audit event with ids, enums and counts only. Learner text is returned
+as data; an instance shows its prompt parameters only (plan ruling 25).
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any, TypeGuard
+from typing import Any
 from uuid import UUID
 
-from tutor.domain.html_guard import ARTIFACT_KINDS, ARTIFACT_TITLE_MAX, ArtifactKind, check_html
+from tutor.domain.errors import FieldError
 from tutor.domain.notes import (
     DEFAULT_SEARCH_LIMIT,
     MAX_SEARCH_LIMIT,
@@ -22,24 +23,26 @@ from tutor.domain.notes import (
     idempotency_key,
     validate_notes,
 )
-from tutor.domain.subjects import collapse_name
+from tutor.domain.templates import pool_size, public_params
 from tutor.services.context import Services
 from tutor.services.errors import ServiceError, field_error
 from tutor.services.ports import NoteRow, UnitOfWork
 from tutor.services.subject_views import (
-    ArtifactRef,
-    ArtifactSaved,
-    ArtifactView,
-    ExerciseView,
+    NoteInstanceView,
     NoteOutcome,
     NoteView,
     Outcome,
     PassageView,
-    QuizItemView,
     SaveNotesResult,
     SearchHitView,
     SearchResult,
     SearchWhy,
+)
+from tutor.services.templates import (
+    ResolvedInstance,
+    raise_collected,
+    resolve_instance,
+    store_instance,
 )
 
 MAX_NOTE_TEXT_CHARS = 12_000  # get_note returns clean_text whole up to this (plan ruling 11)
@@ -55,8 +58,13 @@ def save_notes(
     *,
     origin: Origin = "mcp",
 ) -> SaveNotesResult:
-    """Store 1-4 notes of one subject (spec 4.1, 4.2): `existing` when the idempotency key is
-    known, `superseded` when the same source and lesson_ref hold another text, else `new`."""
+    """Store 1-4 notes of one subject (spec 4.1, 4.2, 15.4): `existing` when the idempotency key
+    is known, `superseded` when the same source and lesson_ref hold another text, else `new`.
+
+    Every instance must use an active template of the subject (else `not_found` on its
+    `template_id`) and parameters that fit it (else `validation_failed` on their paths); all
+    are checked before anything is written (plan ruling 23). An `existing` note keeps the
+    instances it has; the result lists every note's active instance ids."""
     valid = validate_notes(source, notes, origin=origin)
     if isinstance(valid, NotesErrors):
         raise field_error(valid.code, valid.errors)
@@ -64,15 +72,18 @@ def save_notes(
     with svc.uow(user_id) as uow:
         if uow.subjects.get(subject_id) is None:
             raise ServiceError("not_found", ("subject_id",))
+        resolved = _resolve_instances(uow, subject_id, notes)
         source_id = None
         if valid.source is not None:
             source_id = uow.notes.upsert_source(subject_id, valid.source, now).id
         outcomes: list[NoteOutcome] = []
-        for note in valid.notes:
+        created = 0
+        for index, note in enumerate(valid.notes):
             key = idempotency_key(subject_id, source_id, note.lesson_ref, note.raw_text)
             existing = uow.notes.by_idempotency_key(key)
             if existing is not None:
-                outcomes.append(NoteOutcome(existing.id, "existing"))
+                kept = tuple(i.id for i in uow.instances.for_note(existing.id))
+                outcomes.append(NoteOutcome(existing.id, "existing", kept))
                 continue
             previous = None
             if note.lesson_ref is not None:
@@ -85,8 +96,12 @@ def save_notes(
                 supersedes=previous.id if previous is not None else None,
                 now=now,
             )
+            for item in resolved[index]:
+                _, instance_outcome = store_instance(uow, subject_id, row.id, item, "ingest", now)
+                created += instance_outcome != "existing"
+            ids = tuple(i.id for i in uow.instances.for_note(row.id))
             outcome: Outcome = "new" if previous is None else "superseded"
-            outcomes.append(NoteOutcome(row.id, outcome))
+            outcomes.append(NoteOutcome(row.id, outcome, ids))
         meta: dict[str, Any] = {
             "subject_id": str(subject_id),
             "source_id": str(source_id) if source_id is not None else None,
@@ -94,6 +109,7 @@ def save_notes(
         }
         for kind in _OUTCOMES:
             meta[kind] = sum(1 for item in outcomes if item.outcome == kind)
+        meta["instances"] = created
         uow.audit.record("notes_saved", meta, now)
         return SaveNotesResult(source_id=source_id, notes=tuple(outcomes))
 
@@ -101,64 +117,23 @@ def save_notes(
 _OUTCOMES: tuple[Outcome, ...] = ("new", "existing", "superseded")
 
 
-def _is_artifact_kind(value: str) -> TypeGuard[ArtifactKind]:
-    return value in ARTIFACT_KINDS
-
-
-def artifact_web_path(note_id: UUID, artifact_id: UUID) -> str:
-    """The website route that serves the stored document (spec 9)."""
-    return f"/app/notas/{note_id}/artefactos/{artifact_id}/raw"
-
-
-def save_artifact(
-    svc: Services, user_id: UUID, note_id: UUID, kind: str, title: str, html: str
-) -> ArtifactSaved:
-    """Store one HTML document for a note (spec 4.4). `check_html` decides; a rejected document
-    is `validation_failed` on `html` and its first problem code goes to the audit log."""
-    now = svc.clock()
-    fields: list[str] = []
-    if not _is_artifact_kind(kind):
-        fields.append("artifact_kind")
-    name = collapse_name(title)
-    if not 1 <= len(name) <= ARTIFACT_TITLE_MAX:
-        fields.append("title")
-    problems = check_html(html)
-    if problems:
-        fields.append("html")
-    with svc.uow(user_id) as uow:
-        if uow.notes.get(note_id) is None:
-            raise ServiceError("not_found", ("note_id",))
-        if not fields and _is_artifact_kind(kind):
-            row = uow.notes.add_artifact(note_id, kind, name, html, now)
-            uow.audit.record(
-                "artifact_saved",
-                {
-                    "artifact_id": str(row.id),
-                    "note_id": str(note_id),
-                    "artifact_kind": kind,
-                    "bytes": row.bytes,
-                },
-                now,
-            )
-            return ArtifactSaved(artifact_id=row.id, web_path=artifact_web_path(note_id, row.id))
-        if problems:
-            uow.audit.record(
-                "artifact_rejected",
-                {"note_id": str(note_id), "problem": problems[0].code},
-                now,
-            )
-    raise ServiceError("validation_failed", tuple(fields))
-
-
-def get_artifact(svc: Services, user_id: UUID, artifact_id: UUID) -> ArtifactView:
-    """The stored document as data (spec 4.4)."""
-    with svc.uow(user_id) as uow:
-        row = uow.notes.artifact(artifact_id)
-    if row is None or row.html is None:
-        raise ServiceError("not_found", ("artifact_id",))
-    return ArtifactView(
-        artifact_id=row.id, note_id=row.note_id, kind=row.kind, title=row.title, html=row.html
-    )
+def _resolve_instances(
+    uow: UnitOfWork, subject_id: UUID, notes: Sequence[NoteInput]
+) -> list[list[ResolvedInstance]]:
+    """Every note's instances checked against their templates, or the collected errors."""
+    not_found: list[str] = []
+    errors: list[FieldError] = []
+    resolved: list[list[ResolvedInstance]] = []
+    for n, note in enumerate(notes):
+        items: list[ResolvedInstance] = []
+        for i, data in enumerate(note.instances):
+            path = f"notes[{n}].instances[{i}]"
+            item = resolve_instance(uow, subject_id, data, path, not_found, errors)
+            if item is not None:
+                items.append(item)
+        resolved.append(items)
+    raise_collected(not_found, errors)
+    return resolved
 
 
 def get_note(
@@ -169,7 +144,7 @@ def get_note(
     passage_to: int | None = None,
 ) -> NoteView:
     """The note with its clean text (whole up to 12,000 characters, else `truncated`), its
-    exercises, quiz items without answers, concepts and artifact references (spec 5.2). A
+    concepts and its active instances with their prompt parameters only (spec 5.2, 15.9). A
     passage window (1-based, inclusive, at most 10) reads part of a long note."""
     with svc.uow(user_id) as uow:
         note = uow.notes.get(note_id)
@@ -184,31 +159,27 @@ def get_note(
                 for p in uow.notes.passages(note_id, start, stop)
             )
         source = uow.notes.source(note.source_id) if note.source_id is not None else None
-        exercises = tuple(
-            ExerciseView(
-                exercise_id=e.id,
-                name=e.name,
-                instructions=e.instructions,
-                kind=e.kind,
-                tempo_bpm=e.tempo_bpm,
-                duration_min=e.duration_min,
-            )
-            for e in uow.notes.exercises(note_id)
-        )
-        quiz_items = tuple(
-            QuizItemView(
-                question=q.question,
-                options=q.options,
-                explanation=q.explanation,
-                concept=q.concept,
-            )
-            for q in uow.notes.quiz_items(note_id)
-        )
         concepts = tuple(c.name for c in uow.notes.concepts(note_id))
-        artifacts = tuple(
-            ArtifactRef(artifact_id=a.id, kind=a.kind, title=a.title)
-            for a in uow.notes.artifacts(note_id)
-        )
+        instances: list[NoteInstanceView] = []
+        for row in uow.instances.for_note(note_id):
+            template = uow.templates.get(row.template_id)
+            if template is None:  # pragma: no cover - an instance's template always exists
+                continue
+            instances.append(
+                NoteInstanceView(
+                    instance_id=row.id,
+                    seq=row.seq,
+                    template_id=row.template_id,
+                    purpose=row.purpose,
+                    practice_kind=row.practice_kind,
+                    grading_kind=row.grading_kind,
+                    needs_view=template.spec.needs_view,
+                    prompt_text=row.prompt_text,
+                    concept=row.concept,
+                    params=public_params(template.spec, row.params),
+                    pool_entries=pool_size(template.spec, row.params),
+                )
+            )
     return NoteView(
         note_id=note.id,
         subject_id=note.subject_id,
@@ -225,10 +196,8 @@ def get_note(
         truncated=len(note.clean_text) > MAX_NOTE_TEXT_CHARS,
         passage_count=count,
         passages=passages,
-        exercises=exercises,
-        quiz_items=quiz_items,
         concepts=concepts,
-        artifacts=artifacts,
+        instances=tuple(instances),
     )
 
 
