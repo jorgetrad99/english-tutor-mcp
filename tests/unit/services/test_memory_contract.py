@@ -10,19 +10,25 @@ import pytest
 from repo_contract import (
     RepoContract,
     add_closed_session,
+    add_note,
     first_item,
     incoming,
     insert_glossary,
+    long_paragraph,
     planned_items,
     sample_metrics,
     sample_profile,
+    sample_subject,
     start_session,
+    valid_note,
+    valid_source,
 )
 
 from tutor.domain.glossary import InsertItem
+from tutor.domain.notes import ConceptLinkInput, ExerciseInput, QuizItemInput
 from tutor.services.context import Services
 from tutor.services.errors import ServiceError
-from tutor.services.memory import MemoryStore
+from tutor.services.memory import MemoryStore, excerpt
 from tutor.services.ports import OpenSessionExists, UowFactory
 
 from .conftest import FixedClock
@@ -84,8 +90,74 @@ def test_rollback_restores_every_table(
         insert_glossary(uow, session.id, "ship it", now)
         uow.users.note_mcp_use(now)
         uow.audit.record("profile_saved", {}, now)
+        subject_id = uow.subjects.create(sample_subject(), now).id
+        source_id = uow.notes.upsert_source(subject_id, valid_source(), now).id
+        link = ConceptLinkInput("Ritmo", "Compás", "related")
+        quiz = QuizItemInput("¿Qué es?", ("a", "b"), 0, None, "Ritmo")
+        note = valid_note(
+            "Clase",
+            long_paragraph("texto."),
+            concepts=["Ritmo"],
+            links=[link],
+            exercises=[ExerciseInput("Ej", "Toca.", "technique")],
+            quiz_items=[quiz],
+        )
+        row = add_note(uow, subject_id, note, now, source_id=source_id)
+        uow.notes.add_artifact(row.id, "other", "Vista", "<!doctype html><html></html>", now)
         raise RuntimeError("abort")
     assert store.tables == before
+
+
+def test_duplicate_idempotency_key_for_one_user_raises(
+    uow_factory: UowFactory, user_id: UUID, now: datetime
+) -> None:
+    note = valid_note("A", long_paragraph("uno."))
+    with uow_factory(user_id) as uow:
+        subject_id = uow.subjects.create(sample_subject(), now).id
+        add_note(uow, subject_id, note, now)
+    with pytest.raises(ValueError, match="duplicate"), uow_factory(user_id) as uow:
+        add_note(uow, subject_id, note, now)
+
+
+def test_search_excerpt_marks_the_first_match_in_a_25_word_window() -> None:
+    # Plan ruling 3: the memory model of ts_headline.
+    text = (
+        " ".join(f"w{i}" for i in range(40))
+        + " Séptima, dominante. "
+        + " ".join(f"v{i}" for i in range(30))
+    )
+    words = excerpt(text, {"septima"}).split()
+    assert len(words) == 25
+    assert words[0] == "w32"
+    assert words[8] == "[[Séptima]],"
+    assert excerpt("La séptima suena. Y la séptima otra vez.", {"septima", "suena"}) == (
+        "La [[séptima]] suena. Y la séptima otra vez."
+    )
+    assert excerpt("sin nada", {"x"}) == "sin nada"
+
+
+def test_search_falls_back_to_the_title_for_short_queries(
+    uow_factory: UowFactory, user_id: UUID, now: datetime
+) -> None:
+    # The memory model of the trigram fallback on notes.title_norm (plan ruling 2).
+    with uow_factory(user_id) as uow:
+        subject_id = uow.subjects.create(sample_subject(), now).id
+        titled = add_note(
+            uow, subject_id, valid_note("Afinación con afinador", long_paragraph("texto uno.")), now
+        )
+        add_note(uow, subject_id, valid_note("Otra", long_paragraph("texto dos.")), now)
+    with uow_factory(user_id) as uow:
+        [hit] = uow.notes.search("afinacion", None, 10)
+        assert (hit.note_id, hit.passages, hit.concepts, hit.depth, hit.fuzzy, hit.excerpts) == (
+            titled.id,
+            0,
+            (),
+            None,
+            True,
+            (),
+        )
+        assert uow.notes.search("afinación con afinador perfecto", None, 10) == ()  # 4 tokens
+        assert uow.notes.search("texto", None, 10)[0].fuzzy is False
 
 
 def test_service_error_carries_only_code_and_fields() -> None:

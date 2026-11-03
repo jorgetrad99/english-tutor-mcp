@@ -9,6 +9,7 @@ identity resolver, with seeded track ids, so the same tests run on memory and on
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
@@ -31,15 +32,32 @@ from tutor.domain.glossary import (
 from tutor.domain.lesson import BriefVariant, DueCandidate, RecentResult, TaskResult
 from tutor.domain.levels import CefrLevel
 from tutor.domain.metrics import SessionMetrics
+from tutor.domain.notes import (
+    ConceptLinkInput,
+    ExerciseInput,
+    NoteInput,
+    Origin,
+    QuizItemInput,
+    SourceKind,
+    ValidNote,
+    ValidNotes,
+    ValidSource,
+    idempotency_key,
+    validate_notes,
+)
 from tutor.domain.plan_lite import PlannedItem
 from tutor.domain.profile import DEFAULT_TIMEZONE, Profile
+from tutor.domain.subjects import Subject, SubjectStatus
 from tutor.domain.text import normalize
 from tutor.domain.track import TrackItem
 from tutor.domain.validation import Evidence, ReportedError, SessionOutcome, ValidError
 from tutor.services.ports import (
+    ArtifactRow,
     GlossaryRowData,
     IdentityResolver,
+    NoteRow,
     OpenSessionExists,
+    PassageRow,
     ReviewLogRow,
     SessionRow,
     UnitOfWork,
@@ -272,6 +290,82 @@ def insert_glossary(
     )
     uow.glossary.apply([action], [item], session_id=session_id, now=now)
     return uow.glossary.by_norms([norm])[norm]
+
+
+def sample_subject(name: str = "Guitar", *, status: SubjectStatus = "active") -> Subject:
+    return Subject(
+        name=name,
+        goal_text="Play at the wedding",
+        context_text=None,
+        preference="balanced",
+        exercise_kinds=("quiz", "exercise"),
+        minutes_per_session=30,
+        sessions_per_week=3,
+        target_date=None,
+        status=status,
+    )
+
+
+def valid_source(
+    kind: SourceKind = "course", title: str = "Guitar course", url: str | None = None
+) -> ValidSource:
+    return ValidSource(kind, title, url)
+
+
+# Search fixtures (plan ruling 2): exact word forms only, no stems, plurals or stop words of the
+# query vocabulary anywhere else, so Postgres full text search and the memory token model agree.
+FILLER = "Mantener el pulso con calma y paciencia."
+
+
+def long_paragraph(lead: str) -> str:
+    """One paragraph of about 700 characters, so two never merge into one passage."""
+    return lead + " " + " ".join([FILLER] * 17)
+
+
+def valid_note(
+    title: str,
+    *paragraphs: str,
+    lesson_ref: str | None = None,
+    position: int | None = None,
+    concepts: Sequence[str] = (),
+    links: Sequence[ConceptLinkInput] = (),
+    exercises: Sequence[ExerciseInput] = (),
+    quiz_items: Sequence[QuizItemInput] = (),
+) -> ValidNote:
+    """A note validated by the domain, its paragraphs separated by blank lines."""
+    data = NoteInput(
+        title=title,
+        lesson_ref=lesson_ref,
+        position=position,
+        raw_text="\n\n".join(paragraphs),
+        concepts=concepts,
+        links=links,
+        exercises=exercises,
+        quiz_items=quiz_items,
+    )
+    result = validate_notes(None, [data], origin="web")
+    assert isinstance(result, ValidNotes)
+    return result.notes[0]
+
+
+def add_note(
+    uow: UnitOfWork,
+    subject_id: UUID,
+    note: ValidNote,
+    now: datetime,
+    *,
+    source_id: UUID | None = None,
+    supersedes: UUID | None = None,
+    origin: Origin = "mcp",
+) -> NoteRow:
+    return uow.notes.insert(
+        note,
+        subject_id=subject_id,
+        source_id=source_id,
+        origin=origin,
+        supersedes=supersedes,
+        now=now,
+    )
 
 
 class RepoContract:
@@ -1244,3 +1338,474 @@ class RepoContract:
                 {"session_id": str(uuid4()), "status": "closed", "low_trust": False, "n": 3},
                 now,
             )
+
+    # Subjects
+
+    def test_subject_create_get_and_list_active_first_then_by_name(
+        self, uow_factory: UowFactory, user_id: UUID, now: datetime
+    ) -> None:
+        with uow_factory(user_id) as uow:
+            piano = uow.subjects.create(sample_subject("Piano"), now)
+            bass = uow.subjects.create(sample_subject("Bass", status="paused"), now)
+            drums = uow.subjects.create(sample_subject("Drums"), now)
+            alto = uow.subjects.create(sample_subject("Alto sax", status="archived"), now)
+        assert (piano.subject, piano.created_at, piano.updated_at) == (
+            sample_subject("Piano"),
+            now,
+            now,
+        )
+        assert len({piano.id, bass.id, drums.id, alto.id}) == 4
+        with uow_factory(user_id) as uow:
+            assert uow.subjects.get(piano.id) == piano
+            assert uow.subjects.get(uuid4()) is None
+            assert [row.id for row in uow.subjects.list()] == [drums.id, piano.id, alto.id, bass.id]
+
+    def test_subject_update_replaces_and_bumps_updated_at(
+        self, uow_factory: UowFactory, user_id: UUID, now: datetime
+    ) -> None:
+        later = now + timedelta(hours=1)
+        changed = sample_subject("Piano jazz", status="paused")
+        with uow_factory(user_id) as uow:
+            row = uow.subjects.create(sample_subject("Piano"), now)
+        with uow_factory(user_id) as uow:
+            assert uow.subjects.update(row.id, changed, later) is True
+            assert uow.subjects.update(uuid4(), changed, later) is False
+        with uow_factory(user_id) as uow:
+            updated = present(uow.subjects.get(row.id))
+            assert (updated.subject, updated.created_at, updated.updated_at) == (
+                changed,
+                now,
+                later,
+            )
+            assert [r.id for r in uow.subjects.list()] == [row.id]
+
+    def test_subjects_are_isolated(
+        self, uow_factory: UowFactory, user_id: UUID, other_user_id: UUID, now: datetime
+    ) -> None:
+        # Review Focus 5
+        with uow_factory(user_id) as uow:
+            mine = uow.subjects.create(sample_subject("Piano"), now)
+        with uow_factory(other_user_id) as uow:
+            assert uow.subjects.list() == ()
+            assert uow.subjects.get(mine.id) is None
+            assert uow.subjects.update(mine.id, sample_subject("Taken"), now) is False
+            with pytest.raises(LookupError):
+                uow.notes.upsert_source(mine.id, valid_source(), now)
+        with uow_factory(user_id) as uow:
+            assert uow.subjects.get(mine.id) == mine
+
+    # Sources
+
+    def test_upsert_source_matches_kind_and_title_within_the_subject(
+        self, uow_factory: UowFactory, user_id: UUID, now: datetime
+    ) -> None:
+        later = now + timedelta(hours=1)
+        with uow_factory(user_id) as uow:
+            guitar = uow.subjects.create(sample_subject("Guitar"), now).id
+            piano = uow.subjects.create(sample_subject("Piano"), now).id
+            first = uow.notes.upsert_source(guitar, valid_source(), now)
+            again = uow.notes.upsert_source(
+                guitar, valid_source(url="https://example.test/c"), later
+            )
+            pdf = uow.notes.upsert_source(guitar, valid_source(kind="pdf"), now)
+            theirs = uow.notes.upsert_source(piano, valid_source(), now)
+        assert (first.subject_id, first.kind, first.title, first.url, first.created_at) == (
+            guitar,
+            "course",
+            "Guitar course",
+            None,
+            now,
+        )
+        assert (again.id, again.url, again.created_at) == (first.id, "https://example.test/c", now)
+        assert len({first.id, pdf.id, theirs.id}) == 3
+        with uow_factory(user_id) as uow:
+            assert uow.notes.source(first.id) == again
+            assert uow.notes.source(uuid4()) is None
+            # No url in the call keeps the stored one.
+            assert uow.notes.upsert_source(guitar, valid_source(), later).url == again.url
+        with pytest.raises(LookupError), uow_factory(user_id) as uow:
+            uow.notes.upsert_source(uuid4(), valid_source(), now)
+
+    # Notes
+
+    def test_note_insert_stores_text_passages_items_and_concepts(
+        self, uow_factory: UowFactory, user_id: UUID, now: datetime
+    ) -> None:
+        link = ConceptLinkInput("Quinto traste", "Acorde de séptima", "prerequisite")
+        exercise = ExerciseInput(
+            "Cambio C7-G7", "Cambia entre C7 y G7 cada compás.", "technique", 60, 5
+        )
+        quiz = QuizItemInput(
+            "¿Cuántas notas tiene un acorde de séptima?",
+            ("Tres", "Cuatro"),
+            1,
+            "La séptima se suma.",
+            "Acorde de séptima",
+        )
+        note = valid_note(
+            "Clase 3",
+            long_paragraph("acorde de séptima."),
+            long_paragraph("quinto traste."),
+            lesson_ref="M2/C3",
+            position=3,
+            concepts=["Acorde de séptima", "Blues"],
+            links=[link],
+            exercises=[exercise],
+            quiz_items=[quiz],
+        )
+        assert len(note.passages) == 2
+        with uow_factory(user_id) as uow:
+            subject_id = uow.subjects.create(sample_subject(), now).id
+            source_id = uow.notes.upsert_source(subject_id, valid_source(), now).id
+            row = add_note(uow, subject_id, note, now, source_id=source_id)
+        assert row == NoteRow(
+            id=row.id,
+            subject_id=subject_id,
+            source_id=source_id,
+            title="Clase 3",
+            lesson_ref="M2/C3",
+            position=3,
+            raw_text=note.raw_text,
+            raw_had_nul=False,
+            clean_text=note.clean_text,
+            clean_version=1,
+            idempotency_key=idempotency_key(subject_id, source_id, "M2/C3", note.raw_text),
+            origin="mcp",
+            supersedes_note_id=None,
+            created_at=now,
+            updated_at=now,
+        )
+        with uow_factory(user_id) as uow:
+            assert uow.notes.get(row.id) == row
+            assert uow.notes.get(uuid4()) is None
+            assert uow.notes.by_idempotency_key(row.idempotency_key) == row
+            assert uow.notes.by_idempotency_key("no such key") is None
+            assert uow.notes.passage_count(row.id) == 2
+            assert uow.notes.passages(row.id, 1, 10) == tuple(
+                PassageRow(seq, text) for seq, text in enumerate(note.passages, start=1)
+            )
+            [stored] = uow.notes.exercises(row.id)
+            assert (
+                stored.seq,
+                stored.name,
+                stored.instructions,
+                stored.kind,
+                stored.tempo_bpm,
+                stored.duration_min,
+            ) == (1, "Cambio C7-G7", "Cambia entre C7 y G7 cada compás.", "technique", 60, 5)
+            [item] = uow.notes.quiz_items(row.id)
+            assert (
+                item.seq,
+                item.question,
+                item.options,
+                item.answer_index,
+                item.explanation,
+                item.concept,
+            ) == (
+                1,
+                quiz.question,
+                ("Tres", "Cuatro"),
+                1,
+                "La séptima se suma.",
+                "Acorde de séptima",
+            )
+            # Link endpoints ("Quinto traste") exist as concepts but are not attached to the note.
+            assert [(c.subject_id, c.name, c.name_norm) for c in uow.notes.concepts(row.id)] == [
+                (subject_id, "Acorde de séptima", "acorde de septima"),
+                (subject_id, "Blues", "blues"),
+            ]
+            assert uow.notes.artifacts(row.id) == ()
+
+    def test_review_focus_1_same_lesson_twice_then_with_a_typo_fixed(
+        self, uow_factory: UowFactory, user_id: UUID, now: datetime
+    ) -> None:
+        # Review Focus 1
+        first = valid_note(
+            "Clase 3", long_paragraph("acorde de séptima con un tipo."), lesson_ref="M2/C3"
+        )
+        fixed = valid_note(
+            "Clase 3", long_paragraph("acorde de séptima con un typo."), lesson_ref="M2/C3"
+        )
+        with uow_factory(user_id) as uow:
+            subject_id = uow.subjects.create(sample_subject(), now).id
+            source_id = uow.notes.upsert_source(subject_id, valid_source(), now).id
+            original = add_note(uow, subject_id, first, now, source_id=source_id)
+        key = idempotency_key(subject_id, source_id, "M2/C3", first.raw_text)
+        with uow_factory(user_id) as uow:
+            assert uow.notes.by_idempotency_key(key) == original
+            assert uow.notes.latest_by_lesson(subject_id, source_id, "M2/C3") == original
+            assert uow.notes.latest_by_lesson(subject_id, None, "M2/C3") is None
+            assert uow.notes.latest_by_lesson(subject_id, source_id, "M2/C4") is None
+            replacement = add_note(
+                uow,
+                subject_id,
+                fixed,
+                now + timedelta(minutes=1),
+                source_id=source_id,
+                supersedes=original.id,
+            )
+        assert replacement.supersedes_note_id == original.id
+        assert replacement.idempotency_key != original.idempotency_key
+        with uow_factory(user_id) as uow:
+            assert uow.notes.latest_by_lesson(subject_id, source_id, "M2/C3") == replacement
+            assert uow.notes.get(original.id) == original  # the old note stays
+            assert [h.note_id for h in uow.notes.search("séptima", subject_id, 10)] == [
+                replacement.id,
+                original.id,
+            ]
+
+    def test_passages_window_is_one_based_and_inclusive(
+        self, uow_factory: UowFactory, user_id: UUID, now: datetime
+    ) -> None:
+        note = valid_note("Largo", *(long_paragraph(f"parte {n}.") for n in range(1, 5)))
+        assert len(note.passages) == 4
+        with uow_factory(user_id) as uow:
+            subject_id = uow.subjects.create(sample_subject(), now).id
+            row = add_note(uow, subject_id, note, now)
+        with uow_factory(user_id) as uow:
+            assert uow.notes.passage_count(row.id) == 4
+            assert [p.seq for p in uow.notes.passages(row.id, 2, 3)] == [2, 3]
+            assert [p.seq for p in uow.notes.passages(row.id, 4, 9)] == [4]
+            assert uow.notes.passages(row.id, 5, 6) == ()
+            assert uow.notes.passages(row.id, 1, 1) == (PassageRow(1, note.passages[0]),)
+
+    def test_review_focus_5_insert_with_a_foreign_subject_or_source_raises_lookup_error(
+        self, uow_factory: UowFactory, user_id: UUID, other_user_id: UUID, now: datetime
+    ) -> None:
+        # Review Focus 5
+        with uow_factory(other_user_id) as uow:
+            theirs = uow.subjects.create(sample_subject("Theirs"), now).id
+            their_source = uow.notes.upsert_source(theirs, valid_source(), now).id
+            their_note = add_note(uow, theirs, valid_note("Theirs", long_paragraph("ajeno.")), now)
+        with uow_factory(user_id) as uow:
+            mine = uow.subjects.create(sample_subject("Mine"), now).id
+            other_subject = uow.subjects.create(sample_subject("Other"), now).id
+            my_source = uow.notes.upsert_source(mine, valid_source(), now).id
+        note = valid_note("Intento", long_paragraph("propio."), lesson_ref="L1")
+        attempts: list[tuple[UUID, UUID | None, UUID | None]] = [
+            (theirs, None, None),  # another user's subject
+            (uuid4(), None, None),  # a missing subject
+            (mine, their_source, None),  # another user's source
+            (other_subject, my_source, None),  # a source of another subject of mine
+            (mine, my_source, their_note.id),  # superseding another user's note
+            (mine, my_source, uuid4()),  # superseding a missing note
+        ]
+        for subject_id, source_id, supersedes in attempts:
+            with pytest.raises(LookupError), uow_factory(user_id) as uow:
+                add_note(uow, subject_id, note, now, source_id=source_id, supersedes=supersedes)
+        with uow_factory(user_id) as uow:
+            assert uow.notes.search("propio", None, 10) == ()
+            for subject_id in (mine, other_subject):
+                assert uow.notes.latest_by_lesson(subject_id, None, "L1") is None
+                assert uow.notes.latest_by_lesson(subject_id, my_source, "L1") is None
+        with uow_factory(other_user_id) as uow:
+            assert uow.notes.search("propio", None, 10) == ()
+            assert [h.note_id for h in uow.notes.search("ajeno", None, 10)] == [their_note.id]
+
+    def test_concepts_merge_by_name_norm_within_a_subject(
+        self, uow_factory: UowFactory, user_id: UUID, now: datetime
+    ) -> None:
+        with uow_factory(user_id) as uow:
+            guitar = uow.subjects.create(sample_subject("Guitar"), now).id
+            piano = uow.subjects.create(sample_subject("Piano"), now).id
+            a = add_note(
+                uow,
+                guitar,
+                valid_note("A", long_paragraph("uno."), concepts=["Pentatónica menor"]),
+                now,
+            )
+            b = add_note(
+                uow,
+                guitar,
+                valid_note("B", long_paragraph("dos."), concepts=["pentatonica  MENOR", "Blues"]),
+                now,
+            )
+            c = add_note(
+                uow,
+                piano,
+                valid_note("C", long_paragraph("tres."), concepts=["Pentatónica menor"]),
+                now,
+            )
+        with uow_factory(user_id) as uow:
+            [ca] = uow.notes.concepts(a.id)
+            cb = uow.notes.concepts(b.id)
+            [cc] = uow.notes.concepts(c.id)
+        assert (ca.subject_id, ca.name, ca.name_norm) == (
+            guitar,
+            "Pentatónica menor",
+            "pentatonica menor",
+        )
+        assert [x.name for x in cb] == ["Blues", "Pentatónica menor"]  # by name_norm
+        assert cb[1].id == ca.id  # same subject, same name_norm: one concept, first spelling
+        assert (cc.subject_id, cc.name) == (piano, "Pentatónica menor")
+        assert cc.id != ca.id  # another subject: another concept
+
+    # Artifacts
+
+    def test_artifacts_round_trip_and_list_without_html(
+        self, uow_factory: UowFactory, user_id: UUID, other_user_id: UUID, now: datetime
+    ) -> None:
+        html = "<!doctype html><html><body><p>Canción</p></body></html>"
+        later = now + timedelta(minutes=1)
+        with uow_factory(user_id) as uow:
+            subject_id = uow.subjects.create(sample_subject(), now).id
+            note = add_note(uow, subject_id, valid_note("Clase", long_paragraph("texto.")), now)
+            first = uow.notes.add_artifact(note.id, "lesson_view", "Vista", html, now)
+            second = uow.notes.add_artifact(note.id, "other", "Otra", html + " ", later)
+        assert first == ArtifactRow(
+            id=first.id,
+            note_id=note.id,
+            kind="lesson_view",
+            title="Vista",
+            html=html,
+            bytes=len(html.encode("utf-8")),
+            created_at=now,
+        )
+        assert (second.kind, second.bytes, second.created_at) == ("other", first.bytes + 1, later)
+        with uow_factory(user_id) as uow:
+            assert uow.notes.artifacts(note.id) == (
+                replace(first, html=None),
+                replace(second, html=None),
+            )
+            assert uow.notes.artifact(first.id) == first
+            assert uow.notes.artifact(uuid4()) is None
+        with uow_factory(other_user_id) as uow:
+            assert uow.notes.artifact(first.id) is None
+            assert uow.notes.artifacts(note.id) == ()
+            assert uow.notes.get(note.id) is None
+            assert uow.notes.passage_count(note.id) == 0
+            assert uow.notes.passages(note.id, 1, 10) == ()
+            assert uow.notes.exercises(note.id) == ()
+            assert uow.notes.quiz_items(note.id) == ()
+            assert uow.notes.concepts(note.id) == ()
+            with pytest.raises(LookupError):
+                uow.notes.add_artifact(note.id, "other", "Ajena", html, now)
+        with uow_factory(user_id) as uow:
+            assert len(uow.notes.artifacts(note.id)) == 2
+
+    # Search
+
+    def test_search_fixture_orders_by_matches_depth_recency_and_subject(
+        self, uow_factory: UowFactory, user_id: UUID, now: datetime
+    ) -> None:
+        """Twelve notes over two subjects; the expected id order of each query is listed here
+        and must hold on both backends (passages matched desc, then updated_at desc)."""
+        m = timedelta(minutes=1)
+        ids: dict[str, UUID] = {}
+        with uow_factory(user_id) as uow:
+            guitar = uow.subjects.create(sample_subject("Guitar"), now).id
+            piano = uow.subjects.create(sample_subject("Piano"), now).id
+
+            def put(key: str, subject_id: UUID, minute: int, title: str, *leads: str) -> None:
+                note = valid_note(title, *(long_paragraph(lead) for lead in leads))
+                ids[key] = add_note(uow, subject_id, note, now + minute * m).id
+
+            put(
+                "a1",
+                guitar,
+                1,
+                "Acordes",
+                "power chord con dos notas.",
+                "power chord en el quinto traste.",
+            )
+            put(
+                "a2",
+                guitar,
+                2,
+                "Escalas",
+                "escala pentatónica menor.",
+                "la pentatónica para improvisar.",
+            )
+            put(
+                "a3",
+                guitar,
+                3,
+                "Dominantes",
+                "acorde de séptima dominante.",
+                "power chord con distorsión.",
+            )
+            put("a4", guitar, 4, "Posiciones", "acorde de séptima en el quinto traste.")
+            put("a5", guitar, 5, "Afinación", "afinar la guitarra con afinador.")
+            put("a6", guitar, 6, "Modos", "modos griegos: jónico y dórico.")
+            put("b1", piano, 7, "Octavas", "power chord en el piano con octavas.")
+            put("b2", piano, 8, "Dominantes en piano", "acorde de séptima en el piano.")
+            put("b3", piano, 9, "Teclas negras", "escala pentatónica en teclas negras.")
+            put("b4", piano, 10, "Pedal", "pedal de resonancia y dinámica.")
+            put(
+                "b5",
+                piano,
+                11,
+                "Arpegios",
+                "arpegio de séptima ascendente.",
+                "arpegio de séptima descendente.",
+            )
+            put("b6", piano, 12, "Lectura", "lectura de partitura en clave de fa.")
+        expected: list[tuple[str, UUID | None, int, list[str]]] = [
+            ("power chord", None, 10, ["a1", "b1", "a3"]),
+            ("séptima", None, 10, ["b5", "b2", "a4", "a3"]),
+            ("séptima", None, 2, ["b5", "b2"]),
+            ("pentatonica", None, 10, ["a2", "b3"]),
+            ("quinto traste", None, 10, ["a4", "a1"]),
+            ("power chord", piano, 10, ["b1"]),
+            ("power chord", guitar, 10, ["a1", "a3"]),
+            ("ukelele", None, 10, []),
+        ]
+        with uow_factory(user_id) as uow:
+            for query, subject_id, limit, keys in expected:
+                hits = uow.notes.search(query, subject_id, limit)
+                assert [h.note_id for h in hits] == [ids[k] for k in keys], query
+                assert all(h.concepts == () and h.depth is None and not h.fuzzy for h in hits)
+            first, *_ = uow.notes.search("power chord", None, 10)
+            assert first.passages == 2
+            assert all(h.passages == 1 for h in uow.notes.search("quinto traste", None, 10))
+            # Same data, same query, same order.
+            assert uow.notes.search("séptima", None, 10) == uow.notes.search("séptima", None, 10)
+
+    def test_search_reaches_notes_through_the_concept_graph(
+        self, uow_factory: UowFactory, user_id: UUID, now: datetime
+    ) -> None:
+        """A `related` link is followed both ways at depth 1 and a `prerequisite` from the
+        reached concept at depth 2; a third hop and an incoming prerequisite are not followed."""
+        m = timedelta(minutes=1)
+        with uow_factory(user_id) as uow:
+            subject_id = uow.subjects.create(sample_subject("Drums"), now).id
+
+            def put(minute: int, title: str, concept: str, *links: ConceptLinkInput) -> UUID:
+                note = valid_note(
+                    title, long_paragraph(f"contenido {title}."), concepts=[concept], links=links
+                )
+                return add_note(uow, subject_id, note, now + minute * m).id
+
+            seed = put(1, "uno", "Ritmo")
+            related = put(2, "dos", "Compás", ConceptLinkInput("Compás", "Ritmo", "related"))
+            second = put(
+                3, "tres", "Síncopa", ConceptLinkInput("Compás", "Síncopa", "prerequisite")
+            )
+            put(
+                4, "cuatro", "Swing", ConceptLinkInput("Síncopa", "Swing", "prerequisite")
+            )  # depth 3
+            put(5, "cinco", "Metrónomo", ConceptLinkInput("Metrónomo", "Ritmo", "prerequisite"))
+            # A cycle back to the seed must not loop or change depths; this newer note ties
+            # with "dos" (one concept, depth 1) and wins on updated_at.
+            cycle = put(6, "seis", "Compás", ConceptLinkInput("Ritmo", "Compás", "related"))
+        with uow_factory(user_id) as uow:
+            hits = uow.notes.search("ritmo", None, 10)
+        assert [(h.note_id, h.passages, h.concepts, h.depth, h.fuzzy) for h in hits] == [
+            (seed, 0, ("Ritmo",), 0, False),
+            (cycle, 0, ("Compás",), 1, False),
+            (related, 0, ("Compás",), 1, False),
+            (second, 0, ("Síncopa",), 2, False),
+        ]
+
+    def test_search_is_scoped_to_the_user(
+        self, uow_factory: UowFactory, user_id: UUID, other_user_id: UUID, now: datetime
+    ) -> None:
+        with uow_factory(user_id) as uow:
+            subject_id = uow.subjects.create(sample_subject(), now).id
+            mine = add_note(uow, subject_id, valid_note("Mía", long_paragraph("power chord.")), now)
+        with uow_factory(other_user_id) as uow:
+            assert uow.notes.search("power chord", None, 10) == ()
+            assert uow.notes.search("power chord", subject_id, 10) == ()
+        with uow_factory(user_id) as uow:
+            assert [h.note_id for h in uow.notes.search("power chord", None, 10)] == [mine.id]
+            assert uow.notes.search("power chord", uuid4(), 10) == ()

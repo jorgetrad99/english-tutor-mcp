@@ -7,6 +7,7 @@ app.web_session with set_config(..., true), so the settings and the role end wit
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import Connection, Engine, select, text
@@ -22,11 +23,13 @@ from tutor.services.ports import (
     AuditRepo,
     GlossaryRepo,
     IdentityResolver,
+    NoteRepo,
     PlanRepo,
     ProfileRepo,
     ResolvedUser,
     ReviewRepo,
     SessionRepo,
+    SubjectRepo,
     TrackRepo,
     UnitOfWork,
     UowFactory,
@@ -73,6 +76,17 @@ def scoped_connection(
         yield conn
 
 
+class _NotYetMigrated:
+    """Stands in for the subjects and notes repositories until migration 0006 lands (subjects
+    slice A, Task 3); every call raises NotImplementedError."""
+
+    def __init__(self, name: str) -> None:
+        self._name = name
+
+    def __getattr__(self, attr: str) -> Any:
+        raise NotImplementedError(f"{self._name}.{attr} arrives with migration 0006")
+
+
 class PgUnitOfWork:
     """One transaction for one user; every repository shares the connection."""
 
@@ -85,6 +99,8 @@ class PgUnitOfWork:
     glossary: GlossaryRepo
     reviews: ReviewRepo
     audit: AuditRepo
+    subjects: SubjectRepo
+    notes: NoteRepo
 
     def __init__(self, conn: Connection, user_id: UUID) -> None:
         self.conn = conn
@@ -97,6 +113,8 @@ class PgUnitOfWork:
         self.glossary = PgGlossaryRepo(conn, user_id)
         self.reviews = PgReviewRepo(conn, user_id)
         self.audit = PgAuditRepo(conn, user_id)
+        self.subjects = _NotYetMigrated("PgSubjectRepo")
+        self.notes = _NotYetMigrated("PgNoteRepo")
 
 
 def pg_uow_factory(engine: Engine) -> UowFactory:

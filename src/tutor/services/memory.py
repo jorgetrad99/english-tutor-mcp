@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
@@ -30,33 +31,58 @@ from tutor.domain.glossary import (
     Reject,
     SetStatus,
 )
+from tutor.domain.html_guard import ArtifactKind
 from tutor.domain.lesson import BriefVariant, DueCandidate, RecentResult
 from tutor.domain.levels import CefrLevel
 from tutor.domain.metrics import SessionMetrics
+from tutor.domain.notes import (
+    CLEAN_VERSION,
+    ConceptName,
+    LinkKind,
+    NoteExerciseKind,
+    Origin,
+    SourceKind,
+    ValidNote,
+    ValidSource,
+    idempotency_key,
+    name_norm,
+)
 from tutor.domain.plan_lite import PlannedItem, Variant
 from tutor.domain.profile import DEFAULT_TIMEZONE, Domain, Profile
+from tutor.domain.subjects import Subject
 from tutor.domain.track import TrackItem
 from tutor.domain.validation import Category, Evidence, SessionOutcome, ValidError
 from tutor.services.ports import (
     ActivePlan,
+    ArtifactRow,
     AuditEvent,
     AuditRepo,
     ClientName,
+    ConceptRow,
+    ExerciseRow,
     GlossaryRepo,
     GlossaryRowData,
     IdentityResolver,
     Mode,
+    NoteRepo,
+    NoteRow,
     OpenSessionExists,
+    PassageRow,
     PlanItemRow,
     PlanItemStatus,
     PlanRepo,
     ProfileRepo,
+    QuizItemRow,
     ResolvedUser,
     ReviewLogRow,
     ReviewRepo,
+    SearchHit,
     SessionRepo,
     SessionRow,
     SessionStatus,
+    SourceRow,
+    SubjectRepo,
+    SubjectRow,
     TrackRepo,
     UnitOfWork,
     UowFactory,
@@ -188,6 +214,118 @@ class AuditRecord:
 
 
 @dataclass(slots=True)
+class SubjectRecord:
+    id: UUID
+    user_id: UUID
+    subject: Subject
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(slots=True)
+class SourceRecord:
+    id: UUID
+    user_id: UUID
+    subject_id: UUID
+    kind: SourceKind
+    title: str
+    url: str | None
+    created_at: datetime
+
+
+@dataclass(slots=True)
+class NoteRecord:
+    id: UUID
+    user_id: UUID
+    subject_id: UUID
+    source_id: UUID | None
+    title: str
+    title_norm: str
+    lesson_ref: str | None
+    position: int | None
+    raw_text: str
+    raw_had_nul: bool
+    raw_sha256: str
+    clean_text: str
+    clean_version: int
+    idempotency_key: str
+    origin: Origin
+    supersedes_note_id: UUID | None
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class PassageRecord:
+    user_id: UUID
+    note_id: UUID
+    seq: int
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class ExerciseRecord:
+    id: UUID
+    user_id: UUID
+    note_id: UUID
+    seq: int
+    name: str
+    instructions: str
+    kind: NoteExerciseKind
+    tempo_bpm: int | None
+    duration_min: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class QuizItemRecord:
+    id: UUID
+    user_id: UUID
+    note_id: UUID
+    seq: int
+    question: str
+    options: tuple[str, ...]
+    answer_index: int
+    explanation: str | None
+    concept_id: UUID | None
+
+
+@dataclass(slots=True)
+class ConceptRecord:
+    id: UUID
+    user_id: UUID
+    subject_id: UUID
+    name: str
+    name_norm: str
+
+
+@dataclass(frozen=True, slots=True)
+class NoteConceptRecord:
+    user_id: UUID
+    note_id: UUID
+    concept_id: UUID
+
+
+@dataclass(frozen=True, slots=True)
+class ConceptLinkRecord:
+    user_id: UUID
+    from_id: UUID
+    to_id: UUID
+    kind: LinkKind
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactRecord:
+    id: UUID
+    user_id: UUID
+    note_id: UUID
+    kind: ArtifactKind
+    title: str
+    html: str
+    bytes: int
+    created_at: datetime
+
+
+@dataclass(slots=True)
 class Tables:
     users: dict[UUID, UserRecord] = field(default_factory=dict)
     profiles: dict[UUID, Profile] = field(default_factory=dict)
@@ -200,6 +338,16 @@ class Tables:
     review_states: dict[UUID, ReviewStateRecord] = field(default_factory=dict)
     review_logs: list[ReviewLogRecord] = field(default_factory=list)
     audit: list[AuditRecord] = field(default_factory=list)
+    subjects: dict[UUID, SubjectRecord] = field(default_factory=dict)
+    sources: dict[UUID, SourceRecord] = field(default_factory=dict)
+    notes: dict[UUID, NoteRecord] = field(default_factory=dict)
+    note_passages: list[PassageRecord] = field(default_factory=list)
+    note_exercises: list[ExerciseRecord] = field(default_factory=list)
+    quiz_items: list[QuizItemRecord] = field(default_factory=list)
+    concepts: dict[UUID, ConceptRecord] = field(default_factory=dict)
+    note_concepts: list[NoteConceptRecord] = field(default_factory=list)
+    concept_links: list[ConceptLinkRecord] = field(default_factory=list)
+    note_artifacts: dict[UUID, ArtifactRecord] = field(default_factory=dict)
 
 
 class MemoryStore:
@@ -723,6 +871,507 @@ class MemoryReviewRepo(_Repo):
                 entry.rating = rating
 
 
+# --- subjects and notes --------------------------------------------------------------------
+#
+# The search is a model of the Postgres statement, not a copy (plan rulings 2 and 3): text and
+# query are normalised with `name_norm` and split into whole `\w+` tokens; a passage matches when
+# every query token is one of its tokens (no stemming, no stop words, no trigrams); concept seeds
+# are exact `name_norm` matches; the title fallback needs every token in the title.
+
+_WORD = re.compile(r"\w+")
+_MARK = re.compile(r"^(\W*)(.*?)(\W*)$", re.DOTALL)
+EXCERPT_WORDS = 25
+EXCERPT_LEAD = 8  # words kept before the first match, so the markers are always in the window
+MAX_SEEDS = 5
+MAX_DEPTH = 2
+FUZZY_MAX_TOKENS = 3
+
+
+def search_tokens(text: str) -> tuple[str, ...]:
+    return tuple(_WORD.findall(name_norm(text)))
+
+
+def excerpt(text: str, wanted: Collection[str]) -> str:
+    """25 words of the passage around the first matched word, that word inside `[[` `]]`
+    (punctuation stays outside the markers); plain text."""
+    words = text.split()
+    tokens = frozenset(wanted)
+    index = next((i for i, w in enumerate(words) if tokens & frozenset(search_tokens(w))), None)
+    if index is None:
+        return " ".join(words[:EXCERPT_WORDS])
+    start = max(0, index - EXCERPT_LEAD)
+    window = words[start : start + EXCERPT_WORDS]
+    match = _MARK.match(window[index - start])
+    if match is not None:
+        pre, core, post = match.groups()
+        window[index - start] = f"{pre}[[{core}]]{post}"
+    return " ".join(window)
+
+
+@dataclass(slots=True)
+class _Found:
+    passages: int = 0
+    excerpts: tuple[str, ...] = ()
+    concepts: list[tuple[int, str, str]] = field(default_factory=list)  # (depth, norm, name)
+
+
+def _subject_row(rec: SubjectRecord) -> SubjectRow:
+    return SubjectRow(
+        id=rec.id, subject=rec.subject, created_at=rec.created_at, updated_at=rec.updated_at
+    )
+
+
+def _source_row(rec: SourceRecord) -> SourceRow:
+    return SourceRow(
+        id=rec.id,
+        subject_id=rec.subject_id,
+        kind=rec.kind,
+        title=rec.title,
+        url=rec.url,
+        created_at=rec.created_at,
+    )
+
+
+def _note_row(rec: NoteRecord) -> NoteRow:
+    return NoteRow(
+        id=rec.id,
+        subject_id=rec.subject_id,
+        source_id=rec.source_id,
+        title=rec.title,
+        lesson_ref=rec.lesson_ref,
+        position=rec.position,
+        raw_text=rec.raw_text,
+        raw_had_nul=rec.raw_had_nul,
+        clean_text=rec.clean_text,
+        clean_version=rec.clean_version,
+        idempotency_key=rec.idempotency_key,
+        origin=rec.origin,
+        supersedes_note_id=rec.supersedes_note_id,
+        created_at=rec.created_at,
+        updated_at=rec.updated_at,
+    )
+
+
+def _artifact_row(rec: ArtifactRecord, *, with_html: bool) -> ArtifactRow:
+    return ArtifactRow(
+        id=rec.id,
+        note_id=rec.note_id,
+        kind=rec.kind,
+        title=rec.title,
+        html=rec.html if with_html else None,
+        bytes=rec.bytes,
+        created_at=rec.created_at,
+    )
+
+
+class MemorySubjectRepo(_Repo):
+    def _mine(self) -> list[SubjectRecord]:
+        return [s for s in self._t.subjects.values() if s.user_id == self._uid]
+
+    def _record(self, subject_id: UUID) -> SubjectRecord | None:
+        rec = self._t.subjects.get(subject_id)
+        return rec if rec is not None and rec.user_id == self._uid else None
+
+    def list(self) -> tuple[SubjectRow, ...]:
+        rows = sorted(
+            self._mine(), key=lambda s: (s.subject.status != "active", s.subject.name, s.id)
+        )
+        return tuple(_subject_row(s) for s in rows)
+
+    def get(self, subject_id: UUID) -> SubjectRow | None:
+        rec = self._record(subject_id)
+        return None if rec is None else _subject_row(rec)
+
+    def create(self, subject: Subject, now: datetime) -> SubjectRow:
+        rec = SubjectRecord(
+            id=uuid4(), user_id=self._uid, subject=subject, created_at=now, updated_at=now
+        )
+        self._t.subjects[rec.id] = rec
+        return _subject_row(rec)
+
+    def update(self, subject_id: UUID, subject: Subject, now: datetime) -> bool:
+        rec = self._record(subject_id)
+        if rec is None:
+            return False
+        rec.subject = subject
+        rec.updated_at = now
+        return True
+
+
+class MemoryNoteRepo(_Repo):
+    # --- ownership ---------------------------------------------------------------------------
+
+    def _mine(self) -> list[NoteRecord]:
+        return [n for n in self._t.notes.values() if n.user_id == self._uid]
+
+    def _subject(self, subject_id: UUID) -> SubjectRecord:
+        rec = self._t.subjects.get(subject_id)
+        if rec is None or rec.user_id != self._uid:
+            raise LookupError("subject not found")
+        return rec
+
+    def _source(self, source_id: UUID) -> SourceRecord | None:
+        rec = self._t.sources.get(source_id)
+        return rec if rec is not None and rec.user_id == self._uid else None
+
+    def _note(self, note_id: UUID) -> NoteRecord | None:
+        rec = self._t.notes.get(note_id)
+        return rec if rec is not None and rec.user_id == self._uid else None
+
+    def _concept_id(self, subject_id: UUID, concept: ConceptName) -> UUID:
+        """The subject's concept with this name_norm, created with this spelling if new."""
+        for rec in self._t.concepts.values():
+            if (
+                rec.user_id == self._uid
+                and rec.subject_id == subject_id
+                and rec.name_norm == concept.name_norm
+            ):
+                return rec.id
+        rec = ConceptRecord(
+            id=uuid4(),
+            user_id=self._uid,
+            subject_id=subject_id,
+            name=concept.name,
+            name_norm=concept.name_norm,
+        )
+        self._t.concepts[rec.id] = rec
+        return rec.id
+
+    # --- sources and notes -------------------------------------------------------------------
+
+    def upsert_source(self, subject_id: UUID, source: ValidSource, now: datetime) -> SourceRow:
+        self._subject(subject_id)
+        for rec in self._t.sources.values():
+            if (
+                rec.user_id == self._uid
+                and rec.subject_id == subject_id
+                and rec.kind == source.kind
+                and rec.title == source.title
+            ):
+                if source.url is not None:
+                    rec.url = source.url
+                return _source_row(rec)
+        rec = SourceRecord(
+            id=uuid4(),
+            user_id=self._uid,
+            subject_id=subject_id,
+            kind=source.kind,
+            title=source.title,
+            url=source.url,
+            created_at=now,
+        )
+        self._t.sources[rec.id] = rec
+        return _source_row(rec)
+
+    def source(self, source_id: UUID) -> SourceRow | None:
+        rec = self._source(source_id)
+        return None if rec is None else _source_row(rec)
+
+    def by_idempotency_key(self, key: str) -> NoteRow | None:
+        return next((_note_row(n) for n in self._mine() if n.idempotency_key == key), None)
+
+    def latest_by_lesson(
+        self, subject_id: UUID, source_id: UUID | None, lesson_ref: str
+    ) -> NoteRow | None:
+        found = [
+            n
+            for n in self._mine()
+            if n.subject_id == subject_id
+            and n.source_id == source_id
+            and n.lesson_ref == lesson_ref
+        ]
+        if not found:
+            return None
+        return _note_row(max(found, key=lambda n: (n.created_at, n.id)))
+
+    def insert(
+        self,
+        note: ValidNote,
+        *,
+        subject_id: UUID,
+        source_id: UUID | None,
+        origin: Origin,
+        supersedes: UUID | None,
+        now: datetime,
+    ) -> NoteRow:
+        self._subject(subject_id)
+        if source_id is not None:
+            source = self._source(source_id)
+            if source is None or source.subject_id != subject_id:
+                raise LookupError("source not found")
+        if supersedes is not None and self._note(supersedes) is None:
+            raise LookupError("note not found")
+        key = idempotency_key(subject_id, source_id, note.lesson_ref, note.raw_text)
+        if any(n.idempotency_key == key for n in self._mine()):
+            raise ValueError("duplicate idempotency key for this user")
+        rec = NoteRecord(
+            id=uuid4(),
+            user_id=self._uid,
+            subject_id=subject_id,
+            source_id=source_id,
+            title=note.title,
+            title_norm=name_norm(note.title),
+            lesson_ref=note.lesson_ref,
+            position=note.position,
+            raw_text=note.raw_text,
+            raw_had_nul=note.raw_had_nul,
+            raw_sha256=note.raw_sha256,
+            clean_text=note.clean_text,
+            clean_version=CLEAN_VERSION,
+            idempotency_key=key,
+            origin=origin,
+            supersedes_note_id=supersedes,
+            created_at=now,
+            updated_at=now,
+        )
+        self._t.notes[rec.id] = rec
+        for seq, text in enumerate(note.passages, start=1):
+            self._t.note_passages.append(PassageRecord(self._uid, rec.id, seq, text))
+        for seq, exercise in enumerate(note.exercises, start=1):
+            self._t.note_exercises.append(
+                ExerciseRecord(
+                    id=uuid4(),
+                    user_id=self._uid,
+                    note_id=rec.id,
+                    seq=seq,
+                    name=exercise.name,
+                    instructions=exercise.instructions,
+                    kind=exercise.kind,
+                    tempo_bpm=exercise.tempo_bpm,
+                    duration_min=exercise.duration_min,
+                )
+            )
+        for seq, item in enumerate(note.quiz_items, start=1):
+            self._t.quiz_items.append(
+                QuizItemRecord(
+                    id=uuid4(),
+                    user_id=self._uid,
+                    note_id=rec.id,
+                    seq=seq,
+                    question=item.question,
+                    options=item.options,
+                    answer_index=item.answer_index,
+                    explanation=item.explanation,
+                    concept_id=(
+                        self._concept_id(subject_id, item.concept)
+                        if item.concept is not None
+                        else None
+                    ),
+                )
+            )
+        for concept in note.concepts:
+            self._t.note_concepts.append(
+                NoteConceptRecord(self._uid, rec.id, self._concept_id(subject_id, concept))
+            )
+        for link in note.links:
+            edge = ConceptLinkRecord(
+                self._uid,
+                self._concept_id(subject_id, link.from_name),
+                self._concept_id(subject_id, link.to_name),
+                link.kind,
+            )
+            if edge not in self._t.concept_links:
+                self._t.concept_links.append(edge)
+        return _note_row(rec)
+
+    def get(self, note_id: UUID) -> NoteRow | None:
+        rec = self._note(note_id)
+        return None if rec is None else _note_row(rec)
+
+    def _passages_of(self, note_id: UUID) -> list[PassageRecord]:
+        rows = [p for p in self._t.note_passages if p.user_id == self._uid and p.note_id == note_id]
+        return sorted(rows, key=lambda p: p.seq)
+
+    def passages(self, note_id: UUID, start: int, stop: int) -> tuple[PassageRow, ...]:
+        return tuple(
+            PassageRow(seq=p.seq, text=p.text)
+            for p in self._passages_of(note_id)
+            if start <= p.seq <= stop
+        )
+
+    def passage_count(self, note_id: UUID) -> int:
+        return len(self._passages_of(note_id))
+
+    def exercises(self, note_id: UUID) -> tuple[ExerciseRow, ...]:
+        rows = sorted(
+            (e for e in self._t.note_exercises if e.user_id == self._uid and e.note_id == note_id),
+            key=lambda e: e.seq,
+        )
+        return tuple(
+            ExerciseRow(
+                id=e.id,
+                seq=e.seq,
+                name=e.name,
+                instructions=e.instructions,
+                kind=e.kind,
+                tempo_bpm=e.tempo_bpm,
+                duration_min=e.duration_min,
+            )
+            for e in rows
+        )
+
+    def quiz_items(self, note_id: UUID) -> tuple[QuizItemRow, ...]:
+        rows = sorted(
+            (q for q in self._t.quiz_items if q.user_id == self._uid and q.note_id == note_id),
+            key=lambda q: q.seq,
+        )
+        return tuple(
+            QuizItemRow(
+                id=q.id,
+                seq=q.seq,
+                question=q.question,
+                options=q.options,
+                answer_index=q.answer_index,
+                explanation=q.explanation,
+                concept=(self._t.concepts[q.concept_id].name if q.concept_id is not None else None),
+            )
+            for q in rows
+        )
+
+    def concepts(self, note_id: UUID) -> tuple[ConceptRow, ...]:
+        rows = sorted(
+            (
+                self._t.concepts[nc.concept_id]
+                for nc in self._t.note_concepts
+                if nc.user_id == self._uid and nc.note_id == note_id
+            ),
+            key=lambda c: (c.name_norm, c.id),
+        )
+        return tuple(
+            ConceptRow(id=c.id, subject_id=c.subject_id, name=c.name, name_norm=c.name_norm)
+            for c in rows
+        )
+
+    # --- artifacts ---------------------------------------------------------------------------
+
+    def artifacts(self, note_id: UUID) -> tuple[ArtifactRow, ...]:
+        rows = sorted(
+            (
+                a
+                for a in self._t.note_artifacts.values()
+                if a.user_id == self._uid and a.note_id == note_id
+            ),
+            key=lambda a: (a.created_at, a.id),
+        )
+        return tuple(_artifact_row(a, with_html=False) for a in rows)
+
+    def add_artifact(
+        self, note_id: UUID, kind: ArtifactKind, title: str, html: str, now: datetime
+    ) -> ArtifactRow:
+        if self._note(note_id) is None:
+            raise LookupError("note not found")
+        rec = ArtifactRecord(
+            id=uuid4(),
+            user_id=self._uid,
+            note_id=note_id,
+            kind=kind,
+            title=title,
+            html=html,
+            bytes=len(html.encode("utf-8")),
+            created_at=now,
+        )
+        self._t.note_artifacts[rec.id] = rec
+        return _artifact_row(rec, with_html=True)
+
+    def artifact(self, artifact_id: UUID) -> ArtifactRow | None:
+        rec = self._t.note_artifacts.get(artifact_id)
+        if rec is None or rec.user_id != self._uid:
+            return None
+        return _artifact_row(rec, with_html=True)
+
+    # --- search ------------------------------------------------------------------------------
+
+    def _hops(self, query_norm: str, subject_id: UUID | None) -> dict[UUID, int]:
+        """Concept id -> depth: exact-name seeds at 0, then `related` both ways and
+        `prerequisite` outgoing, two hops at most, each concept at its first depth."""
+        seeds = sorted(
+            (
+                c
+                for c in self._t.concepts.values()
+                if c.user_id == self._uid
+                and (subject_id is None or c.subject_id == subject_id)
+                and c.name_norm == query_norm
+            ),
+            key=lambda c: c.id,
+        )[:MAX_SEEDS]
+        depth = {c.id: 0 for c in seeds}
+        frontier = [c.id for c in seeds]
+        links = [edge for edge in self._t.concept_links if edge.user_id == self._uid]
+        for hop in range(1, MAX_DEPTH + 1):
+            reached: list[UUID] = []
+            for concept_id in frontier:
+                for edge in links:
+                    for other in _neighbours(edge, concept_id):
+                        if other not in depth:
+                            depth[other] = hop
+                            reached.append(other)
+            frontier = reached
+        return depth
+
+    def search(self, query: str, subject_id: UUID | None, limit: int) -> tuple[SearchHit, ...]:
+        tokens = search_tokens(query)
+        if not tokens or limit < 1:
+            return ()
+        wanted = frozenset(tokens)
+        notes = {n.id: n for n in self._mine() if subject_id is None or n.subject_id == subject_id}
+        found: dict[UUID, _Found] = {}
+        for note in notes.values():
+            matched = [
+                p.text
+                for p in self._passages_of(note.id)
+                if wanted <= frozenset(search_tokens(p.text))
+            ]
+            if matched:
+                found[note.id] = _Found(len(matched), (excerpt(matched[0], wanted),))
+        hops = self._hops(name_norm(query), subject_id)
+        for attached in self._t.note_concepts:
+            if (
+                attached.user_id == self._uid
+                and attached.note_id in notes
+                and attached.concept_id in hops
+            ):
+                concept = self._t.concepts[attached.concept_id]
+                entry = found.setdefault(attached.note_id, _Found())
+                entry.concepts.append((hops[concept.id], concept.name_norm, concept.name))
+        fuzzy = False
+        if not found and len(tokens) <= FUZZY_MAX_TOKENS:
+            fuzzy = True
+            for note in notes.values():
+                if wanted <= frozenset(search_tokens(note.title)):
+                    found[note.id] = _Found()
+        ordered = sorted(
+            found.items(),
+            key=lambda item: (
+                -(item[1].passages + len(item[1].concepts)),
+                min((d for d, _, _ in item[1].concepts), default=MAX_DEPTH + 1),
+                -notes[item[0]].updated_at.timestamp(),
+                item[0],
+            ),
+        )
+        return tuple(
+            SearchHit(
+                note_id=note_id,
+                passages=entry.passages,
+                concepts=tuple(name for _, _, name in sorted(entry.concepts)),
+                depth=min((d for d, _, _ in entry.concepts), default=None),
+                fuzzy=fuzzy,
+                excerpts=entry.excerpts,
+            )
+            for note_id, entry in ordered[:limit]
+        )
+
+
+def _neighbours(edge: ConceptLinkRecord, concept_id: UUID) -> tuple[UUID, ...]:
+    if edge.kind == "related":
+        if edge.from_id == concept_id:
+            return (edge.to_id,)
+        if edge.to_id == concept_id:
+            return (edge.from_id,)
+    elif edge.from_id == concept_id:  # prerequisite: from the required concept onwards
+        return (edge.to_id,)
+    return ()
+
+
 class MemoryAuditRepo(_Repo):
     def record(self, event: AuditEvent, meta: Mapping[str, Any], now: datetime) -> None:
         self._t.audit.append(
@@ -741,6 +1390,8 @@ class MemoryUnitOfWork:
         self.glossary: GlossaryRepo = MemoryGlossaryRepo(store, user_id)
         self.reviews: ReviewRepo = MemoryReviewRepo(store, user_id)
         self.audit: AuditRepo = MemoryAuditRepo(store, user_id)
+        self.subjects: SubjectRepo = MemorySubjectRepo(store, user_id)
+        self.notes: NoteRepo = MemoryNoteRepo(store, user_id)
 
 
 def memory_uow(store: MemoryStore) -> UowFactory:

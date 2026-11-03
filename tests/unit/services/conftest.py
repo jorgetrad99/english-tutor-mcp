@@ -9,10 +9,12 @@ from uuid import UUID
 import pytest
 
 from tutor.domain.profile import ProfileInput
+from tutor.domain.subjects import SubjectInput
 from tutor.services.context import Services
 from tutor.services.memory import MemoryIdentity, MemoryStore, memory_uow
 from tutor.services.ports import IdentityResolver, UowFactory
 from tutor.services.profile import save_profile
+from tutor.services.subjects import save_subject
 from tutor.services.views import SaveProfileResult
 
 NOW = datetime(2026, 10, 14, 15, 0, tzinfo=UTC)  # a Wednesday; 09:00 in Mexico City
@@ -52,6 +54,28 @@ def profile_input(**changes: Any) -> ProfileInput:
 def onboard(svc: Services, user_id: UUID, **changes: Any) -> SaveProfileResult:
     """Run save_profile with the default answers plus `changes`."""
     return save_profile(svc, user_id, profile_input(**changes))
+
+
+def subject_input(**changes: Any) -> SubjectInput:
+    """Valid subject answers (Guitarra, balanced, quiz + exercise, 30 min x 3 a week)."""
+    data: dict[str, Any] = {
+        "name": "Guitarra",
+        "goal_text": None,
+        "context_text": None,
+        "preference": "balanced",
+        "exercise_kinds": ["quiz", "exercise"],
+        "minutes_per_session": 30,
+        "sessions_per_week": 3,
+        "target_date": None,
+        "status": None,
+    }
+    data.update(changes)
+    return SubjectInput(**data)
+
+
+def create_subject(svc: Services, user_id: UUID, **changes: Any) -> UUID:
+    """Run save_subject with the default answers plus `changes`; the new subject's id."""
+    return save_subject(svc, user_id, subject_input(**changes)).subject.id
 
 
 @pytest.fixture

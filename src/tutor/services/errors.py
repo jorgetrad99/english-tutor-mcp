@@ -1,6 +1,9 @@
 """Closed error codes for the use cases (spec section 8.2). Never carries learner text."""
 
+from collections.abc import Iterable
 from typing import Literal
+
+from tutor.domain.errors import FieldError
 
 ErrorCode = Literal[
     "onboarding_needed",
@@ -21,3 +24,8 @@ class ServiceError(Exception):
         super().__init__(code)
         self.code: ErrorCode = code
         self.fields: tuple[str, ...] = fields
+
+
+def field_error(code: ErrorCode, errors: Iterable[FieldError]) -> ServiceError:
+    """The domain's field errors as one ServiceError: paths deduplicated, in order (ruling 13)."""
+    return ServiceError(code, tuple(dict.fromkeys(error.field for error in errors)))
