@@ -571,6 +571,98 @@ Replace with:
 | Data retention | Raw evidence 12 months, metrics indefinitely, provisional items 7 days, declined glossary items 30 days, website sessions 30 days at most, deleted accounts purged in 24 h |
 ```
 
+## Sections 1, 2, 4, 6, 7 and 16: Subjects v0, a second product line (spec 2026-11-02, ADR 0004)
+
+### E37. Subjects v0: the learner's own material, beside English
+
+Decided by the author on 2026-11-02. The English line and its gate are unchanged; this edit adds a second line, specified in `docs/superpowers/specs/2026-11-02-subjects-and-notes-design.md`, and relaxes exactly two rules for it (uploads on the website; MCP Apps in the stack). No LLM API call on the server and no vector database remain in force.
+
+**Section 1.** Find:
+
+```text
+- Remote MCP server (Streamable HTTP) with OAuth 2.1 login via Google.
+```
+
+Replace with:
+
+```text
+- Remote MCP server (Streamable HTTP) with OAuth 2.1 login via Google.
+- Subjects v0 (E37): the learner's own study material for any subject (first case: a guitar course), added through MCP tools in batches or as a PDF on the website; stored as received plus a cleaned copy; deterministic search (Postgres full-text search plus a concept graph); HTML lesson views shown in a sandboxed frame; a practice plan computed by the server; practice sessions with server-generated and server-graded exercises shown as an MCP App with a text fallback; attendance and results logged per session.
+```
+
+**Section 2, principle 5.** Find:
+
+```text
+5. **Zero setup for the user.** Google login, connect the MCP, say "start my lesson". No prompt engineering, no file uploads, no external apps (no Anki, no Notion).
+```
+
+Replace with:
+
+```text
+5. **Zero setup for the user.** Google login, connect the MCP, say "start my lesson". No prompt engineering, no external apps (no Anki, no Notion). The only file upload is a PDF of the learner's own subject material on the website (E37); the lesson loop never needs one.
+```
+
+**Section 4.** Find:
+
+```text
+**Deliberately not in the stack:** LLM API calls in the lesson loop, vector databases, Anki/AnkiConnect, Notion, message queues (v1).
+```
+
+Replace with:
+
+```text
+**Deliberately not in the stack:** LLM API calls anywhere on the server, vector databases, Anki/AnkiConnect, Notion, message queues (v1). Subject search (E37) is PostgreSQL full-text search (`unaccent`, `pg_trgm`, two language configurations) plus a concept graph in plain tables. MCP Apps (`io.modelcontextprotocol/ui`, a `ui://` HTML resource rendered by the client) are in the stack for the subject practice view only, with a text fallback.
+```
+
+**Section 6.** Find:
+
+```text
+Eleven tables carry v1; raw evidence lives in JSONB so metrics can be recomputed when the formulas change.
+```
+
+Replace with:
+
+```text
+Eleven tables carry v1 for English; raw evidence lives in JSONB so metrics can be recomputed when the formulas change. Subjects v0 (E37) adds its own user-scoped tables, all under row-level security: `subjects`, `sources`, `notes`, `note_passages`, `note_artifacts`, `exercises`, `quiz_items`, `concepts`, `note_concepts`, `concept_links`, `practice_plans`, `practice_sessions`, `practice_items`. Their columns and rules are in the 2026-11-02 spec; `notes.raw_text` is immutable.
+```
+
+**Section 7.** Find:
+
+```text
+Nine tools, three prompts and one `instructions` string make up the whole MCP contract. Every tool returns structured JSON plus a short `response_rules` field that tells the LLM how to speak next.
+```
+
+Replace with:
+
+```text
+Nine English tools, three prompts and one `instructions` string make up the English MCP contract. Subjects v0 (E37) adds eleven tools under the same rules: `get_subjects`, `save_subject`, `save_notes`, `save_artifact`, `get_artifact`, `search_notes`, `get_note`, `start_practice`, `next_exercise`, `record_result`, `end_practice`, plus one `ui://tutor/practice/v1/app.html` resource. Every tool returns structured JSON plus a short `response_rules` field that tells the LLM how to speak next.
+```
+
+**Section 16, the rule.** Find:
+
+```text
+The spike gates the core loop; the core loop gates everything else. Nothing in the plan engine, dashboard, billing or reporting is started before the gate decision on November 30, and the scope after the gate is re-estimated with the data from those 15 sessions.
+```
+
+Replace with:
+
+```text
+The spike gates the core loop; the core loop gates everything else. Nothing in the plan engine, dashboard, billing or reporting is started before the gate decision on November 30, and the scope after the gate is re-estimated with the data from those 15 sessions. Subjects v0 (E37) is the one exception: a second product line for the author's own use, built beside the gate from November 2 without moving the gate's dates or criteria.
+```
+
+**Section 16, the table.** Find:
+
+```text
+| Gate decision (Nov 30) | Continue, pivot (e.g. text-first), or stop. Scope and dates below are re-estimated here |
+```
+
+Replace with:
+
+```text
+| Gate decision (Nov 30) | Continue, pivot (e.g. text-first), or stop. Scope and dates below are re-estimated here |
+| Subjects v0 (Nov 2–Dec 15, beside the gate) | The author ingests one full guitar course (≥ 20 lessons) through Claude, asks 20 questions answered from the notes with the lesson cited, completes 8 practice sessions with the interactive view on claude.ai or Claude Desktop (or text-only if spike 05 fails), and sees notes, artifacts, plan status and attendance on the website. Migrations 0006 and 0007 applied in production without touching existing rows |
+```
+
 ## Checked, no edit needed
 
 - **Section 12, the Spanish rule.** The build applies "Spanish is used only for a meaning check on request, never for explanations longer than one sentence" in every phase (A36). The two exceptions are already in the requirements: the warm-up cue in section 8 ("the situation in Spanish or a paraphrase") and the onboarding prompts, which only exist in the spec.
