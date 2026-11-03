@@ -110,7 +110,7 @@ ANSWER_KINDS: tuple[AnswerKind, ...] = (
 # recomputes it (tutor.services.template_files.guide_sha256); change both together (plan
 # rulings 21 and 31).
 TEMPLATE_GUIDE_VERSION = 2
-TEMPLATE_CONTRACT_SHA256 = "82d2bf59500551f8fc9ac4d66e06c1887fca630eeec5873ea86508ec8617af36"
+TEMPLATE_CONTRACT_SHA256 = "81f465a101d9a403f01e306c92e9fe8e45abff4e32c3f35503dcc3241a546e3b"
 
 # Caps (plan ruling 24; spec 15.3, 15.4). The MCP schemas and migration 0006 restate them.
 NAME_MAX = 80
@@ -336,7 +336,12 @@ def contract_constants() -> Mapping[str, Any]:
         "numbers": "optional sign, digits, one decimal separator (. or ,) or a fraction p/q; "
         "no thousands separators (1,000 is refused; write 1000, or 1.000 for one)",
         "pool_draws": {
-            "none": {"picks": "-", "drawn": "null", "key": "the answer_key"},
+            "none": {
+                "picks": "-",
+                "drawn": 'null; for choice_index, {"options"}: the options_param list in '
+                "its authored order",
+                "key": "the answer_key",
+            },
             "one": {
                 "picks": "1 entry",
                 "drawn": '{"cue"}',
@@ -1213,7 +1218,17 @@ def _worst_drawn(spec: TemplateSpec, params: Mapping[str, object]) -> object:
     if spec.grading_kind == "exact_sequence":
         key = params.get(spec.by_role("answer_key")[0].name)
         return {"cues": key if isinstance(key, list) else []}
-    return None
+    return _authored_options(spec, params)
+
+
+def _authored_options(spec: TemplateSpec, params: Mapping[str, object]) -> object:
+    """An authored choice's options as `drawn.options`, in the order option_index counts, so
+    a bridge can word the answer (plan ruling 35); the options are prompt parameters already,
+    and the key is never part of it."""
+    if spec.pool_draw != "none" or spec.grading_kind != "choice_index" or not spec.options_param:
+        return None
+    options = params.get(spec.options_param)
+    return {"options": list(options)} if isinstance(options, list) else None
 
 
 def _worst_public_bytes(spec: TemplateSpec, params: Mapping[str, object]) -> int:
@@ -1339,7 +1354,7 @@ def _drawn(spec: TemplateSpec, params: Mapping[str, object], shown: Draw) -> obj
         key = params.get(spec.by_role("answer_key")[0].name)
         items = key if isinstance(key, list) else []
         return {"cues": [items[k] for k in shown.order]}
-    return None
+    return _authored_options(spec, params)
 
 
 def public_payload(
@@ -1463,7 +1478,7 @@ def render_text(
         if isinstance(drawn, Mapping):
             if "cue" in drawn:
                 lines.append(f"Pista: {drawn['cue']}")
-            if "options" in drawn:
+            if "options" in drawn and spec.pool_draw != "none":  # authored: listed above
                 lines += [f"{i}. {o}" for i, o in enumerate(drawn["options"], start=1)]
             if "cues" in drawn:
                 lines += [f"- {c}" for c in drawn["cues"]]

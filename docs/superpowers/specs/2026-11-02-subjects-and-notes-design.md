@@ -430,6 +430,7 @@ Two mechanisms give varied practice, and both are kept:
 | `one_of_choices` | 1 entry, plus `pool_count − 1` entries whose answers differ from it and from each other | `{cue, options}`: the answers, in a seeded order | the index of the drawn entry's answer in `options` |
 | `ordered` | `pool_count` entries | `{cues}`: their cues, in a seeded order that is not the sorted one | the cues sorted by `order` ascending |
 | (no pool) `exact_sequence` | — | `{cues}`: the key's items, in a seeded order that is not the right one | the `answer_key` list |
+| (no pool) `choice_index` | — | `{options}`: the `options_param` list in its authored order (slice A plan ruling 35) | the `answer_key` index |
 
 The `explain` of the drawn entry (or entries) is returned with the graded result, as a reveal. **Seeds:** a showing's seed is the first 8 bytes of `sha256(item_id)`; slice B stores `draw_seed` and the picked indexes (`draw`) on the practice item, and grading reads the stored indexes, never a recomputation. Outside practice (`create_instance`, `get_instance_view`, the website) the view is a **preview draw** seeded by the instance id; it is not graded and not stored. Within one practice session the server avoids repeating a pool entry while unused entries remain (slice B).
 

@@ -815,6 +815,30 @@ def test_choices_payload_shows_answers_only_as_options() -> None:
     assert "because" not in json.dumps(payload)
 
 
+def test_authored_choice_payload_carries_its_options_but_never_the_key() -> None:
+    # Contract review: the artifact bridge words an option_index from drawn.options, so an
+    # authored choice sends its options there too, in the authored order the index counts.
+    spec = ok(CHOICE)
+    values = params_ok(spec, *choice_params())
+    payload = public_payload(INSTANCE, spec, values, draw(spec, values, 7))
+    assert payload["drawn"] == {"options": ["Do", "Re", "Mi"]}
+    assert payload["params"] == {"question": "¿Qué acorde es?", "options": ["Do", "Re", "Mi"]}
+    text = encode_payload(payload)
+    assert '"right"' not in text and "Porque" not in text  # no key name, no reveal
+    assert set(payload) == {
+        "v",
+        "instance_id",
+        "template_purpose",
+        "grading_kind",
+        "ui_lang",
+        "params",
+        "drawn",
+        "labels",
+    }
+    shown = render_text(spec, values, Draw(), "Elige.")
+    assert shown.count("Do") == 1  # the text view lists the options once
+
+
 def test_sequence_payloads() -> None:
     steps = params_ok(ok(STEPS), ParamPair("steps", "text_list", ["a", "b", "c"]))
     shown = Draw(order=(2, 0, 1))
