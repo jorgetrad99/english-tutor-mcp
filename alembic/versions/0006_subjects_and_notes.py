@@ -13,6 +13,7 @@ Revises: 0005
 Create Date: 2026-11-02
 """
 
+import os
 from collections.abc import Sequence
 from typing import Any
 
@@ -27,6 +28,10 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 CURRENT_USER_ID = "nullif(current_setting('app.user_id', true), '')::uuid"
+
+# The downgrade drops every table below: it runs only when `notes` and `subjects` are empty (as
+# seen by a role that bypasses RLS) or when the operator sets this variable to "1".
+DESTRUCTIVE_DOWNGRADE_FLAG = "TUTOR_ALLOW_DESTRUCTIVE_DOWNGRADE"
 
 # Creation order; the downgrade drops in reverse.
 TABLES = (
@@ -154,11 +159,32 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    _refuse_to_drop_learner_data()
     for table in reversed(TABLES):
         op.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
     for name, _, _ in TEXT_SEARCH_CONFIGURATIONS:
         op.execute(f"DROP TEXT SEARCH CONFIGURATION IF EXISTS {name}")
     # The extensions stay: harmless, and possibly shared with other schemas.
+
+
+def _refuse_to_drop_learner_data() -> None:
+    if os.environ.get(DESTRUCTIVE_DOWNGRADE_FLAG) == "1":
+        return
+    conn = op.get_bind()
+    # Under FORCE RLS a role that does not bypass it sees no rows, so an empty count proves
+    # nothing; only a superuser or BYPASSRLS role can tell the tables are really empty.
+    sees_all = conn.execute(
+        sa.text("SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user")
+    ).scalar_one()
+    has_data = conn.execute(
+        sa.text("SELECT EXISTS (SELECT 1 FROM notes) OR EXISTS (SELECT 1 FROM subjects)")
+    ).scalar_one()
+    if has_data or not sees_all:
+        reason = "notes or subjects hold rows" if has_data else "this role cannot see past RLS"
+        raise RuntimeError(
+            f"Refusing to downgrade 0006: it drops ten tables of learner data and {reason}."
+            f" Take a backup, then rerun with {DESTRUCTIVE_DOWNGRADE_FLAG}=1 to drop them."
+        )
 
 
 def _create_extensions_and_configurations() -> None:

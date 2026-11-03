@@ -5,16 +5,18 @@ from datetime import datetime
 from uuid import UUID
 
 import pytest
+from alembic.config import Config
 from psycopg.errors import InsufficientPrivilege
 from repo_contract import add_note, long_paragraph, sample_subject, valid_note
 from sqlalchemy import Engine, inspect, text
 from sqlalchemy.exc import DBAPIError
 
+from alembic import command
 from tutor.db.repos.notes import SEARCH_SQL, search_params
 from tutor.db.uow import scoped_connection
 from tutor.services.ports import UowFactory
 
-from .conftest import run_alembic
+from .conftest import ROOT, run_alembic
 
 pytestmark = pytest.mark.integration
 
@@ -162,3 +164,80 @@ def test_search_uses_the_gin_index_over_a_thousand_passages(
         assert uow.notes.passage_count(note.id) == 1001
     assert (hit.note_id, hit.passages, hit.fuzzy) == (note.id, 1, False)
     assert len(hit.excerpts) == 1 and "[[palabra777]]" in hit.excerpts[0]
+
+
+# The downgrade drops ten tables of learner data: it refuses unless they are empty or the
+# operator sets the flag (runbook, "Upgrades and migrations").
+DESTRUCTIVE_FLAG = "TUTOR_ALLOW_DESTRUCTIVE_DOWNGRADE"
+
+
+def _tables_present(engine: Engine) -> bool:
+    return set(NEW_TABLES) <= set(inspect(engine).get_table_names())
+
+
+def test_downgrade_refuses_while_a_subject_exists(
+    engine: Engine,
+    uow_factory: UowFactory,
+    user_id: UUID,
+    now: datetime,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(DESTRUCTIVE_FLAG, raising=False)
+    with uow_factory(user_id) as uow:
+        uow.subjects.create(sample_subject(), now)
+    with pytest.raises(RuntimeError, match=DESTRUCTIVE_FLAG):
+        run_alembic(engine, "downgrade", "0005")
+    assert _tables_present(engine)
+    monkeypatch.setenv(DESTRUCTIVE_FLAG, "yes")  # only "1" counts
+    with pytest.raises(RuntimeError, match=DESTRUCTIVE_FLAG):
+        run_alembic(engine, "downgrade", "0005")
+    assert _tables_present(engine)
+
+
+def test_downgrade_proceeds_over_data_with_the_flag(
+    engine: Engine,
+    uow_factory: UowFactory,
+    user_id: UUID,
+    now: datetime,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with uow_factory(user_id) as uow:
+        subject_id = uow.subjects.create(sample_subject(), now).id
+        add_note(uow, subject_id, valid_note("Clase", long_paragraph("texto.")), now)
+    monkeypatch.setenv(DESTRUCTIVE_FLAG, "1")
+    run_alembic(engine, "downgrade", "0005")
+    assert set(inspect(engine).get_table_names()).isdisjoint(NEW_TABLES)
+    run_alembic(engine, "upgrade", "head")
+    assert _tables_present(engine)
+
+
+def test_downgrade_proceeds_on_empty_tables_without_the_flag(
+    engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv(DESTRUCTIVE_FLAG, raising=False)
+    run_alembic(engine, "downgrade", "0005")
+    assert set(inspect(engine).get_table_names()).isdisjoint(NEW_TABLES)
+    run_alembic(engine, "upgrade", "head")
+    assert _tables_present(engine)
+
+
+def test_downgrade_refuses_when_row_level_security_hides_the_rows(
+    engine: Engine,
+    uow_factory: UowFactory,
+    user_id: UUID,
+    now: datetime,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A role that does not bypass RLS sees empty tables whatever they hold, so the check
+    cannot tell; without the flag the downgrade refuses rather than trust an empty count."""
+    monkeypatch.delenv(DESTRUCTIVE_FLAG, raising=False)
+    with uow_factory(user_id) as uow:
+        uow.subjects.create(sample_subject(), now)
+    cfg = Config(str(ROOT / "alembic.ini"))
+    with pytest.raises(RuntimeError, match=DESTRUCTIVE_FLAG), engine.begin() as conn:
+        # Alembic must read its version row as that role; the refusal rolls the grant back.
+        conn.execute(text("GRANT SELECT ON alembic_version TO tutor_app"))
+        conn.execute(text("SET LOCAL ROLE tutor_app"))
+        cfg.attributes["connection"] = conn
+        command.downgrade(cfg, "0005")
+    assert _tables_present(engine)
