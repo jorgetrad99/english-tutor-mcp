@@ -185,7 +185,7 @@ def guide_sha256() -> str:
     """What `TEMPLATE_CONTRACT_SHA256` must equal: the contract constants, every rendered guide
     section and every example file (plan rulings 21 and 31). Text is read with universal
     newlines, so a checkout's line endings do not change it."""
-    sections = {section: guide_section(section) for section in GUIDE_SECTIONS}
+    sections: dict[str, str] = {section: guide_section(section) for section in GUIDE_SECTIONS}
     return guide_digest(contract_constants(), sections, example_files())
 
 

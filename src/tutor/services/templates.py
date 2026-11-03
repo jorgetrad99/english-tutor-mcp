@@ -300,6 +300,13 @@ def preview(template: TemplateRow, instance: InstanceRow) -> tuple[str, str]:
     return document, render_text(spec, instance.params, shown, instance.prompt_text)
 
 
+def preview_text(template: TemplateRow, instance: InstanceRow) -> str:
+    """The text view alone, from the same preview draw as `preview`."""
+    spec = template.spec
+    shown = draw(spec, instance.params, seed_for(instance.id))
+    return render_text(spec, instance.params, shown, instance.prompt_text)
+
+
 def raise_collected(not_found: Sequence[str], errors: Sequence[FieldError]) -> None:
     """`not_found` first (an id the learner does not have), then `validation_failed`."""
     if not_found:
@@ -314,9 +321,12 @@ def create_instance(
     subject_id: UUID,
     data: InstanceInput,
     note_id: UUID | None = None,
+    *,
+    include_document: bool = False,
 ) -> InstanceSaved:
     """Store one instance of a subject's template outside ingest (spec 15.9), optionally on a
-    note of the same subject, and return its view. Not graded."""
+    note of the same subject, and return its text view; the composed document only when
+    `include_document` (plan ruling 37: get_instance_view shows a stored one). Not graded."""
     now = svc.clock()
     with svc.uow(user_id) as uow:
         if uow.subjects.get(subject_id) is None:
@@ -332,7 +342,11 @@ def create_instance(
         if resolved is None:  # pragma: no cover - raise_collected raised
             raise ServiceError("validation_failed")
         row, outcome = store_instance(uow, subject_id, note_id, resolved, "class", now)
-        document, text = preview(resolved.template, row)
+        document: str | None = None
+        if include_document:
+            document, text = preview(resolved.template, row)
+        else:
+            text = preview_text(resolved.template, row)
         return InstanceSaved(
             instance_id=row.id, outcome=outcome, purpose=row.purpose, document=document, text=text
         )

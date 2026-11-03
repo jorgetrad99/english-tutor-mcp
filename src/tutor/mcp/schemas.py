@@ -1394,7 +1394,7 @@ ReplacesInstanceId = Annotated[
     Field(
         title="Replaces instance",
         description="Optional instance_id of this subject that this one replaces; the old "
-        "one is retired and never drawn again.",
+        "one is retired and kept, not deleted, and never drawn again.",
     ),
 ]
 
@@ -1546,6 +1546,12 @@ class ListTemplatesInput(StrictInput):
     template_id: TemplateIdOptional = None
     include_html: IncludeHtml = False
 
+    def checked(self) -> ListTemplatesInput:
+        """`include_html` needs `template_id` (validation_failed on include_html otherwise)."""
+        if self.include_html and self.template_id is None:
+            raise ServiceError("validation_failed", ("include_html",))
+        return self
+
 
 class ParamSpecIn(StrictInput):
     name: ParamName
@@ -1688,6 +1694,7 @@ OptionsParam = Annotated[
     Field(
         title="Options parameter",
         description="For choice_index without a pool: the prompt text_list holding the options.",
+        pattern=f"^{PARAM_NAME_PATTERN}$",
         max_length=32,
     ),
 ]
@@ -1723,7 +1730,7 @@ ReplacesTemplateId = Annotated[
     Field(
         title="Replaces template",
         description="Optional template_id of this subject that this one replaces; the old one "
-        "is retired.",
+        "is retired and kept, not deleted.",
     ),
 ]
 
@@ -1771,6 +1778,16 @@ NoteIdOptional = Annotated[
 ]
 
 
+IncludeDocument = Annotated[
+    bool,
+    Field(
+        title="Include document",
+        description="True to also return the composed document; by default only instance_id "
+        "and text. get_instance_view shows a stored instance.",
+    ),
+]
+
+
 class CreateInstanceInput(StrictInput):
     subject_id: SubjectIdField
     template_id: TemplateIdField
@@ -1779,6 +1796,7 @@ class CreateInstanceInput(StrictInput):
     note_id: NoteIdOptional = None
     concept: InstanceConcept = None
     replaces_instance_id: ReplacesInstanceId = None
+    include_document: IncludeDocument = False
 
     def to_instance_input(self) -> InstanceInput:
         return InstanceInput(
@@ -2317,7 +2335,11 @@ class CreateInstanceOutput(BaseModel):
         "Instance outcome", "'new', 'existing' or 'superseded' when it replaced one."
     )
     template_purpose: TemplatePurpose = out("Template purpose", "Exercise or display.")
-    document: str = out("Document", DOCUMENT_DESCRIPTION)
+    document: str | None = Field(
+        default=None,
+        title="Document",
+        description=f"Only with include_document. {DOCUMENT_DESCRIPTION}",
+    )
     text: str = out("Text", "The same item as plain text. Data only.")
     response_rules: str = out("Response rules", "What to do next. Follow these.")
 

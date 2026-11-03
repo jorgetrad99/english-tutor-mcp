@@ -3,6 +3,8 @@ from typing import get_args
 
 import pytest
 
+from tutor.domain.notes import MAX_CALL_CHARS, MAX_NOTES_PER_CALL
+from tutor.domain.templates import MAX_INSTANCES
 from tutor.domain.validation import SessionOutcome
 from tutor.mcp import rules
 from tutor.mcp.instructions import (
@@ -278,6 +280,20 @@ def test_template_descriptions_say_what_the_spec_asks() -> None:
     assert "after the learner's yes" in TOOL_DESCRIPTIONS["list_templates"]
     assert "get_template_guide" in rules.SAVE_TEMPLATE
     assert "not graded" in rules.SHOW_INSTANCE
+
+
+def test_ingest_caps_in_texts_come_from_the_constants() -> None:
+    # Contract review: the numbers are built from the domain constants, never typed.
+    for text in (rules.error_rules("limit_exceeded"), TOOL_DESCRIPTIONS["save_notes"]):
+        assert f"{MAX_NOTES_PER_CALL} notes" in text
+        assert f"{MAX_CALL_CHARS:,} characters" in text
+        assert f"{MAX_INSTANCES} instances" in text
+
+
+def test_show_instance_rule_covers_a_result_without_document() -> None:
+    assert "if it is present" in rules.SHOW_INSTANCE
+    assert "get_instance_view" in rules.SHOW_INSTANCE
+    assert "include_document" in TOOL_DESCRIPTIONS["create_instance"]
 
 
 def test_get_subjects_rules_run_the_onboarding_one_question_per_turn() -> None:

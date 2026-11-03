@@ -1,7 +1,8 @@
 """Server instructions (spec 8.3, <= 400 words), tool descriptions (<= 120 words), the prompt."""
 
 from tutor.domain.html_guard import MAX_TEMPLATE_BYTES
-from tutor.domain.notes import MAX_NOTE_CHARS
+from tutor.domain.notes import MAX_CALL_CHARS, MAX_NOTE_CHARS, MAX_NOTES_PER_CALL
+from tutor.domain.templates import MAX_INSTANCES
 
 INSTRUCTIONS = (
     "You are an English tutor for Spanish-speaking professionals. Speak English unless the "
@@ -108,13 +109,14 @@ SAVE_SUBJECT_DESCRIPTION = (
 )
 SAVE_NOTES_DESCRIPTION = (
     "Call to store the learner's material for a subject: one note per lesson, sent in order, "
-    "with the optional source it comes from. At most 4 notes and 16,000 characters of "
-    "raw_text per call (64 KB in all); if a note's text is over "
+    f"with the optional source it comes from. At most {MAX_NOTES_PER_CALL} notes and "
+    f"{MAX_CALL_CHARS:,} characters of raw_text per call (64 KB in all); if a note's text is over "
     f"{MAX_NOTE_CHARS:,} characters, split it into several notes with the same lesson_ref plus "
     "a suffix ('... / parte 2'). Send the text as given; you may fix "
     "obvious extraction damage. Describe images in text; never download media. Add the "
-    "lesson's concepts and links, and up to 12 instances per note: a template_id from "
-    "list_templates for this subject with parameters taken from the lesson. Sending the same "
+    f"lesson's concepts and links, and up to {MAX_INSTANCES} instances per note: a "
+    "template_id from list_templates for this subject with parameters taken from the lesson. "
+    "Sending the same "
     "lesson again changes nothing; a corrected text replaces it."
 )
 GET_TEMPLATE_GUIDE_DESCRIPTION = (
@@ -147,7 +149,8 @@ CREATE_INSTANCE_DESCRIPTION = (
     "Call to make one item from a subject's template outside save_notes, for example during a "
     "lesson: the template_id, parameters from the material and prompt_text, optionally a "
     "note_id and replaces_instance_id. The same item twice is stored once. Returns the "
-    "instance_id, the view as document and as text. It is not graded; a pool instance shows "
+    "instance_id and the item as text; send include_document true to also get the composed "
+    "document (get_instance_view shows a stored one). It is not graded; a pool instance shows "
     "a preview draw."
 )
 GET_INSTANCE_VIEW_DESCRIPTION = (

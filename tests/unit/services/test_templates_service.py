@@ -265,12 +265,15 @@ def test_create_instance_new_then_existing_with_a_preview(
     subject_id = create_subject(svc, user_id)
     template_id = saved(svc, user_id, subject_id, NUMERIC)
     data = InstanceInput(template_id, numeric_params(), "Resuelve.")
-    first = create_instance(svc, user_id, subject_id, data)
+    first = create_instance(svc, user_id, subject_id, data, include_document=True)
     assert (first.outcome, first.purpose) == ("new", "exercise")
     assert first.text == "Resuelve.\nEtiqueta problem: 2 + 2\nResponde con un número."
+    assert first.document is not None
     assert first.document.count('id="tutor-params"') == 1 and 'id="tutor-bridge"' in first.document
-    again = create_instance(svc, user_id, subject_id, data)
+    again = create_instance(svc, user_id, subject_id, data, include_document=True)
     assert again == dataclasses.replace(first, outcome="existing")
+    plain = create_instance(svc, user_id, subject_id, data)  # the default: no document
+    assert plain == dataclasses.replace(first, outcome="existing", document=None)
     view = get_instance_view(svc, user_id, first.instance_id)
     assert (view.document, view.text, view.purpose, view.status) == (
         first.document,
@@ -280,6 +283,7 @@ def test_create_instance_new_then_existing_with_a_preview(
     )
     assert [e["instance_outcome"] for e in events(store, user_id, "instance_created")] == [
         "new",
+        "existing",
         "existing",
     ]
     assert events(store, user_id, "instance_created")[0] == {
@@ -300,15 +304,29 @@ def test_review_focus_7_views_never_show_keys_reveals_or_undrawn_entries(
     numeric = saved(svc, user_id, subject_id, NUMERIC)
     flash = saved(svc, user_id, subject_id, FLASHCARD)
     shown: list[InstanceSaved] = [
-        create_instance(svc, user_id, subject_id, InstanceInput(numeric, numeric_params(), "R.")),
-        create_instance(svc, user_id, subject_id, InstanceInput(flash, flashcard_params(6), "T.")),
+        create_instance(
+            svc,
+            user_id,
+            subject_id,
+            InstanceInput(numeric, numeric_params(), "R."),
+            include_document=True,
+        ),
+        create_instance(
+            svc,
+            user_id,
+            subject_id,
+            InstanceInput(flash, flashcard_params(6), "T."),
+            include_document=True,
+        ),
     ]
     for result in shown:
         view = get_instance_view(svc, user_id, result.instance_id)
+        assert result.document is not None
         for text in (result.document, result.text, view.document, view.text):
             assert not any(leak in text for leak in LEAKS), text
     # The pool preview shows exactly one drawn cue, the same on every view.
     pool_doc = shown[1].document
+    assert pool_doc is not None
     assert sum(f"cue {i}" in pool_doc for i in range(6)) == 1
     assert get_instance_view(svc, user_id, shown[1].instance_id).document == pool_doc
 

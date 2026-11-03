@@ -122,10 +122,17 @@ async def test_list_tools_follows_the_mcp_contract() -> None:
             for field, prop in obj["properties"].items():
                 assert prop.get("title") and prop.get("description"), (name, field)
     assert tools["get_profile"].annotations.read_only_hint is True
-    for name in ("save_profile", "record_review", "end_session"):
-        assert tools[name].annotations.idempotent_hint is True
-    for name in ("record_review", "save_glossary", "end_session"):
-        assert tools[name].annotations.destructive_hint is False
+    for name in (
+        "save_profile",
+        "record_review",
+        "end_session",
+        "save_notes",
+        "save_template",
+        "create_instance",
+    ):
+        assert tools[name].annotations.idempotent_hint is True, name
+    for name in ("record_review", "save_glossary", "end_session", "save_template"):
+        assert tools[name].annotations.destructive_hint is False, name
     assert tools["end_session"].input_schema["properties"]["user_turns"]["title"] == "User turns"
 
 

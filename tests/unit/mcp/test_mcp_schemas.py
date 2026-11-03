@@ -31,6 +31,7 @@ from tutor.mcp.schemas import (
     RAW_EVIDENCE_MAX_BYTES,
     EndSessionInput,
     GlossaryItemInput,
+    ListTemplatesInput,
     SaveProfileInput,
     SaveTemplateInput,
     StartLessonInput,
@@ -494,6 +495,30 @@ def test_save_profile_input_converts_without_timezone() -> None:
     assert raw.timezone is None
 
 
+def test_include_html_needs_a_template_id() -> None:
+    subject_id = uuid4()
+    with pytest.raises(ServiceError) as info:
+        ListTemplatesInput(subject_id=subject_id, include_html=True).checked()
+    assert (info.value.code, info.value.fields) == ("validation_failed", ("include_html",))
+    one = ListTemplatesInput(subject_id=subject_id, template_id=uuid4(), include_html=True)
+    assert one.checked() is one
+
+
+def test_replaces_descriptions_say_the_old_one_is_kept() -> None:
+    for model, field in (
+        (SaveTemplateInput, "replaces_template_id"),
+        (schemas.CreateInstanceInput, "replaces_instance_id"),
+        (schemas.InstanceIn, "replaces_instance_id"),
+    ):
+        description = model.model_fields[field].description or ""
+        assert "the old one is retired and kept, not deleted" in description, (model, field)
+
+
+def test_create_instance_leaves_the_document_out_by_default() -> None:
+    assert schemas.CreateInstanceInput.model_validate(create_args()).include_document is False
+    assert schemas.CreateInstanceOutput.model_fields["document"].default is None
+
+
 def test_needs_view_description_names_no_field_of_study() -> None:
     description = SaveTemplateInput.model_fields["needs_view"].description or ""
     assert "such as one that needs a sound, drawing or other interaction" in description
@@ -631,6 +656,12 @@ EDGE_CASES: list[tuple[str, dict[str, Any], tuple[Any, ...], Any]] = [
     ("save_template", template_args(), ("params", 0, "param_type"), "image"),
     ("save_template", template_args(), ("params", 0, "label"), "x" * 61),
     ("save_template", template_args(), ("pool_count",), 13),
+    ("save_template", template_args(), ("params",), template_args()["params"] * 9),
+    ("save_template", template_args(), ("text_match",), "fuzzy"),
+    ("save_template", template_args(), ("pool_draw",), "two"),
+    ("save_template", template_args(), ("options_param",), "x" * 33),
+    ("save_template", template_args(), ("options_param",), "Bad name"),
+    ("create_instance", create_args(), ("include_document",), "sometimes"),
     ("create_instance", create_args(), ("params",), [{"name": "q", "text": "a"}] * 9),
     ("create_instance", create_args(), ("params", 1, "pool"), [{"cue": "a", "answer": "b"}] * 201),
     ("create_instance", create_args(), ("params", 1, "pool", 0, "cue"), "x" * 201),

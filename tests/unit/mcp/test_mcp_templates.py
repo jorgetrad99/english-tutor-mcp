@@ -147,7 +147,11 @@ async def test_each_worked_example_saves_and_shows_an_instance(name: str) -> Non
         made = await call(
             client,
             "create_instance",
-            {"subject_id": subject_id, **instance_args(name, str(saved["template_id"]))},
+            {
+                "subject_id": subject_id,
+                "include_document": True,
+                **instance_args(name, str(saved["template_id"])),
+            },
         )
         view = await call(client, "get_instance_view", {"instance_id": made["instance_id"]})
         again = await call(client, "save_template", template_args(subject_id, name))
@@ -158,6 +162,21 @@ async def test_each_worked_example_saves_and_shows_an_instance(name: str) -> Non
     assert view["instance_status"] == "active"
     assert made["document"].count('id="tutor-params"') == 1
     assert TEMPLATE_MARKER not in made["document"]  # filled at the marker
+
+
+@pytest.mark.asyncio
+async def test_create_instance_returns_text_without_the_document_by_default() -> None:
+    # Contract review: the document is large; get_instance_view shows a stored instance.
+    async with Client(World().mcp) as client:
+        subject_id = await new_subject(client)
+        numeric = await save(client, subject_id, "numeric")
+        args = {"subject_id": subject_id, **instance_args("numeric", numeric)}
+        made = await call(client, "create_instance", args)
+        view = await call(client, "get_instance_view", {"instance_id": made["instance_id"]})
+        again = await call(client, "create_instance", {**args, "include_document": True})
+    assert made.get("document") is None and made["text"] == view["text"]
+    assert made["response_rules"] == rules.SHOW_INSTANCE
+    assert again["instance_outcome"] == "existing" and again["document"] == view["document"]
 
 
 # --- notes with instances and what a client may see ---------------------------------------------
@@ -222,7 +241,9 @@ async def test_review_focus_8_parameters_stay_json_inside_the_marker() -> None:
         for p in args["params"]:
             if p["name"] == "problem":
                 p["text"] = hostile
-        made = await call(client, "create_instance", {"subject_id": subject_id, **args})
+        made = await call(
+            client, "create_instance", {"subject_id": subject_id, "include_document": True, **args}
+        )
     document = made["document"]
     assert hostile not in document
     assert document.count("<script") == example("numeric")["html"].count("<script") + 1

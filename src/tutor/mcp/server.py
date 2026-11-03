@@ -234,6 +234,9 @@ def _register_subject_tools(mcp: FastMCP, svc: Services) -> None:
         include_html: s.IncludeHtml = False,
     ) -> s.ListTemplatesOutput:
         def run() -> s.ListTemplatesOutput:
+            s.ListTemplatesInput(
+                subject_id=subject_id, template_id=template_id, include_html=include_html
+            ).checked()
             view = templates_svc.list_templates(svc, _user(), subject_id, template_id, include_html)
             return s.ListTemplatesOutput.of(view, rules.LIST_TEMPLATES)
 
@@ -297,6 +300,7 @@ def _register_subject_tools(mcp: FastMCP, svc: Services) -> None:
         note_id: s.NoteIdOptional = None,
         concept: s.InstanceConcept = None,
         replaces_instance_id: s.ReplacesInstanceId = None,
+        include_document: s.IncludeDocument = False,
     ) -> s.CreateInstanceOutput:
         def run() -> s.CreateInstanceOutput:
             args = s.CreateInstanceInput(
@@ -307,9 +311,15 @@ def _register_subject_tools(mcp: FastMCP, svc: Services) -> None:
                 note_id=note_id,
                 concept=concept,
                 replaces_instance_id=replaces_instance_id,
+                include_document=include_document,
             )
             saved = templates_svc.create_instance(
-                svc, _user(), subject_id, args.to_instance_input(), note_id
+                svc,
+                _user(),
+                subject_id,
+                args.to_instance_input(),
+                note_id,
+                include_document=include_document,
             )
             return s.CreateInstanceOutput.of(saved, rules.SHOW_INSTANCE)
 
@@ -373,7 +383,13 @@ def _register_subject_tools(mcp: FastMCP, svc: Services) -> None:
         mcp,
         save_template,
         s.SaveTemplateInput,
-        ToolAnnotations(title="Save template", destructive_hint=False, open_world_hint=False),
+        # The same spec and HTML twice is one template (`existing`), so a retry is harmless.
+        ToolAnnotations(
+            title="Save template",
+            idempotent_hint=True,
+            destructive_hint=False,
+            open_world_hint=False,
+        ),
     )
     _register(
         mcp,

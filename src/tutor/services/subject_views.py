@@ -197,7 +197,7 @@ class InstanceSaved:
     instance_id: UUID
     outcome: InstanceOutcome
     purpose: TemplatePurpose
-    document: str
+    document: str | None  # only when asked (include_document); get_instance_view shows one
     text: str
 
 
