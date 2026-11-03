@@ -278,7 +278,7 @@ def test_app_role_may_only_retire_templates_and_instances(
     engine: Engine, uow_factory: UowFactory, user_id: UUID, now: datetime
 ) -> None:
     _, _, template_id, instance_id = _seed_template(uow_factory, user_id, now)
-    ids = {"id": template_id}
+    ids: dict[str, object] = {"id": template_id}
     for sql in (
         "UPDATE exercise_templates SET html = html WHERE id = :id",
         "UPDATE exercise_templates SET params = params WHERE id = :id",

@@ -42,10 +42,13 @@ SUBJECT_TOOLS = {
     "get_subjects",
     "save_subject",
     "save_notes",
-    "save_artifact",
-    "get_artifact",
     "search_notes",
     "get_note",
+    "get_template_guide",
+    "list_templates",
+    "save_template",
+    "create_instance",
+    "get_instance_view",
 }
 
 

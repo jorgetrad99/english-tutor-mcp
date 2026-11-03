@@ -1,5 +1,6 @@
-"""The seven subjects tools through the in-process FastMCP client over the memory store
-(subjects spec 3-5, 7.1, 7.3; plan rulings 1, 10-12; Review Focus 2, 4, 5, 6)."""
+"""The subjects, notes and search tools through the in-process FastMCP client over the memory
+store (subjects spec 3-5, 7.1, 7.3; plan rulings 1, 10-12; Review Focus 2, 5, 6). The template
+tools: test_mcp_templates.py."""
 
 from __future__ import annotations
 
@@ -14,15 +15,12 @@ from fastmcp import Client
 from mcp_lesson import NOW, Clock, call, text_of
 
 from tutor.app import MAX_BODY_BYTES, BodySizeGuard, Message, Receive, Scope, Send
-from tutor.domain.html_guard import MAX_ARTIFACT_BYTES
 from tutor.domain.notes import (
     LESSON_REF_MAX,
     MAX_CALL_CHARS,
     MAX_CONCEPTS,
     MAX_NOTE_CHARS,
     MAX_NOTES_PER_CALL,
-    MAX_QUIZ_ITEMS,
-    OPTION_MAX,
     NoteInput,
 )
 from tutor.domain.notes import (
@@ -44,10 +42,13 @@ SUBJECT_TOOLS = (
     "get_subjects",
     "save_subject",
     "save_notes",
-    "save_artifact",
-    "get_artifact",
     "search_notes",
     "get_note",
+    "get_template_guide",
+    "list_templates",
+    "save_template",
+    "create_instance",
+    "get_instance_view",
 )
 SUBJECT_ARGS: dict[str, Any] = {
     "name": "Guitarra",
@@ -56,11 +57,6 @@ SUBJECT_ARGS: dict[str, Any] = {
     "minutes_per_session": 30,
     "sessions_per_week": 3,
 }
-GOOD_HTML = (
-    "<!doctype html>\n<html><head><style>p { color: red }</style></head>"
-    '<body><h1>Clase 3</h1><p>Canción</p><a href="#top">top</a>'
-    "<script>document.title = 'ok';</script></body></html>"
-)
 
 
 class World:
@@ -103,24 +99,6 @@ def note(**changes: Any) -> dict[str, Any]:
         "links": [
             {"from": "Quinto traste", "to": "Acorde de séptima", "link_kind": "prerequisite"}
         ],
-        "exercises": [
-            {
-                "name": "Cambio C7-G7",
-                "instructions": "Cambia entre C7 y G7 cada compás.",
-                "exercise_kind": "technique",
-                "tempo_bpm": 60,
-                "duration_min": 5,
-            }
-        ],
-        "quiz_items": [
-            {
-                "question": "¿Cuántas notas tiene un acorde de séptima?",
-                "options": ["Tres", "Cuatro", "Cinco"],
-                "answer_index": 1,
-                "explanation": "La séptima se suma a la tríada.",
-                "concept": "Acorde de séptima",
-            }
-        ],
     }
     data.update(changes)
     return data
@@ -160,13 +138,22 @@ async def save_notes(
 
 
 @pytest.mark.asyncio
-async def test_the_seven_tools_are_listed_with_their_annotations() -> None:
+async def test_the_subject_tools_are_listed_with_their_annotations() -> None:
     async with Client(World().mcp) as client:
         tools = {tool.name: tool for tool in await client.list_tools()}
     assert set(SUBJECT_TOOLS) <= set(tools)
-    for name in ("get_subjects", "get_artifact", "search_notes", "get_note"):
+    assert "save_artifact" not in tools and "get_artifact" not in tools  # removed (ruling 19)
+    read_only = (
+        "get_subjects",
+        "search_notes",
+        "get_note",
+        "get_template_guide",
+        "list_templates",
+        "get_instance_view",
+    )
+    for name in read_only:
         assert tools[name].annotations.read_only_hint is True, name
-    for name in ("save_subject", "save_notes", "save_artifact"):
+    for name in ("save_subject", "save_notes", "save_template", "create_instance"):
         assert tools[name].annotations.destructive_hint is False, name
         assert tools[name].annotations.read_only_hint is not True, name
     assert tools["save_notes"].annotations.idempotent_hint is True
@@ -185,23 +172,10 @@ def test_descriptions_say_what_the_spec_asks() -> None:
         assert phrase in ingest, phrase
     assert "16,000 characters" in ingest
     assert "describe images" in ingest.lower() and "never download" in ingest.lower()
-    artifact = TOOL_DESCRIPTIONS["save_artifact"]
-    for phrase in ("iframe", "external", "url(", "script", f"{MAX_ARTIFACT_BYTES:,} bytes"):
-        assert phrase in artifact, phrase
+    assert "list_templates" in ingest and "instances" in ingest
     search = TOOL_DESCRIPTIONS["search_notes"]
     assert "excerpts" in search and "lesson" in search
     assert "get_subjects" in INSTRUCTIONS and "search_notes" in INSTRUCTIONS
-
-
-@pytest.mark.asyncio
-async def test_the_artifact_html_field_states_the_byte_cap_from_the_constant() -> None:
-    async with Client(World().mcp) as client:
-        tools = {tool.name: tool for tool in await client.list_tools()}
-    html = tools["save_artifact"].input_schema["properties"]["html"]
-    assert f"{MAX_ARTIFACT_BYTES:,} bytes" in html["description"]
-    assert html["maxLength"] == MAX_ARTIFACT_BYTES
-    assert "KiB" not in html["description"]
-    assert "KiB" not in TOOL_DESCRIPTIONS["save_artifact"]
 
 
 def test_save_notes_says_to_split_a_note_over_the_note_cap() -> None:
@@ -212,15 +186,15 @@ def test_save_notes_says_to_split_a_note_over_the_note_cap() -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_two_exercise_kind_lists_say_they_differ() -> None:
+async def test_exercise_kinds_offer_drill_and_no_music_term() -> None:
     async with Client(World().mcp) as client:
         tools = {tool.name: tool for tool in await client.list_tools()}
-    subject = tools["save_subject"].input_schema["properties"]["exercise_kinds"]["description"]
-    note = tools["save_notes"].input_schema["properties"]["notes"]["items"]
-    exercise = note["properties"]["exercises"]["items"]["properties"]["exercise_kind"]
-    exercise = exercise["description"]
-    assert "not the same list" in subject.lower() and "exercise_kind" in subject
-    assert "not the same list" in exercise.lower() and "exercise_kinds" in exercise
+    kinds = tools["save_subject"].input_schema["properties"]["exercise_kinds"]
+    assert kinds["items"]["enum"] == ["quiz", "drill", "exercise"]
+    assert "'drill'" in kinds["description"] and "ear" not in kinds["description"].split()
+    instance = tools["save_notes"].input_schema["properties"]["notes"]["items"]["properties"]
+    concept = instance["instances"]["items"]["properties"]["concept"]["description"]
+    assert "one of this note's concepts" in concept and "never creates" in concept
 
 
 # --- subjects -----------------------------------------------------------------------------------
@@ -248,7 +222,7 @@ async def test_onboarding_then_save_subject_then_update() -> None:
         assert questions["name"]["options"] == []
         preferences = [o["choice_value"] for o in questions["preference"]["options"]]
         kinds = [o["choice_value"] for o in questions["kinds"]["options"]]
-        assert kinds == ["quiz", "ear", "exercise"]
+        assert kinds == ["quiz", "drill", "exercise"]
 
         saved = await call(
             client,
@@ -264,7 +238,7 @@ async def test_onboarding_then_save_subject_then_update() -> None:
         assert (saved["created"], saved["plan_changed"]) == (True, False)
         subject = saved["subject"]
         assert subject["subject_status"] == "active"
-        assert subject["exercise_kinds"] == ["quiz", "ear", "exercise"]
+        assert subject["exercise_kinds"] == ["quiz", "drill", "exercise"]
         assert subject["plan_status"] is None
         assert saved["response_rules"] == rules.SAVE_SUBJECT
 
@@ -460,10 +434,8 @@ def _big_notes(count: int, total: int) -> list[dict[str, Any]]:
     return notes
 
 
-def _options_too_long() -> list[dict[str, Any]]:
-    item = copy.deepcopy(note()["quiz_items"][0])
-    item["options"] = ["x" * (OPTION_MAX + 1)] * 3
-    return [note(quiz_items=[item])]
+def _instance(i: int = 0) -> dict[str, Any]:
+    return {"template_id": str(uuid4()), "params": [], "prompt_text": f"Item {i}"}
 
 
 CAP_CASES: list[tuple[str, Any, str, list[str]]] = [
@@ -481,30 +453,16 @@ CAP_CASES: list[tuple[str, Any, str, list[str]]] = [
         ["notes[0].concepts"],
     ),
     (
-        "11 quiz items",
-        lambda: [note(quiz_items=note()["quiz_items"] * (MAX_QUIZ_ITEMS + 1))],
+        "13 instances",
+        lambda: [note(instances=[_instance(i) for i in range(13)])],
         "limit_exceeded",
-        ["notes[0].quiz_items"],
+        ["notes[0].instances"],
     ),
     (
-        "options of 201 characters",
-        _options_too_long,
+        "a prompt of 501 characters",
+        lambda: [note(instances=[{**_instance(), "prompt_text": "x" * 501}])],
         "validation_failed",
-        [
-            "notes[0].quiz_items[0].options[0]",
-            "notes[0].quiz_items[0].options[1]",
-            "notes[0].quiz_items[0].options[2]",
-        ],
-    ),
-    (
-        "six options",
-        lambda: [
-            note(
-                quiz_items=[{**note()["quiz_items"][0], "options": ["a", "b", "c", "d", "e", "f"]}]
-            )
-        ],
-        "validation_failed",
-        ["notes[0].quiz_items[0].options"],
+        ["notes[0].instances[0].prompt_text"],
     ),
 ]
 
@@ -535,7 +493,6 @@ async def test_exactly_at_the_caps_is_accepted() -> None:
         subject_id = await new_subject(client)
         notes = _big_notes(MAX_NOTES_PER_CALL, MAX_CALL_CHARS)
         notes[0]["concepts"] = [f"Concepto {i}" for i in range(MAX_CONCEPTS)]
-        notes[0]["quiz_items"] = note()["quiz_items"] * MAX_QUIZ_ITEMS
         saved = await save_notes(client, subject_id, notes)
     assert [n["note_outcome"] for n in saved["notes"]] == ["new"] * MAX_NOTES_PER_CALL
 
@@ -556,8 +513,8 @@ UNKNOWN_KEY_PATHS: list[tuple[tuple[Any, ...], str]] = [
     (("source",), "source.unknown_field"),
     (("notes", 0), "notes[0].unknown_field"),
     (("notes", 0, "links", 0), "notes[0].links[0].unknown_field"),
-    (("notes", 0, "exercises", 0), "notes[0].exercises[0].unknown_field"),
-    (("notes", 0, "quiz_items", 0), "notes[0].quiz_items[0].unknown_field"),
+    (("notes", 0, "instances", 0), "notes[0].instances[0].unknown_field"),
+    (("notes", 0, "instances", 0, "params", 0), "notes[0].instances[0].params[0].unknown_field"),
 ]
 
 
@@ -572,7 +529,17 @@ async def test_unknown_keys_are_rejected_at_every_nesting_level(
     async with Client(world.mcp) as client:
         subject_id = await new_subject(client)
         args: dict[str, Any] = copy.deepcopy(
-            {"subject_id": subject_id, "source": SOURCE, "notes": [note()]}
+            {
+                "subject_id": subject_id,
+                "source": SOURCE,
+                "notes": [
+                    note(
+                        instances=[
+                            {**_instance(), "params": [{"name": "question", "text": "¿Qué?"}]}
+                        ]
+                    )
+                ],
+            }
         )
         node: Any = args
         for step in where:
@@ -581,88 +548,6 @@ async def test_unknown_keys_are_rejected_at_every_nesting_level(
         body = await error_of(client, "save_notes", args)
     assert (body["code"], body["fields"]) == ("validation_failed", [path])
     assert world.note_count(world.ana) == 0
-
-
-# --- artifacts ----------------------------------------------------------------------------------
-
-BAD_ARTIFACTS = [
-    '<!doctype html><html><body><iframe src="#a"></iframe></body></html>',
-    '<!doctype html><html><head><meta http-equiv="refresh" content="0"></head></html>',
-    '<!doctype html><html><body><a href="https://example.test">x</a></body></html>',
-    '<!doctype html><html><body><img src="data:image/png;base64,AAAA"></body></html>',
-    '<!doctype html><html><body><p style="background: url(x.png)">x</p></body></html>',
-    "<p>not a document</p>",
-]
-
-
-@pytest.mark.asyncio
-async def test_a_clean_artifact_is_stored_and_read_back_as_data() -> None:
-    """Review Focus 4: inline script and style with fragment links pass."""
-    async with Client(World().mcp) as client:
-        subject_id = await new_subject(client)
-        note_id = (await save_notes(client, subject_id, [note()]))["notes"][0]["note_id"]
-        saved = await call(
-            client,
-            "save_artifact",
-            {
-                "note_id": note_id,
-                "artifact_kind": "lesson_view",
-                "title": "Clase 3",
-                "html": GOOD_HTML,
-            },
-        )
-        read = await call(client, "get_artifact", {"artifact_id": saved["artifact_id"]})
-        listed = await call(client, "get_note", {"note_id": note_id})
-    assert saved["web_path"] == f"/app/notas/{note_id}/artefactos/{saved['artifact_id']}/raw"
-    assert saved["response_rules"] == rules.SAVE_ARTIFACT
-    assert read["html"] == GOOD_HTML
-    assert (read["artifact_kind"], read["title"], read["note_id"]) == (
-        "lesson_view",
-        "Clase 3",
-        note_id,
-    )
-    assert read["response_rules"] == rules.GET_ARTIFACT
-    assert listed["artifacts"] == [
-        {"artifact_id": saved["artifact_id"], "artifact_kind": "lesson_view", "title": "Clase 3"}
-    ]
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("html", BAD_ARTIFACTS)
-async def test_artifacts_that_try_to_escape_are_rejected_on_html(html: str) -> None:
-    """Review Focus 4."""
-    world = World()
-    async with Client(world.mcp) as client:
-        subject_id = await new_subject(client)
-        note_id = (await save_notes(client, subject_id, [note()]))["notes"][0]["note_id"]
-        body = await error_of(
-            client,
-            "save_artifact",
-            {"note_id": note_id, "artifact_kind": "other", "title": "Vista", "html": html},
-        )
-        listed = await call(client, "get_note", {"note_id": note_id})
-    assert (body["code"], body["fields"]) == ("validation_failed", ["html"])
-    assert listed["artifacts"] == []
-
-
-@pytest.mark.asyncio
-async def test_an_artifact_one_byte_over_the_cap_is_rejected() -> None:
-    """Review Focus 6: 40,001 bytes."""
-    head = "<!doctype html><html><body><p>"
-    tail = "</p></body></html>"
-    html = head + "é" * ((MAX_ARTIFACT_BYTES + 1 - len(head) - len(tail)) // 2) + tail
-    html = html.replace("<p>", "<p>" + "a" * (MAX_ARTIFACT_BYTES + 1 - len(html.encode())), 1)
-    assert len(html.encode("utf-8")) == MAX_ARTIFACT_BYTES + 1
-    assert len(html) <= MAX_ARTIFACT_BYTES  # the schema's character cap lets it reach the guard
-    async with Client(World().mcp) as client:
-        subject_id = await new_subject(client)
-        note_id = (await save_notes(client, subject_id, [note()]))["notes"][0]["note_id"]
-        body = await error_of(
-            client,
-            "save_artifact",
-            {"note_id": note_id, "artifact_kind": "other", "title": "Vista", "html": html},
-        )
-    assert (body["code"], body["fields"]) == ("validation_failed", ["html"])
 
 
 # --- the 64 KB request body cap ----------------------------------------------------------------
@@ -715,8 +600,6 @@ async def test_a_valid_emoji_heavy_save_notes_call_is_a_bare_413_over_the_body_c
             lesson_ref=f"{i}" + "🎵" * (LESSON_REF_MAX - 1),
             position=i,
             raw_text="🎸" * per_note,
-            exercises=[],
-            quiz_items=[],
         )
         for i in range(1, MAX_NOTES_PER_CALL + 1)
     ]
@@ -732,17 +615,6 @@ async def test_a_valid_emoji_heavy_save_notes_call_is_a_bare_413_over_the_body_c
     assert "64 KB in all" in TOOL_DESCRIPTIONS["save_notes"]
 
 
-@pytest.mark.asyncio
-async def test_an_ascii_artifact_at_the_byte_cap_fits_the_body_cap() -> None:
-    head, tail = "<!doctype html><html><body><p>", "</p></body></html>"
-    html = head + "a" * (MAX_ARTIFACT_BYTES - len(head) - len(tail)) + tail
-    assert len(html.encode()) == MAX_ARTIFACT_BYTES
-    args = {"note_id": str(uuid4()), "artifact_kind": "lesson_view", "title": "Vista", "html": html}
-    body = rpc_body("save_artifact", args)
-    status, reached = await through_guard(body)
-    assert (status, reached) == (200, [body])
-
-
 # --- foreign rows -------------------------------------------------------------------------------
 
 
@@ -753,13 +625,6 @@ async def test_another_learners_ids_are_not_found_and_nothing_is_written() -> No
     async with Client(world.mcp) as client:
         subject_id = await new_subject(client)
         note_id = (await save_notes(client, subject_id, [note()]))["notes"][0]["note_id"]
-        artifact_id = (
-            await call(
-                client,
-                "save_artifact",
-                {"note_id": note_id, "artifact_kind": "other", "title": "Vista", "html": GOOD_HTML},
-            )
-        )["artifact_id"]
 
         world.user_id = world.beto
         cases = [
@@ -769,13 +634,8 @@ async def test_another_learners_ids_are_not_found_and_nothing_is_written() -> No
                 {**SUBJECT_ARGS, "subject_id": subject_id, "subject_status": "archived"},
                 "subject_id",
             ),
-            (
-                "save_artifact",
-                {"note_id": note_id, "artifact_kind": "other", "title": "x", "html": GOOD_HTML},
-                "note_id",
-            ),
             ("get_note", {"note_id": note_id}, "note_id"),
-            ("get_artifact", {"artifact_id": artifact_id}, "artifact_id"),
+            ("list_templates", {"subject_id": subject_id}, "subject_id"),
             ("search_notes", {"query": "acorde", "subject_id": subject_id}, "subject_id"),
             ("get_note", {"note_id": str(uuid4())}, "note_id"),
         ]
@@ -810,7 +670,6 @@ async def test_search_over_three_notes_answers_from_excerpts() -> None:
                     raw_text="La escala pentatónica tiene cinco notas.",
                     concepts=["Escala pentatónica"],
                     links=[],
-                    quiz_items=[],
                 ),
                 note(
                     title="Clase 2",
@@ -818,7 +677,6 @@ async def test_search_over_three_notes_answers_from_excerpts() -> None:
                     raw_text="El acorde mayor tiene tres notas; la escala pentatónica va encima.",
                     concepts=["Acorde mayor"],
                     links=[],
-                    quiz_items=[],
                 ),
                 note(
                     title="Clase 3",
@@ -826,7 +684,6 @@ async def test_search_over_three_notes_answers_from_excerpts() -> None:
                     raw_text="El ritmo de vals va en tres tiempos.",
                     concepts=["Vals"],
                     links=[],
-                    quiz_items=[],
                 ),
             ],
         )
@@ -888,11 +745,7 @@ async def test_get_note_returns_content_without_answers_and_reads_a_window() -> 
     assert whole["source_title"] == "Curso de guitarra"
     assert whole["origin"] == "mcp"
     assert whole["concepts"] == ["Acorde de séptima", "Quinto traste"]
-    [quiz] = whole["quiz_items"]
-    assert "answer_index" not in quiz
-    assert quiz["options"] == ["Tres", "Cuatro", "Cinco"]
-    [exercise] = whole["exercises"]
-    assert (exercise["exercise_kind"], exercise["tempo_bpm"]) == ("technique", 60)
+    assert whole["instances"] == []
     assert whole["response_rules"] == rules.GET_NOTE
     assert [p["seq"] for p in window["passages"]] == [2, 3]
     assert (wide["code"], wide["fields"]) == ("validation_failed", ["passage_to"])

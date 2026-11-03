@@ -36,7 +36,7 @@ _TOKEN = re.compile(r"[A-Za-z0-9_]+|\[\d{1,4}\]")
 _UNKNOWN_FIELD_TYPES = frozenset({"extra_forbidden", "unexpected_keyword_argument"})
 # Lists whose max_length is a per-call count cap of the subjects payload (plan rulings 10, 12).
 COUNT_CAP_TOOLS = frozenset({"save_notes"})
-COUNT_CAP_FIELDS = frozenset({"notes", "concepts", "links", "exercises", "quiz_items"})
+COUNT_CAP_FIELDS = frozenset({"notes", "concepts", "links", "instances"})
 
 
 class TutorToolError(ToolError):
@@ -105,8 +105,8 @@ def validation_failure(
 ) -> tuple[McpErrorCode, tuple[str, ...]]:
     """The code and field paths of an argument-schema failure.
 
-    A count cap of the subjects payload (too many notes, concepts, links, exercises or quiz
-    items) is limit_exceeded with only those paths, as the domain reports it (plan ruling 12);
+    A count cap of the subjects payload (too many notes, concepts, links or instances) is
+    limit_exceeded with only those paths, as the domain reports it (plan ruling 12);
     every other failure is validation_failed.
     """
     cause = exc.__cause__

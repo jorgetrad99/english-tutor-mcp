@@ -14,6 +14,8 @@ from tutor.domain.profile import (
     MIN_DAYS_PER_WEEK,
     MINUTES_CHOICES,
 )
+from tutor.domain.templates import GUIDE_SECTIONS
+from tutor.domain.templates import PARAM_TYPES as _PARAM_TYPES
 from tutor.domain.validation import ReportedError
 from tutor.mcp import schemas
 from tutor.mcp.schemas import (
@@ -36,6 +38,17 @@ from tutor.services.errors import ServiceError
 from tutor.services.glossary import MAX_GLOSSARY_ITEMS
 from tutor.services.lesson import MAX_MINUTES, MAX_PREP_CHARS, MAX_REVIEW_RESULTS, MIN_MINUTES
 from tutor.services.session_end import MAX_RAW_EVIDENCE_BYTES
+
+GRADING = {
+    "none",
+    "choice_index",
+    "exact_text",
+    "exact_set",
+    "exact_sequence",
+    "numeric",
+    "self_report",
+}
+PARAM_TYPES = set(_PARAM_TYPES)
 
 pytestmark = pytest.mark.unit
 
@@ -138,12 +151,24 @@ def test_output_closed_sets_are_enums_not_open_strings() -> None:
     # Subjects (plan ruling 1): names of their own, never an English one.
     assert enums["subject_status"] == {"active", "paused", "archived"}
     assert enums["preference"] == {"practice_first", "theory_first", "balanced"}
-    assert enums["exercise_kinds"] == {"quiz", "ear", "exercise"}
+    assert enums["exercise_kinds"] == {"quiz", "drill", "exercise"}
     assert enums["choice_value"] == enums["preference"] | enums["exercise_kinds"]
     assert enums["note_outcome"] == {"new", "existing", "superseded"}
-    assert enums["artifact_kind"] == {"lesson_view", "exercise_view", "other"}
-    assert enums["exercise_kind"] == {"technique", "repertoire", "theory", "ear", "other"}
     assert enums["origin"] == {"mcp", "web"}
+    # Templates (spec 15.9): names of their own as well.
+    assert enums["template_purpose"] == {"exercise", "display"}
+    assert enums["practice_kind"] == {"quiz", "drill", "exercise"}
+    assert enums["grading_kind"] == GRADING
+    assert enums["text_match"] == {"fold_all", "keep_accents", "exact_case"}
+    assert enums["pool_draw"] == {"none", "one", "one_of_choices", "ordered"}
+    assert enums["param_type"] == PARAM_TYPES
+    assert enums["param_role"] == {"prompt", "answer_key", "reveal", "pool"}
+    assert enums["template_status"] == {"active", "retired"}
+    assert enums["instance_status"] == {"active", "retired"}
+    assert enums["template_outcome"] == {"new", "existing", "superseded"}
+    assert enums["instance_outcome"] == {"new", "existing", "superseded"}
+    assert enums["guide_section"] == set(GUIDE_SECTIONS)
+    assert "artifact_kind" not in enums and "exercise_kind" not in enums
 
 
 def test_enums_are_closed_and_match_the_contract() -> None:
@@ -180,12 +205,19 @@ def test_enums_are_closed_and_match_the_contract() -> None:
         "confidence": {"low", "medium", "high"},
         # Subjects (plan ruling 1).
         "preference": {"practice_first", "theory_first", "balanced"},
-        "exercise_kinds": {"quiz", "ear", "exercise"},
+        "exercise_kinds": {"quiz", "drill", "exercise"},
         "subject_status": {"active", "paused", "archived"},
         "source_kind": {"course", "pdf", "text", "url", "other"},
         "link_kind": {"prerequisite", "related"},
-        "exercise_kind": {"technique", "repertoire", "theory", "ear", "other"},
-        "artifact_kind": {"lesson_view", "exercise_view", "other"},
+        # Templates (spec 15.9).
+        "guide_section": set(GUIDE_SECTIONS),
+        "template_purpose": {"exercise", "display"},
+        "grading_kind": GRADING,
+        "text_match": {"fold_all", "keep_accents", "exact_case"},
+        "pool_draw": {"none", "one", "one_of_choices", "ordered"},
+        "param_type": PARAM_TYPES,
+        "param_role": {"prompt", "answer_key", "reveal", "pool"},
+        "learner_confirmed": {True},
     }
     assert enums["minutes_per_day"] == set(MINUTES_CHOICES)
 
@@ -346,22 +378,46 @@ def notes_args() -> dict[str, Any]:
                 "title": "Clase 1",
                 "raw_text": "Texto",
                 "links": [{"from": "A", "to": "B", "link_kind": "related"}],
-                "exercises": [
-                    {"name": "E", "instructions": "Haz esto.", "exercise_kind": "technique"}
-                ],
-                "quiz_items": [{"question": "Q", "options": ["a", "b"], "answer_index": 0}],
+                "instances": [instance_args()],
             }
         ],
     }
 
 
-def artifact_args() -> dict[str, Any]:
+def instance_args() -> dict[str, Any]:
     return {
-        "note_id": str(uuid4()),
-        "artifact_kind": "lesson_view",
-        "title": "Vista",
-        "html": "<!doctype html><html></html>",
+        "template_id": str(uuid4()),
+        "params": [
+            {"name": "question", "text": "¿Cuál?"},
+            {"name": "deck", "pool": [{"cue": "a", "answer": "b", "accept": ["c"]}]},
+        ],
+        "prompt_text": "Elige.",
     }
+
+
+def template_args() -> dict[str, Any]:
+    return {
+        "subject_id": str(uuid4()),
+        "name": "Opción múltiple",
+        "template_purpose": "exercise",
+        "grading_kind": "choice_index",
+        "params": [
+            {
+                "name": "options",
+                "param_type": "text_list",
+                "param_role": "prompt",
+                "label": "Opciones",
+            }
+        ],
+        "options_param": "options",
+        "html": "<!doctype html><html></html>",
+        "guide_version": 1,
+        "learner_confirmed": True,
+    }
+
+
+def create_args() -> dict[str, Any]:
+    return {"subject_id": str(uuid4()), **instance_args()}
 
 
 # (tool, valid minimal payload, where the unknown key goes; "" means the top level)
@@ -382,10 +438,17 @@ UNKNOWN_KEY_CASES: list[tuple[str, dict[str, Any], str]] = [
     ("save_notes", notes_args(), "source"),
     ("save_notes", notes_args(), "notes.0"),
     ("save_notes", notes_args(), "notes.0.links.0"),
-    ("save_notes", notes_args(), "notes.0.exercises.0"),
-    ("save_notes", notes_args(), "notes.0.quiz_items.0"),
-    ("save_artifact", artifact_args(), ""),
-    ("get_artifact", {"artifact_id": str(uuid4())}, ""),
+    ("save_notes", notes_args(), "notes.0.instances.0"),
+    ("save_notes", notes_args(), "notes.0.instances.0.params.0"),
+    ("save_notes", notes_args(), "notes.0.instances.0.params.1.pool.0"),
+    ("get_template_guide", {}, ""),
+    ("list_templates", {"subject_id": str(uuid4())}, ""),
+    ("save_template", template_args(), ""),
+    ("save_template", template_args(), "params.0"),
+    ("create_instance", create_args(), ""),
+    ("create_instance", create_args(), "params.1"),
+    ("create_instance", create_args(), "params.1.pool.0"),
+    ("get_instance_view", {"instance_id": str(uuid4())}, ""),
     ("search_notes", {"query": "acorde"}, ""),
     ("get_note", {"note_id": str(uuid4())}, ""),
 ]
@@ -525,7 +588,8 @@ EDGE_CASES: list[tuple[str, dict[str, Any], tuple[Any, ...], Any]] = [
     ("save_subject", subject_args(), ("minutes_per_session",), 121),
     ("save_subject", subject_args(), ("sessions_per_week",), 8),
     ("save_subject", subject_args(), ("exercise_kinds",), []),
-    ("save_subject", subject_args(), ("exercise_kinds",), ["quiz", "ear", "exercise", "quiz"]),
+    ("save_subject", subject_args(), ("exercise_kinds",), ["quiz", "drill", "exercise", "quiz"]),
+    ("save_subject", subject_args(), ("exercise_kinds",), ["ear"]),
     ("save_subject", subject_args(), ("name",), "x" * 81),
     ("save_subject", subject_args(), ("goal_text",), "x" * 301),
     ("save_subject", subject_args(), ("context_text",), "x" * 601),
@@ -540,15 +604,31 @@ EDGE_CASES: list[tuple[str, dict[str, Any], tuple[Any, ...], Any]] = [
     ("save_notes", notes_args(), ("notes", 0, "concepts"), ["c"] * 13),
     ("save_notes", notes_args(), ("notes", 0, "concepts"), ["x" * 81]),
     ("save_notes", notes_args(), ("notes", 0, "links", 0, "link_kind"), "parent"),
-    ("save_notes", notes_args(), ("notes", 0, "exercises", 0, "exercise_kind"), "song"),
-    ("save_notes", notes_args(), ("notes", 0, "exercises", 0, "tempo_bpm"), 301),
-    ("save_notes", notes_args(), ("notes", 0, "exercises", 0, "duration_min"), 0),
-    ("save_notes", notes_args(), ("notes", 0, "quiz_items", 0, "options"), ["a"]),
-    ("save_notes", notes_args(), ("notes", 0, "quiz_items", 0, "answer_index"), 5),
-    ("save_notes", notes_args(), ("notes", 0, "quiz_items", 0, "explanation"), "x" * 501),
-    ("save_artifact", artifact_args(), ("artifact_kind",), "page"),
-    ("save_artifact", artifact_args(), ("title",), "x" * 201),
-    ("save_artifact", artifact_args(), ("html",), ""),
+    ("save_notes", notes_args(), ("notes", 0, "instances"), [instance_args()] * 13),
+    ("save_notes", notes_args(), ("notes", 0, "instances", 0, "prompt_text"), "x" * 501),
+    ("save_notes", notes_args(), ("notes", 0, "instances", 0, "params", 0, "name"), "Bad"),
+    ("save_notes", notes_args(), ("notes", 0, "instances", 0, "params", 0), {"name": "q"}),
+    (
+        "save_notes",
+        notes_args(),
+        ("notes", 0, "instances", 0, "params", 0),
+        {"name": "q", "text": "a", "integer": 1},
+    ),
+    ("get_template_guide", {}, ("guide_section",), "everything"),
+    ("list_templates", {"subject_id": str(uuid4())}, ("template_id",), "nope"),
+    ("save_template", template_args(), ("learner_confirmed",), False),
+    ("save_template", template_args(), ("practice_kind",), "quiz"),
+    ("save_template", template_args(), ("html",), ""),
+    ("save_template", template_args(), ("html",), "x" * 40_001),
+    ("save_template", template_args(), ("params",), []),
+    ("save_template", template_args(), ("grading_kind",), "essay"),
+    ("save_template", template_args(), ("params", 0, "param_type"), "image"),
+    ("save_template", template_args(), ("params", 0, "label"), "x" * 61),
+    ("save_template", template_args(), ("pool_count",), 13),
+    ("create_instance", create_args(), ("params",), [{"name": "q", "text": "a"}] * 9),
+    ("create_instance", create_args(), ("params", 1, "pool"), [{"cue": "a", "answer": "b"}] * 201),
+    ("create_instance", create_args(), ("params", 1, "pool", 0, "cue"), "x" * 201),
+    ("create_instance", create_args(), ("params", 1, "pool", 0, "accept"), ["a"] * 7),
     ("search_notes", {"query": "acorde"}, ("query",), ""),
     ("search_notes", {"query": "acorde"}, ("query",), "x" * 201),
     ("search_notes", {"query": "acorde"}, ("limit",), 11),
@@ -557,7 +637,11 @@ EDGE_CASES: list[tuple[str, dict[str, Any], tuple[Any, ...], Any]] = [
 ]
 
 
-@pytest.mark.parametrize(("tool", "payload", "path", "value"), EDGE_CASES)
+@pytest.mark.parametrize(
+    ("tool", "payload", "path", "value"),
+    EDGE_CASES,
+    ids=[f"{t}:{'.'.join(map(str, p))}" for t, _, p, _ in EDGE_CASES],
+)
 def test_edge_values_are_rejected(
     tool: str, payload: dict[str, Any], path: tuple[Any, ...], value: Any
 ) -> None:

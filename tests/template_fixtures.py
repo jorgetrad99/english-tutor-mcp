@@ -95,7 +95,12 @@ def spec(data: TemplateInput) -> TemplateSpec:
 def pool(count: int = 4) -> tuple[PoolEntryInput, ...]:
     """Entries whose answers and explanations hold the secret strings."""
     return tuple(
-        PoolEntryInput(f"cue {i}", f"{HIDDEN_ANSWER} {i}", (f"{HIDDEN_ANSWER}-alt {i}",), f"{HIDDEN_EXPLAIN} {i}")
+        PoolEntryInput(
+            f"cue {i}",
+            f"{HIDDEN_ANSWER} {i}",
+            (f"{HIDDEN_ANSWER}-alt {i}",),
+            f"{HIDDEN_EXPLAIN} {i}",
+        )
         for i in range(count)
     )
 

@@ -1,5 +1,5 @@
-"""FastMCP server: six English tools, seven subjects tools, the start-lesson prompt and the
-instructions (spec section 8; subjects spec 7.1).
+"""FastMCP server: six English tools, ten subjects tools, the start-lesson prompt and the
+instructions (spec section 8; subjects spec 7.1, 15.9).
 
 Tools are plain `def` functions: FastMCP runs them in a worker thread with contextvars
 copied, so the blocking services and get_access_token() work inside them.
@@ -37,6 +37,7 @@ from tutor.services import notes as notes_svc
 from tutor.services import profile as profile_svc
 from tutor.services import session_end as end_svc
 from tutor.services import subjects as subjects_svc
+from tutor.services import templates as templates_svc
 from tutor.services.context import Services
 from tutor.services.errors import ServiceError
 from tutor.services.ports import IdentityResolver
@@ -102,7 +103,9 @@ def _canonical(node: Any) -> Any:
     """Schema without titles and with sorted `required`, for the drift check."""
     if isinstance(node, dict):
         return {
-            key: sorted(value) if key == "required" else _canonical(value)
+            key: sorted(value)
+            if key == "required" and isinstance(value, list)
+            else _canonical(value)
             for key, value in node.items()
             if not (key == "title" and isinstance(value, str))
         }
@@ -148,7 +151,7 @@ def _register(
 
 
 def _register_subject_tools(mcp: FastMCP, svc: Services) -> None:
-    """The seven subjects tools (subjects spec 7.1, first seven rows)."""
+    """The ten subjects tools (subjects spec 7.1, 15.9)."""
 
     def get_subjects() -> s.GetSubjectsOutput:
         def run() -> s.GetSubjectsOutput:
@@ -216,24 +219,108 @@ def _register_subject_tools(mcp: FastMCP, svc: Services) -> None:
 
         return _guard("save_notes", run)
 
-    def save_artifact(
-        note_id: s.NoteIdField,
-        artifact_kind: s.ArtifactKindField,
-        title: s.ArtifactTitle,
-        html: s.ArtifactHtml,
-    ) -> s.SaveArtifactOutput:
-        def run() -> s.SaveArtifactOutput:
-            saved = notes_svc.save_artifact(svc, _user(), note_id, artifact_kind, title, html)
-            return s.SaveArtifactOutput.of(saved, rules.SAVE_ARTIFACT)
+    def get_template_guide(
+        guide_section: s.GuideSectionField = "contract",
+    ) -> s.GetTemplateGuideOutput:
+        def run() -> s.GetTemplateGuideOutput:
+            view = templates_svc.get_template_guide(guide_section)
+            return s.GetTemplateGuideOutput.of(view, rules.GET_TEMPLATE_GUIDE)
 
-        return _guard("save_artifact", run)
+        return _guard("get_template_guide", run)
 
-    def get_artifact(artifact_id: s.ArtifactIdField) -> s.GetArtifactOutput:
-        def run() -> s.GetArtifactOutput:
-            view = notes_svc.get_artifact(svc, _user(), artifact_id)
-            return s.GetArtifactOutput.of(view, rules.GET_ARTIFACT)
+    def list_templates(
+        subject_id: s.SubjectIdField,
+        template_id: s.TemplateIdOptional = None,
+        include_html: s.IncludeHtml = False,
+    ) -> s.ListTemplatesOutput:
+        def run() -> s.ListTemplatesOutput:
+            view = templates_svc.list_templates(svc, _user(), subject_id, template_id, include_html)
+            return s.ListTemplatesOutput.of(view, rules.LIST_TEMPLATES)
 
-        return _guard("get_artifact", run)
+        return _guard("list_templates", run)
+
+    def save_template(
+        subject_id: s.SubjectIdField,
+        name: s.TemplateName,
+        template_purpose: s.TemplatePurposeField,
+        grading_kind: s.GradingKindField,
+        params: s.ParamSpecsField,
+        html: s.TemplateHtml,
+        guide_version: s.GuideVersionField,
+        learner_confirmed: s.LearnerConfirmed,
+        description: s.TemplateDescription = None,
+        text_match: s.TextMatchField = None,
+        numeric_tolerance: s.NumericTolerance = None,
+        pool_draw: s.PoolDrawField = "none",
+        pool_count: s.PoolCount = None,
+        needs_view: s.NeedsView = False,
+        options_param: s.OptionsParam = None,
+        replaces_template_id: s.ReplacesTemplateId = None,
+    ) -> s.SaveTemplateOutput:
+        def run() -> s.SaveTemplateOutput:
+            args = s.SaveTemplateInput(
+                subject_id=subject_id,
+                name=name,
+                template_purpose=template_purpose,
+                grading_kind=grading_kind,
+                params=params,
+                html=html,
+                guide_version=guide_version,
+                learner_confirmed=learner_confirmed,
+                description=description,
+                text_match=text_match,
+                numeric_tolerance=numeric_tolerance,
+                pool_draw=pool_draw,
+                pool_count=pool_count,
+                needs_view=needs_view,
+                options_param=options_param,
+                replaces_template_id=replaces_template_id,
+            )
+            saved = templates_svc.save_template(
+                svc,
+                _user(),
+                subject_id,
+                args.to_template_input(),
+                html,
+                guide_version,
+                replaces_template_id,
+            )
+            return s.SaveTemplateOutput.of(saved, rules.SAVE_TEMPLATE)
+
+        return _guard("save_template", run)
+
+    def create_instance(
+        subject_id: s.SubjectIdField,
+        template_id: s.TemplateIdField,
+        params: s.ParamsField,
+        prompt_text: s.PromptText,
+        note_id: s.NoteIdOptional = None,
+        concept: s.InstanceConcept = None,
+        replaces_instance_id: s.ReplacesInstanceId = None,
+    ) -> s.CreateInstanceOutput:
+        def run() -> s.CreateInstanceOutput:
+            args = s.CreateInstanceInput(
+                subject_id=subject_id,
+                template_id=template_id,
+                params=params,
+                prompt_text=prompt_text,
+                note_id=note_id,
+                concept=concept,
+                replaces_instance_id=replaces_instance_id,
+            )
+            saved = templates_svc.create_instance(
+                svc, _user(), subject_id, args.to_instance_input(), note_id
+            )
+            return s.CreateInstanceOutput.of(saved, rules.SHOW_INSTANCE)
+
+        return _guard("create_instance", run)
+
+    def get_instance_view(instance_id: s.InstanceIdField) -> s.GetInstanceViewOutput:
+        def run() -> s.GetInstanceViewOutput:
+            view = templates_svc.get_instance_view(svc, _user(), instance_id)
+            return s.GetInstanceViewOutput.of(view, rules.SHOW_INSTANCE)
+
+        return _guard("get_instance_view", run)
 
     def search_notes(
         query: s.SearchQuery,
@@ -278,15 +365,28 @@ def _register_subject_tools(mcp: FastMCP, svc: Services) -> None:
             open_world_hint=False,
         ),
     )
-    _register(
-        mcp,
-        save_artifact,
-        s.SaveArtifactInput,
-        ToolAnnotations(title="Save artifact", destructive_hint=False, open_world_hint=False),
-    )
-    _register(mcp, get_artifact, s.GetArtifactInput, read("Get artifact"))
     _register(mcp, search_notes, s.SearchNotesInput, read("Search notes"))
     _register(mcp, get_note, s.GetNoteInput, read("Get note"))
+    _register(mcp, get_template_guide, s.GetTemplateGuideInput, read("Get template guide"))
+    _register(mcp, list_templates, s.ListTemplatesInput, read("List templates"))
+    _register(
+        mcp,
+        save_template,
+        s.SaveTemplateInput,
+        ToolAnnotations(title="Save template", destructive_hint=False, open_world_hint=False),
+    )
+    _register(
+        mcp,
+        create_instance,
+        s.CreateInstanceInput,
+        ToolAnnotations(
+            title="Create instance",
+            idempotent_hint=True,
+            destructive_hint=False,
+            open_world_hint=False,
+        ),
+    )
+    _register(mcp, get_instance_view, s.GetInstanceViewInput, read("Get instance view"))
 
 
 def build_mcp(
