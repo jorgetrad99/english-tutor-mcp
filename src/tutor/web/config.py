@@ -7,7 +7,13 @@ from dataclasses import dataclass
 from typing import Literal, cast
 from urllib.parse import urlsplit
 
-from tutor.settings import dev_auth_allowed, dev_auth_flag, is_loopback, parse_base_url
+from tutor.settings import (
+    dev_auth_allowed,
+    dev_auth_flag,
+    is_loopback,
+    parse_base_url,
+    template_origin_problem,
+)
 
 _ENVS = ("dev", "test", "prod")
 MCP_PATH = "/mcp"
@@ -25,6 +31,9 @@ class WebConfig:
     # GET /auth/dev-login for the seeded dev identities (dev-environment design D5); the route is
     # not registered at all when this is off. Same guard as Settings.dev_auth.
     dev_auth: bool = False
+    # The origin that serves template frames (Settings.template_origin); None: no frames, and
+    # the dashboard CSP lets nothing be framed.
+    template_origin: str | None = None
 
     def __post_init__(self) -> None:
         if self.env not in _ENVS:
@@ -38,6 +47,10 @@ class WebConfig:
                 "TUTOR_DEV_AUTH is only allowed with TUTOR_ENV=dev|test on a loopback "
                 "TUTOR_BASE_URL"
             )
+        if self.template_origin is not None:
+            problem = template_origin_problem(self.template_origin, self.base_url)
+            if problem:
+                raise ValueError(problem)
         if self.mcp_url != self.base_url + MCP_PATH:
             raise ValueError(f"TUTOR_MCP_URL must equal TUTOR_BASE_URL followed by {MCP_PATH}")
 
@@ -60,4 +73,15 @@ class WebConfig:
             support_email=support_email,
             test_login=environ.get("TUTOR_TEST_LOGIN") == "1",
             dev_auth=dev_auth_flag(environ),
+            template_origin=_template_origin(environ.get("TUTOR_TEMPLATE_ORIGIN", "")),
         )
+
+
+def _template_origin(raw: str) -> str | None:
+    """Blank is unset; anything else must be an origin (the full check is __post_init__)."""
+    if not raw.strip():
+        return None
+    origin = parse_base_url(raw)
+    if origin is None:
+        raise ValueError("TUTOR_TEMPLATE_ORIGIN must be an https origin (http only on loopback)")
+    return origin
