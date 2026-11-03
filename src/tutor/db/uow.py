@@ -16,6 +16,8 @@ from tutor.db.repos.glossary import PgGlossaryRepo, PgReviewRepo
 from tutor.db.repos.notes import PgNoteRepo
 from tutor.db.repos.people import PgAuditRepo, PgProfileRepo, PgUserRepo
 from tutor.db.repos.plans import PgPlanRepo
+from tutor.db.repos.practice import PgPracticeRepo
+from tutor.db.repos.progress import PgProgressRepo
 from tutor.db.repos.sessions import PgSessionRepo
 from tutor.db.repos.subjects import PgSubjectRepo
 from tutor.db.repos.templates import PgInstanceRepo, PgTemplateRepo
@@ -98,8 +100,6 @@ class PgUnitOfWork:
     notes: NoteRepo
     templates: TemplateRepo
     instances: InstanceRepo
-    # Declared for the port only: the Postgres repositories come with migration 0007 (slice B
-    # Task 3), so practice and progress run on the memory store until then.
     practice: PracticeRepo
     progress: ProgressRepo
 
@@ -118,6 +118,8 @@ class PgUnitOfWork:
         self.notes = PgNoteRepo(conn, user_id)
         self.templates = PgTemplateRepo(conn, user_id)
         self.instances = PgInstanceRepo(conn, user_id)
+        self.practice = PgPracticeRepo(conn, user_id)
+        self.progress = PgProgressRepo(conn, user_id)
 
 
 def pg_uow_factory(engine: Engine) -> UowFactory:
