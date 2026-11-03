@@ -10,7 +10,7 @@ a pool (ruling 25). Audit events carry ids and enums only. Template and instance
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
@@ -20,6 +20,7 @@ from tutor.domain.html_guard import check_template_html
 from tutor.domain.notes import ConceptName, InstanceInput, name_norm, validate_instance
 from tutor.domain.templates import (
     TEMPLATE_GUIDE_VERSION,
+    Channel,
     GuideSection,
     Origin,
     TemplateInput,
@@ -288,15 +289,18 @@ def store_instance(
     return row, outcome
 
 
-def preview(template: TemplateRow, instance: InstanceRow) -> tuple[str, str]:
-    """The composed document (artifact bridge) and the text view of an instance, with the
-    preview draw seeded by the instance id (ruling 26): never stored, never graded."""
+def preview(
+    template: TemplateRow, instance: InstanceRow, channel: Channel = "artifact"
+) -> tuple[str, str]:
+    """The composed document (the channel's bridge, artifact by default) and the text view of
+    an instance, with the preview draw seeded by the instance id (ruling 26): never stored,
+    never graded."""
     if template.html is None:  # pragma: no cover - get() always returns the html
         raise RuntimeError("template html missing")
     spec = template.spec
     shown = draw(spec, instance.params, seed_for(instance.id))
     payload = public_payload(instance.id, spec, instance.params, shown)
-    document = compose_document(template.html, encode_payload(payload), bridge("artifact"))
+    document = compose_document(template.html, encode_payload(payload), bridge(channel))
     return document, render_text(spec, instance.params, shown, instance.prompt_text)
 
 
@@ -363,3 +367,26 @@ def get_instance_view(svc: Services, user_id: UUID, instance_id: UUID) -> Instan
     return InstanceView(
         instance_id=row.id, purpose=row.purpose, status=row.status, document=document, text=text
     )
+
+
+def web_instance_document(svc: Services, user_id: UUID, instance_id: UUID) -> str | None:
+    """The instance composed with the `web` bridge and the preview draw (spec 15.5, slice D
+    ruling 50), for the website's sandboxed frame; retired instances and instances of retired
+    templates are still served by id, as get_instance_view does. None for another user's or a
+    missing instance."""
+    with svc.uow(user_id) as uow:
+        row = uow.instances.get(instance_id)
+        template = uow.templates.get(row.template_id) if row is not None else None
+    if row is None or template is None:
+        return None
+    document, _ = preview(template, row, "web")
+    return document
+
+
+def instance_counts(svc: Services, user_id: UUID, subject_id: UUID) -> Mapping[UUID, int]:
+    """Active instances of the subject per template (the website's template list); a foreign or
+    missing subject is `not_found`."""
+    with svc.uow(user_id) as uow:
+        if uow.subjects.get(subject_id) is None:
+            raise ServiceError("not_found", ("subject_id",))
+        return dict(uow.instances.active_counts(subject_id))

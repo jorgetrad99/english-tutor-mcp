@@ -27,7 +27,7 @@ from tutor.domain.notes import (
 from tutor.domain.templates import pool_size, public_params
 from tutor.services.context import Services
 from tutor.services.errors import ServiceError, field_error
-from tutor.services.ports import NoteRow, UnitOfWork
+from tutor.services.ports import NoteListRow, NoteRow, UnitOfWork
 from tutor.services.subject_views import (
     NoteInstanceView,
     NoteOutcome,
@@ -152,6 +152,23 @@ def get_note(
     """The note with its clean text (whole up to 12,000 characters, else `truncated`), its
     concepts and its active instances with their prompt parameters only (spec 5.2, 15.9). A
     passage window (1-based, inclusive, at most 10) reads part of a long note."""
+    return _note_view(svc, user_id, note_id, passage_from, passage_to, whole_text=False)
+
+
+def get_whole_note(svc: Services, user_id: UUID, note_id: UUID) -> NoteView:
+    """get_note with the clean text uncut, for the website's note page (slice D ruling 50)."""
+    return _note_view(svc, user_id, note_id, None, None, whole_text=True)
+
+
+def _note_view(
+    svc: Services,
+    user_id: UUID,
+    note_id: UUID,
+    passage_from: int | None,
+    passage_to: int | None,
+    *,
+    whole_text: bool,
+) -> NoteView:
     with svc.uow(user_id) as uow:
         note = uow.notes.get(note_id)
         if note is None:
@@ -198,8 +215,8 @@ def get_note(
         supersedes_note_id=note.supersedes_note_id,
         created_at=note.created_at,
         updated_at=note.updated_at,
-        clean_text=note.clean_text[:MAX_NOTE_TEXT_CHARS],
-        truncated=len(note.clean_text) > MAX_NOTE_TEXT_CHARS,
+        clean_text=note.clean_text if whole_text else note.clean_text[:MAX_NOTE_TEXT_CHARS],
+        truncated=not whole_text and len(note.clean_text) > MAX_NOTE_TEXT_CHARS,
         passage_count=count,
         passages=passages,
         concepts=concepts,
@@ -275,3 +292,13 @@ def _source_title(uow: UnitOfWork, note: NoteRow) -> str | None:
         return None
     source = uow.notes.source(note.source_id)
     return source.title if source is not None else None
+
+
+def list_notes(svc: Services, user_id: UUID, subject_id: UUID) -> tuple[NoteListRow, ...]:
+    """Every note of the subject, superseded ones included and flagged, in the repository's
+    order (slice D ruling 56): metadata only, no text. A foreign or missing subject is
+    `not_found`."""
+    with svc.uow(user_id) as uow:
+        if uow.subjects.get(subject_id) is None:
+            raise ServiceError("not_found", ("subject_id",))
+        return uow.notes.list_for_subject(subject_id)

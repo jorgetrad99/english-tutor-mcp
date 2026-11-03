@@ -1677,6 +1677,70 @@ class RepoContract:
         assert (cc.subject_id, cc.name) == (piano, "Pentatónica menor")
         assert cc.id != ca.id  # another subject: another concept
 
+    def test_list_for_subject_orders_by_source_position_and_time_and_flags_superseded(
+        self, uow_factory: UowFactory, user_id: UUID, other_user_id: UUID, now: datetime
+    ) -> None:
+        # Slice D ruling 56
+        later = now + timedelta(minutes=5)
+        with uow_factory(user_id) as uow:
+            subject_id = uow.subjects.create(sample_subject(), now).id
+            other_subject = uow.subjects.create(sample_subject("Piano"), now).id
+            zeta = uow.notes.upsert_source(subject_id, valid_source("pdf", "Zeta"), now).id
+            alfa = uow.notes.upsert_source(subject_id, valid_source("course", "Alfa"), now).id
+            loose = add_note(uow, subject_id, valid_note("Suelta", long_paragraph("a.")), now)
+            z1 = add_note(
+                uow,
+                subject_id,
+                valid_note("Z1", long_paragraph("b."), position=1),
+                now,
+                source_id=zeta,
+            )
+            a_unplaced = add_note(
+                uow, subject_id, valid_note("A sin", long_paragraph("c.")), now, source_id=alfa
+            )
+            a2 = add_note(
+                uow,
+                subject_id,
+                valid_note("A2", long_paragraph("d."), position=2, lesson_ref="L2"),
+                now,
+                source_id=alfa,
+            )
+            a1 = add_note(
+                uow,
+                subject_id,
+                valid_note("A1", long_paragraph("e."), position=1),
+                later,
+                source_id=alfa,
+            )
+            a2_fixed = add_note(
+                uow,
+                subject_id,
+                valid_note("A2", long_paragraph("f."), position=2, lesson_ref="L2"),
+                later,
+                source_id=alfa,
+                supersedes=a2.id,
+                origin="web",
+            )
+            add_note(uow, other_subject, valid_note("Otra", long_paragraph("g.")), now)
+        with uow_factory(user_id) as uow:
+            rows = uow.notes.list_for_subject(subject_id)
+            assert uow.notes.list_for_subject(uuid4()) == ()
+        assert [r.id for r in rows] == [a1.id, a2.id, a2_fixed.id, a_unplaced.id, z1.id, loose.id]
+        by_id = {r.id: r for r in rows}
+        assert by_id[a2.id].superseded and not by_id[a2_fixed.id].superseded
+        assert by_id[a2_fixed.id].supersedes_note_id == a2.id
+        assert by_id[a2_fixed.id].origin == "web"
+        assert (by_id[z1.id].source_title, by_id[z1.id].source_kind) == ("Zeta", "pdf")
+        assert (by_id[loose.id].source_id, by_id[loose.id].source_title) == (None, None)
+        assert (by_id[a2.id].lesson_ref, by_id[a2.id].position, by_id[a2.id].title) == (
+            "L2",
+            2,
+            "A2",
+        )
+        assert by_id[a1.id].created_at == later
+        with uow_factory(other_user_id) as uow:
+            assert uow.notes.list_for_subject(subject_id) == ()
+
     # Templates (spec 15.3)
 
     def test_template_create_get_and_list_active_by_name(
@@ -2592,6 +2656,60 @@ class PracticeContract:
             assert uow.practice.completed_count(uuid4()) == 0
         with uow_factory(other_user_id) as uow:
             assert uow.practice.completed_count(plan.id) == 0
+
+    def test_sessions_for_subject_are_newest_first_with_a_limit(
+        self, uow_factory: UowFactory, user_id: UUID, other_user_id: UUID, now: datetime
+    ) -> None:
+        # Slice D ruling 55
+        def at(minutes: int) -> datetime:
+            return now + timedelta(minutes=minutes)
+
+        with uow_factory(user_id) as uow:
+            world = practice_world(uow, now)
+            first = open_practice(uow, world, at(0))
+            uow.practice.close(first.id, summary={"minutes": 1}, self_rating=None, now=at(1))
+            second = open_practice(uow, world, at(2), mode="app")
+            uow.practice.mark_incomplete(second.id, at(3))
+            other = uow.practice.create_session(
+                uuid4(),
+                subject_id=world.other_subject_id,
+                plan_id=None,
+                mode="text",
+                items=(),
+                now=at(6),
+            )
+            uow.practice.mark_incomplete(other.id, at(7))
+            third = open_practice(uow, world, at(4), mode="class")
+        with uow_factory(user_id) as uow:
+            rows = uow.practice.sessions_for_subject(world.subject_id)
+            assert [r.id for r in rows] == [third.id, second.id, first.id]
+            assert [r.status for r in rows] == ["open", "incomplete", "closed"]
+            assert rows[2].summary == {"minutes": 1}
+            assert [r.id for r in uow.practice.sessions_for_subject(world.subject_id, 2)] == [
+                third.id,
+                second.id,
+            ]
+            assert [r.id for r in uow.practice.sessions_for_subject(world.other_subject_id)] == [
+                other.id
+            ]
+            assert uow.practice.sessions_for_subject(uuid4()) == ()
+        with uow_factory(other_user_id) as uow:
+            assert uow.practice.sessions_for_subject(world.subject_id) == ()
+
+    def test_active_counts_count_active_instances_per_template(
+        self, uow_factory: UowFactory, user_id: UUID, other_user_id: UUID, now: datetime
+    ) -> None:
+        with uow_factory(user_id) as uow:
+            world = practice_world(uow, now)
+            counts = uow.instances.active_counts(world.subject_id)
+        # quiz, loose_quiz and the replacement are active; the replaced one is retired
+        assert counts[world.numeric.id] == 3
+        assert counts[world.flash.id] == 1
+        assert sum(counts.values()) == 5  # the display counts on its own template
+        with uow_factory(user_id) as uow:
+            assert uow.instances.active_counts(uuid4()) == {}
+        with uow_factory(other_user_id) as uow:
+            assert uow.instances.active_counts(world.subject_id) == {}
 
     def test_candidates_are_active_exercises_with_their_last_showing(
         self, uow_factory: UowFactory, user_id: UUID, now: datetime

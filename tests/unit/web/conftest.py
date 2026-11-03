@@ -6,12 +6,14 @@ from uuid import UUID
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from subject_web_fixtures import SubjectWorld, seed_subject_world
 
 from tutor.web.app import create_app
 from tutor.web.config import WebConfig
 from tutor.web.demo import DemoUsers, seed_demo
 from tutor.web.memory import FakeBilling, FakeGoogle, FixedClock, MemoryBackend, memory_deps
 from tutor.web.profile import MemoryProfiles, install_profiles
+from tutor.web.subjects import MemorySubjects, install_frame_url, install_subjects
 
 NOW = datetime(2027, 1, 12, 18, 0, tzinfo=UTC)  # 12:00 in Mexico City, a Tuesday
 TODAY = date(2027, 1, 12)
@@ -61,6 +63,25 @@ def profiles(clock: FixedClock) -> MemoryProfiles:
 
 
 @pytest.fixture
+def subjects(clock: FixedClock) -> MemorySubjects:
+    """Core in-memory subjects services behind the Materias port (slice D ruling 50)."""
+    return MemorySubjects(clock)
+
+
+def fake_frame_url(user_id: UUID, instance_id: UUID) -> str:
+    """Stands in for the template origin's signer (spec 10): the frame's src, never a
+    same-origin path."""
+    return f"https://templates.testserver/app/instances/{instance_id}/raw?t=test"
+
+
+@pytest.fixture
+def beto_world(subjects: MemorySubjects, demo: DemoUsers) -> SubjectWorld:
+    """Beto's subject, notes, templates, instances and practice (the isolation sweep's ids)."""
+    subjects.ensure_user(demo.beto)
+    return seed_subject_world(subjects.svc, demo.beto, name="Bajo")
+
+
+@pytest.fixture
 def app(
     backend: MemoryBackend,
     demo: DemoUsers,
@@ -69,9 +90,12 @@ def app(
     google: FakeGoogle,
     config: WebConfig,
     profiles: MemoryProfiles,
+    subjects: MemorySubjects,
 ) -> FastAPI:
     application = create_app(memory_deps(backend, clock, billing=billing, google=google), config)
     install_profiles(application, profiles)
+    install_subjects(application, subjects)
+    install_frame_url(application, fake_frame_url)
     return application
 
 

@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import Connection, func, insert, select, text
+from sqlalchemy import Connection, exists, func, insert, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import RowMapping
 
@@ -35,6 +35,7 @@ from tutor.domain.notes import (
 )
 from tutor.services.ports import (
     ConceptRow,
+    NoteListRow,
     NoteRow,
     PassageRow,
     SearchHit,
@@ -418,6 +419,56 @@ class PgNoteRepo:
             .one_or_none()
         )
         return None if m is None else _note_row(m)
+
+    def list_for_subject(self, subject_id: UUID) -> tuple[NoteListRow, ...]:
+        newer = notes.alias("newer")
+        superseded = exists().where(
+            newer.c.user_id == self._user_id, newer.c.supersedes_note_id == notes.c.id
+        )
+        rows = self._conn.execute(
+            select(
+                notes.c.id,
+                notes.c.source_id,
+                sources.c.title.label("source_title"),
+                sources.c.kind.label("source_kind"),
+                notes.c.title,
+                notes.c.lesson_ref,
+                notes.c.position,
+                notes.c.origin,
+                notes.c.created_at,
+                notes.c.supersedes_note_id,
+                superseded.label("superseded"),
+            )
+            .select_from(
+                notes.outerjoin(
+                    sources,
+                    (sources.c.id == notes.c.source_id) & (sources.c.user_id == self._user_id),
+                )
+            )
+            .where(notes.c.user_id == self._user_id, notes.c.subject_id == subject_id)
+            .order_by(
+                sources.c.title.collate("C").asc().nulls_last(),
+                notes.c.position.asc().nulls_last(),
+                notes.c.created_at,
+                notes.c.id,
+            )
+        ).mappings()
+        return tuple(
+            NoteListRow(
+                id=m["id"],
+                source_id=m["source_id"],
+                source_title=m["source_title"],
+                source_kind=m["source_kind"],
+                title=m["title"],
+                lesson_ref=m["lesson_ref"],
+                position=m["position"],
+                origin=m["origin"],
+                created_at=m["created_at"],
+                supersedes_note_id=m["supersedes_note_id"],
+                superseded=bool(m["superseded"]),
+            )
+            for m in rows
+        )
 
     # --- passages and concepts ---------------------------------------------------------------
 

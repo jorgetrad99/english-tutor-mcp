@@ -408,6 +408,24 @@ class InstanceRow:
 
 
 @dataclass(frozen=True, slots=True)
+class NoteListRow:
+    """One note as the subject page lists it (slice D ruling 56): metadata only, no text.
+    `superseded` when another note of the user names this one in supersedes_note_id."""
+
+    id: UUID
+    source_id: UUID | None
+    source_title: str | None
+    source_kind: SourceKind | None
+    title: str
+    lesson_ref: str | None
+    position: int | None
+    origin: Origin
+    created_at: datetime
+    supersedes_note_id: UUID | None
+    superseded: bool
+
+
+@dataclass(frozen=True, slots=True)
 class SearchHit:
     """One note found by `NoteRepo.search`: how many passages matched, which concept hops
     reached it (names) at what minimum depth, whether only approximate matching reached it
@@ -481,6 +499,11 @@ class NoteRepo(Protocol):
 
     def get(self, note_id: UUID) -> NoteRow | None:
         """The user's note, or None."""
+
+    def list_for_subject(self, subject_id: UUID) -> tuple[NoteListRow, ...]:
+        """Every note of the subject, superseded ones included (ruling 56), by source title
+        (code point order, notes without a source last), position (nulls last), created_at
+        and id; () for another user's or a missing subject."""
 
     def passages(self, note_id: UUID, start: int, stop: int) -> tuple[PassageRow, ...]:
         """Passages `start`..`stop` (1-based, inclusive) in order; () outside the range or
@@ -563,6 +586,10 @@ class InstanceRepo(Protocol):
 
     def for_note(self, note_id: UUID) -> tuple[InstanceRow, ...]:
         """The note's active instances by seq; () for another user's note."""
+
+    def active_counts(self, subject_id: UUID) -> Mapping[UUID, int]:
+        """Active instances of the subject per template id (templates without one left out);
+        empty for another user's or a missing subject."""
 
 
 # --- practice and progress (subjects spec 6, 16; slice B plan rulings 28-38, 63-71) ------------
@@ -661,6 +688,12 @@ class PracticeRepo(Protocol):
 
     def session(self, session_id: UUID) -> PracticeSessionRow | None:
         """The user's practice session, or None."""
+
+    def sessions_for_subject(
+        self, subject_id: UUID, limit: int = 50
+    ) -> tuple[PracticeSessionRow, ...]:
+        """The subject's practice sessions of any status, newest first (started_at, then id,
+        both descending), at most `limit` (ruling 55); () for another user's subject."""
 
     def items(self, session_id: UUID) -> tuple[PracticeItemRow, ...]:
         """The session's items by seq; () for another user's session."""

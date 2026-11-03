@@ -43,6 +43,7 @@ from tutor.web.pg import (
 )
 from tutor.web.profile import ServicesProfiles, install_profiles
 from tutor.web.sessions import ANONYMOUS_LIFETIME
+from tutor.web.subjects import ServicesSubjects, install_subjects
 
 Scope = MutableMapping[str, Any]
 Message = MutableMapping[str, Any]
@@ -348,6 +349,8 @@ def build_app(
         mcp_app = PeriodicPurge(mcp_app, _session_purge(deps.sessions, config, deps.clock))
     web = create_app(deps, config)
     install_profiles(web, ServicesProfiles(svc))  # Perfil saves through the same Services
+    install_subjects(web, ServicesSubjects(svc))  # Materias reads through the same Services
+    # TODO(slice D frame origin): install_frame_url(web, <the template origin's signer>)
     web_app: ASGIApp = BodySizeGuard(web)
     if settings.dev_auth:
         web_app = RejectProxyHeaders(web_app)  # covers /auth/dev-login

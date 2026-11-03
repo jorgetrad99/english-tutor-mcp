@@ -13,7 +13,7 @@ from typing import Literal
 from uuid import UUID
 
 from tutor.domain.notes import Origin
-from tutor.domain.practice import KindResult, PracticeMode
+from tutor.domain.practice import KindResult, PracticeMode, PracticeStatus
 from tutor.domain.subjects import Subject, SubjectQuestion
 from tutor.domain.templates import (
     GradingKind,
@@ -284,3 +284,21 @@ class PracticeSummary:
     self_rating: int | None
     plan_status: PlanStatus | None
     streak_days: int  # the subject's current streak (spec 16.13 Q2), never the English one
+
+
+@dataclass(frozen=True, slots=True)
+class HistoryRow:
+    """One practice session as the subject page lists it (slice D ruling 55). `items` and
+    `answered` count the session's showings; `accuracy` is the share of answered showings graded
+    correct (None without an answer); `minutes` is the stored summary's, None until the session
+    is closed; `counted` is the attendance rule (spec 15.13 D5), decided here."""
+
+    session_id: UUID
+    started_at: datetime
+    mode: PracticeMode
+    status: PracticeStatus
+    items: int
+    answered: int
+    accuracy: float | None
+    minutes: int | None
+    counted: bool

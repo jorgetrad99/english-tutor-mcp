@@ -431,6 +431,7 @@ class SubjectProgress:
     unassigned: UnassignedProgress
     templates: tuple[TemplateTiming, ...]
     time_cap_seconds: int
+    over_cap: int  # graded answers above the cap, left out of every timing
     weeks: tuple[WeekCounts, ...]
     totals: ActivityCounts
     unscoped_searches: int
@@ -480,6 +481,7 @@ def subject_progress(
     breakdown = concept_accuracy(showings, concepts, recent_from=start)
     streak = subject_streak(practice_days, now, tz)
     recent = accuracy_of(s for s in showings if s.answered_at >= start)
+    over_cap = _timing(showings).over_cap
     return SubjectProgress(
         as_of=today,
         streak=streak,
@@ -490,8 +492,9 @@ def subject_progress(
         unassigned=breakdown.unassigned,
         templates=template_timing(showings, templates),
         time_cap_seconds=ITEM_TIME_CAP_SECONDS,
+        over_cap=over_cap,
         weeks=weekly_counts(activity, sessions, today=today, tz=tz, now=now),
         totals=activity_totals(activity, sessions, now=now),
         unscoped_searches=unscoped_searches,
-        summary_text=summary_text(streak, recent, _timing(showings).over_cap),
+        summary_text=summary_text(streak, recent, over_cap),
     )

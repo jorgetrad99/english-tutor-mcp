@@ -60,6 +60,7 @@ from tutor.services.ports import (
 )
 from tutor.services.subject_views import (
     GradedResult,
+    HistoryRow,
     NextItem,
     PlanStatus,
     PracticeItemView,
@@ -554,3 +555,53 @@ def end_practice(
         plan_status=status,
         streak_days=streak,
     )
+
+
+# --- history (slice D ruling 55) ----------------------------------------------------------------
+
+HISTORY_LIMIT = 50
+
+
+def counts_toward_plan(session: PracticeSessionRow, answered: int) -> bool:
+    """The attendance rule of `PracticeRepo.completed_count` for one session (spec 15.13 D5):
+    a session of a plan counts when it is a closed `app` or `text` session, or a `class` session
+    of any status with at least one answered showing."""
+    if session.plan_id is None:
+        return False
+    if session.mode == "class":
+        return answered > 0
+    return session.status == "closed"
+
+
+def _history_row(uow: UnitOfWork, session: PracticeSessionRow) -> HistoryRow:
+    rows = uow.practice.items(session.id)
+    answered = [r for r in rows if r.answered_at is not None]
+    correct = sum(1 for r in answered if r.correct is True)
+    minutes = None
+    if session.status == "closed" and session.summary is not None:
+        minutes = int(session.summary.get("minutes", 0))
+    return HistoryRow(
+        session_id=session.id,
+        started_at=session.started_at,
+        mode=session.mode,
+        status=session.status,
+        items=len(rows),
+        answered=len(answered),
+        accuracy=correct / len(answered) if answered else None,
+        minutes=minutes,
+        counted=counts_toward_plan(session, len(answered)),
+    )
+
+
+def history(
+    svc: Services, user_id: UUID, subject_id: UUID, limit: int = HISTORY_LIMIT
+) -> tuple[HistoryRow, ...]:
+    """The subject's practice sessions, newest first, each with its counts and whether it
+    counted toward the plan; open and incomplete sessions are listed too. A foreign or
+    missing subject is `not_found`."""
+    with svc.uow(user_id) as uow:
+        if uow.subjects.get(subject_id) is None:
+            raise ServiceError("not_found", ("subject_id",))
+        return tuple(
+            _history_row(uow, s) for s in uow.practice.sessions_for_subject(subject_id, limit)
+        )

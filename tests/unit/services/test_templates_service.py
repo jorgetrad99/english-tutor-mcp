@@ -38,13 +38,15 @@ from tutor.services.errors import ServiceError
 from tutor.services.memory import MemoryStore
 from tutor.services.notes import get_note, save_notes
 from tutor.services.subject_views import InstanceSaved, TemplateSaved
-from tutor.services.template_files import inline_guide
+from tutor.services.template_files import bridge, inline_guide
 from tutor.services.templates import (
     create_instance,
     get_instance_view,
     get_template_guide,
+    instance_counts,
     list_templates,
     save_template,
+    web_instance_document,
 )
 
 from .conftest import FixedClock, create_subject
@@ -637,3 +639,74 @@ def test_a_note_with_one_concept_gives_it_to_instances_without_one(
     assert [i.concept for i in get_note(svc, user_id, first.note_id).instances] == ["Suma"]
     assert [i.concept for i in get_note(svc, user_id, second.note_id).instances] == [None]
     assert sorted(c.name for c in store.tables.concepts.values()) == ["Resta", "Suma"]
+
+
+# --- the website's reads (slice D rulings 50 and 59) -------------------------------------------
+
+
+def test_web_instance_document_uses_the_web_bridge_and_the_same_preview_draw(
+    svc: Services, user_id: UUID, other_user_id: UUID
+) -> None:
+    subject_id = create_subject(svc, user_id)
+    flash = saved(svc, user_id, subject_id, FLASHCARD)
+    numeric = saved(svc, user_id, subject_id, NUMERIC)
+    pooled = create_instance(
+        svc, user_id, subject_id, InstanceInput(flash, flashcard_params(6), "T.")
+    ).instance_id
+    sums = create_instance(
+        svc, user_id, subject_id, InstanceInput(numeric, numeric_params(), "R.")
+    ).instance_id
+    document = web_instance_document(svc, user_id, pooled)
+    assert document is not None
+    assert bridge("web") in document and bridge("artifact") not in document
+    assert document.count('id="tutor-params"') == 1
+    assert web_instance_document(svc, user_id, pooled) == document  # seeded by the instance id
+    artifact = get_instance_view(svc, user_id, pooled).document
+    assert sum(f"cue {i}" in document for i in range(6)) == 1
+    assert [f"cue {i}" in document for i in range(6)] == [f"cue {i}" in artifact for i in range(6)]
+    for iid in (pooled, sums):
+        text = web_instance_document(svc, user_id, iid)
+        assert text is not None and not any(leak in text for leak in LEAKS)
+    assert web_instance_document(svc, other_user_id, pooled) is None
+    assert web_instance_document(svc, user_id, uuid4()) is None
+
+
+def test_web_instance_document_still_serves_a_retired_instance(
+    svc: Services, user_id: UUID
+) -> None:
+    subject_id = create_subject(svc, user_id)
+    template_id = saved(svc, user_id, subject_id, CHOICE)
+    first = create_instance(
+        svc, user_id, subject_id, InstanceInput(template_id, choice_params(1), "Elige.")
+    )
+    create_instance(
+        svc,
+        user_id,
+        subject_id,
+        InstanceInput(template_id, choice_params(2), "Elige.", None, first.instance_id),
+    )
+    assert get_instance_view(svc, user_id, first.instance_id).status == "retired"
+    assert web_instance_document(svc, user_id, first.instance_id) is not None
+
+
+def test_instance_counts_count_active_instances_per_template(
+    svc: Services, user_id: UUID, other_user_id: UUID
+) -> None:
+    subject_id = create_subject(svc, user_id)
+    choice = saved(svc, user_id, subject_id, CHOICE)
+    table = saved(svc, user_id, subject_id, TABLE)
+    saved(svc, user_id, subject_id, NUMERIC)  # no instance: left out
+    first = create_instance(
+        svc, user_id, subject_id, InstanceInput(choice, choice_params(1), "Elige.")
+    )
+    create_instance(
+        svc,
+        user_id,
+        subject_id,
+        InstanceInput(choice, choice_params(2), "Elige.", None, first.instance_id),
+    )
+    create_instance(svc, user_id, subject_id, InstanceInput(table, table_params(), "Mira."))
+    assert instance_counts(svc, user_id, subject_id) == {choice: 1, table: 1}
+    with pytest.raises(ServiceError) as info:
+        instance_counts(svc, other_user_id, subject_id)
+    assert info.value.code == "not_found"
