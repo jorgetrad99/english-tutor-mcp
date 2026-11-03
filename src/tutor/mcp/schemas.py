@@ -1195,8 +1195,8 @@ class SourceIn(StrictInput):
         default=None,
         title="URL",
         description=(
-            f"Optional address of the source, at most {URL_MAX} characters. Stored as data; "
-            "the server never fetches it."
+            f"Optional http or https address of the source, at most {URL_MAX} characters. "
+            "Stored as data; the server never fetches it."
         ),
         max_length=URL_MAX,
     )

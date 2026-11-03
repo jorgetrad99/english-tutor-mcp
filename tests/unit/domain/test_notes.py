@@ -579,6 +579,42 @@ def test_each_source_field_error(changes: dict[str, object], field: str) -> None
     assert (error.code, error.fields) == ("validation_failed", (field,))
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://example.test/curso",
+        "http://example.test/clase?id=3#parte-2",
+        "HTTPS://Example.test",
+        "  https://example.test/curso  ",
+    ],
+)
+def test_source_url_accepts_http_and_https(url: str) -> None:
+    valid = ok(note(), src=source(url=url))
+    assert valid.source is not None and valid.source.url == url.strip()
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "javascript:alert(1)",
+        "data:text/html,<p>hola</p>",
+        "file:///etc/passwd",
+        "ftp://example.test/curso.pdf",
+        "mailto:profe@example.test",
+        "example.test/curso",
+        "//example.test/curso",
+        "https://",
+        "https:///curso",
+        "http://[::1",
+        "https://example.test/una clase",
+        "https://example.test/	clase",
+    ],
+)
+def test_source_url_refuses_other_schemes_and_malformed_addresses(url: str) -> None:
+    error = failure(note(), src=source(url=url))
+    assert (error.code, error.fields) == ("validation_failed", ("source.url",))
+
+
 def test_all_validation_errors_are_reported_in_order() -> None:
     error = failure(
         note(title="", raw_text="", links=(ConceptLinkInput("x", "x", "related"),)),

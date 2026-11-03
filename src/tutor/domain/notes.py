@@ -7,6 +7,7 @@ import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal, TypeGuard
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from tutor.domain.errors import FieldError, FieldErrorCode
@@ -39,6 +40,7 @@ TITLE_MAX = 200
 LESSON_REF_MAX = 120
 SOURCE_TITLE_MAX = 200
 URL_MAX = 2000
+URL_SCHEMES = frozenset({"http", "https"})
 CONCEPT_NAME_MAX = 80
 
 PASSAGE_TARGET = 1200
@@ -394,8 +396,29 @@ def _source(data: SourceInput, errors: Errors) -> ValidSource | None:
     if kind is None:
         _fail(errors, "source.kind", "required" if not kind_value else "invalid_choice")
     title = _name(data.title, SOURCE_TITLE_MAX, "source.title", errors)
-    url = _optional_text(data.url, URL_MAX, "source.url", errors)
+    url = _url(data.url, errors)
     return ValidSource(kind, title, url) if kind is not None else None
+
+
+def _url(value: str | None, errors: Errors) -> str | None:
+    """An optional absolute http or https address with a host and no whitespace; stored as data
+    and never fetched, but a website link must not carry `javascript:` or `data:`."""
+    text = _optional_text(value, URL_MAX, "source.url", errors)
+    if text is None:
+        return None
+    try:
+        parts = urlsplit(text)
+    except ValueError:  # an unbalanced IPv6 bracket
+        parts = None
+    if (
+        parts is None
+        or parts.scheme.lower() not in URL_SCHEMES
+        or not parts.hostname
+        or _WHITESPACE.search(text) is not None
+    ):
+        _fail(errors, "source.url", "invalid")
+        return None
+    return text
 
 
 def _concepts(values: Sequence[str], field: str, errors: Errors) -> tuple[ConceptName, ...]:

@@ -509,6 +509,22 @@ async def test_a_self_link_is_validation_failed_by_path() -> None:
     assert (body["code"], body["fields"]) == ("validation_failed", ["notes[0].links[0]"])
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("url", ["javascript:alert(1)", "data:text/html,x", "file:///etc/passwd"])
+async def test_a_source_url_other_than_http_or_https_is_refused(url: str) -> None:
+    world = World()
+    async with Client(world.mcp) as client:
+        subject_id = await new_subject(client)
+        body = await error_of(
+            client,
+            "save_notes",
+            {"subject_id": subject_id, "source": {**SOURCE, "url": url}, "notes": [note()]},
+        )
+    assert (body["code"], body["fields"]) == ("validation_failed", ["source.url"])
+    assert world.note_count(world.ana) == 0
+    assert world.source_count(world.ana) == 0
+
+
 UNKNOWN_KEY_PATHS: list[tuple[tuple[Any, ...], str]] = [
     ((), "unknown_field"),
     (("source",), "source.unknown_field"),
