@@ -2,6 +2,7 @@ import dataclasses
 from datetime import date, timedelta
 
 import pytest
+
 from tutor.domain.subjects import (
     CONTEXT_TEXT_MAX,
     DEFAULT_EXERCISE_KINDS,
@@ -19,8 +20,6 @@ from tutor.domain.subjects import (
     SubjectInput,
     validate_subject,
 )
-
-from tutor.services.errors import ServiceError
 
 pytestmark = pytest.mark.unit
 
@@ -43,14 +42,15 @@ def raw(**changes: object) -> SubjectInput:
 
 
 def ok(value: SubjectInput) -> Subject:
-    return validate_subject(value, TODAY)
+    result = validate_subject(value, TODAY)
+    assert isinstance(result, Subject)
+    return result
 
 
 def fields_of(value: SubjectInput) -> tuple[str, ...]:
-    with pytest.raises(ServiceError) as info:
-        validate_subject(value, TODAY)
-    assert info.value.code == "validation_failed"
-    return info.value.fields
+    result = validate_subject(value, TODAY)
+    assert isinstance(result, tuple)  # the errors, never raised (ruling 13)
+    return tuple(error.field for error in result)
 
 
 def test_enums_are_closed_tuples() -> None:
@@ -164,6 +164,29 @@ def test_boundaries_are_allowed() -> None:
 )
 def test_each_field_error(changes: dict[str, object], field: str) -> None:
     assert fields_of(raw(**changes)) == (field,)
+
+
+def test_error_codes_say_why() -> None:
+    bad = raw(
+        name="", goal_text="g" * 400, preference="x", exercise_kinds=["x"], minutes_per_session=0
+    )
+    result = validate_subject(bad, TODAY)
+    assert isinstance(result, tuple)
+    assert [(e.field, e.code) for e in result] == [
+        ("name", "required"),
+        ("goal_text", "too_long"),
+        ("preference", "invalid_choice"),
+        ("exercise_kinds", "invalid_choice"),
+        ("minutes_per_session", "out_of_range"),
+    ]
+    four = validate_subject(raw(exercise_kinds=(*EXERCISE_KINDS, "quiz")), TODAY)
+    assert isinstance(four, tuple) and four[0].code == "invalid_choice"
+    past = validate_subject(raw(target_date=TODAY - timedelta(days=1), preference=""), TODAY)
+    assert isinstance(past, tuple)
+    assert [(e.field, e.code) for e in past] == [
+        ("preference", "required"),
+        ("target_date", "invalid"),
+    ]
 
 
 def test_all_errors_are_reported_in_field_order() -> None:

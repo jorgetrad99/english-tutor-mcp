@@ -32,6 +32,7 @@ from tutor.domain.notes import (
     ConceptName,
     ExerciseInput,
     NoteInput,
+    NotesErrors,
     QuizItemInput,
     SourceInput,
     ValidNotes,
@@ -44,7 +45,6 @@ from tutor.domain.notes import (
     strip_nul,
     validate_notes,
 )
-from tutor.services.errors import ServiceError
 
 pytestmark = pytest.mark.unit
 
@@ -92,13 +92,15 @@ def source(**changes: object) -> SourceInput:
 
 
 def ok(*notes: NoteInput, src: SourceInput | None = None, origin: str = "mcp") -> ValidNotes:
-    return validate_notes(src, notes, origin=origin)  # type: ignore[arg-type]
+    result = validate_notes(src, notes, origin=origin)  # type: ignore[arg-type]
+    assert isinstance(result, ValidNotes)
+    return result
 
 
-def failure(*notes: NoteInput, src: SourceInput | None = None, origin: str = "mcp") -> ServiceError:
-    with pytest.raises(ServiceError) as info:
-        validate_notes(src, notes, origin=origin)  # type: ignore[arg-type]
-    return info.value
+def failure(*notes: NoteInput, src: SourceInput | None = None, origin: str = "mcp") -> NotesErrors:
+    result = validate_notes(src, notes, origin=origin)  # type: ignore[arg-type]
+    assert isinstance(result, NotesErrors)  # returned, never raised (ruling 13)
+    return result
 
 
 # --- caps ------------------------------------------------------------------------------------

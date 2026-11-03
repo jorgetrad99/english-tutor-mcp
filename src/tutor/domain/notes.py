@@ -9,8 +9,8 @@ from dataclasses import dataclass
 from typing import Literal, TypeGuard
 from uuid import UUID
 
+from tutor.domain.errors import FieldError, FieldErrorCode
 from tutor.domain.subjects import collapse_name
-from tutor.services.errors import ServiceError
 
 SourceKind = Literal["course", "pdf", "text", "url", "other"]
 LinkKind = Literal["prerequisite", "related"]
@@ -349,6 +349,22 @@ class ValidNotes:
     notes: tuple[ValidNote, ...]
 
 
+NotesErrorCode = Literal["validation_failed", "limit_exceeded"]
+
+
+@dataclass(frozen=True, slots=True)
+class NotesErrors:
+    """Why a payload was refused: `limit_exceeded` carries the one cap that was hit,
+    `validation_failed` every bad field in payload order (ruling 13)."""
+
+    code: NotesErrorCode
+    errors: tuple[FieldError, ...]
+
+    @property
+    def fields(self) -> tuple[str, ...]:
+        return tuple(error.field for error in self.errors)
+
+
 def _is_source_kind(value: str) -> TypeGuard[SourceKind]:
     return value in SOURCE_KINDS
 
@@ -361,65 +377,77 @@ def _is_exercise_kind(value: str) -> TypeGuard[NoteExerciseKind]:
     return value in NOTE_EXERCISE_KINDS
 
 
-def _name(value: str, limit: int, field: str, errors: list[str]) -> str:
+Errors = list[FieldError]
+
+
+def _fail(errors: Errors, field: str, code: FieldErrorCode) -> None:
+    errors.append(FieldError(field, code))
+
+
+def _length(text: str, limit: int, field: str, errors: Errors, *, required: bool) -> None:
+    if not text:
+        if required:
+            _fail(errors, field, "required")
+    elif len(text) > limit:
+        _fail(errors, field, "too_long")
+
+
+def _name(value: str, limit: int, field: str, errors: Errors) -> str:
     text = collapse_name(value)
-    if not 1 <= len(text) <= limit:
-        errors.append(field)
+    _length(text, limit, field, errors, required=True)
     return text
 
 
-def _optional_name(value: str | None, limit: int, field: str, errors: list[str]) -> str | None:
+def _optional_name(value: str | None, limit: int, field: str, errors: Errors) -> str | None:
     text = collapse_name(value or "")
-    if len(text) > limit:
-        errors.append(field)
-        return None
-    return text or None
+    _length(text, limit, field, errors, required=False)
+    return text if text and len(text) <= limit else None
 
 
-def _text(value: str, limit: int, field: str, errors: list[str]) -> str:
+def _text(value: str, limit: int, field: str, errors: Errors) -> str:
     text = value.strip()
-    if not 1 <= len(text) <= limit:
-        errors.append(field)
+    _length(text, limit, field, errors, required=True)
     return text
 
 
-def _optional_text(value: str | None, limit: int, field: str, errors: list[str]) -> str | None:
+def _optional_text(value: str | None, limit: int, field: str, errors: Errors) -> str | None:
     text = (value or "").strip()
-    if len(text) > limit:
-        errors.append(field)
-        return None
-    return text or None
+    _length(text, limit, field, errors, required=False)
+    return text if text and len(text) <= limit else None
 
 
 def _optional_range(
-    value: int | None, low: int, high: int, field: str, errors: list[str]
+    value: int | None, low: int, high: int, field: str, errors: Errors
 ) -> int | None:
     if value is not None and not low <= value <= high:
-        errors.append(field)
+        _fail(errors, field, "out_of_range")
         return None
     return value
 
 
-def _concept(value: str, field: str, errors: list[str]) -> ConceptName | None:
+def _concept(value: str, field: str, errors: Errors) -> ConceptName | None:
     name = collapse_name(value)
     norm = name_norm(name)
-    if not 1 <= len(name) <= CONCEPT_NAME_MAX or not norm:
-        errors.append(field)
+    if not name or not norm:
+        _fail(errors, field, "required")
+        return None
+    if len(name) > CONCEPT_NAME_MAX:
+        _fail(errors, field, "too_long")
         return None
     return ConceptName(name, norm)
 
 
-def _source(data: SourceInput, errors: list[str]) -> ValidSource | None:
+def _source(data: SourceInput, errors: Errors) -> ValidSource | None:
     kind_value = data.kind.strip()
     kind = kind_value if _is_source_kind(kind_value) else None
     if kind is None:
-        errors.append("source.kind")
+        _fail(errors, "source.kind", "required" if not kind_value else "invalid_choice")
     title = _name(data.title, SOURCE_TITLE_MAX, "source.title", errors)
     url = _optional_text(data.url, URL_MAX, "source.url", errors)
     return ValidSource(kind, title, url) if kind is not None else None
 
 
-def _concepts(values: Sequence[str], field: str, errors: list[str]) -> tuple[ConceptName, ...]:
+def _concepts(values: Sequence[str], field: str, errors: Errors) -> tuple[ConceptName, ...]:
     seen: dict[str, ConceptName] = {}
     for index, value in enumerate(values):
         concept = _concept(value, f"{field}[{index}]", errors)
@@ -429,7 +457,7 @@ def _concepts(values: Sequence[str], field: str, errors: list[str]) -> tuple[Con
 
 
 def _links(
-    values: Sequence[ConceptLinkInput], field: str, errors: list[str]
+    values: Sequence[ConceptLinkInput], field: str, errors: Errors
 ) -> tuple[ConceptLink, ...]:
     links: dict[tuple[str, str, str], ConceptLink] = {}
     for index, value in enumerate(values):
@@ -438,12 +466,12 @@ def _links(
         to_name = _concept(value.to_name, f"{path}.to", errors)
         kind = value.kind.strip()
         if not _is_link_kind(kind):
-            errors.append(f"{path}.kind")
+            _fail(errors, f"{path}.kind", "required" if not kind else "invalid_choice")
             continue
         if from_name is None or to_name is None:
             continue
         if from_name.name_norm == to_name.name_norm:
-            errors.append(path)
+            _fail(errors, path, "invalid")  # a self-link
             continue
         links.setdefault(
             (from_name.name_norm, to_name.name_norm, kind), ConceptLink(from_name, to_name, kind)
@@ -451,13 +479,13 @@ def _links(
     return tuple(links.values())
 
 
-def _exercise(data: ExerciseInput, path: str, errors: list[str]) -> Exercise | None:
+def _exercise(data: ExerciseInput, path: str, errors: Errors) -> Exercise | None:
     name = _name(data.name, EXERCISE_NAME_MAX, f"{path}.name", errors)
     instructions = _text(data.instructions, INSTRUCTIONS_MAX, f"{path}.instructions", errors)
     kind_value = data.kind.strip()
     kind = kind_value if _is_exercise_kind(kind_value) else None
     if kind is None:
-        errors.append(f"{path}.kind")
+        _fail(errors, f"{path}.kind", "required" if not kind_value else "invalid_choice")
     tempo = _optional_range(data.tempo_bpm, TEMPO_MIN, TEMPO_MAX, f"{path}.tempo_bpm", errors)
     duration = _optional_range(
         data.duration_min, DURATION_MIN, DURATION_MAX, f"{path}.duration_min", errors
@@ -465,16 +493,16 @@ def _exercise(data: ExerciseInput, path: str, errors: list[str]) -> Exercise | N
     return Exercise(name, instructions, kind, tempo, duration) if kind is not None else None
 
 
-def _quiz_item(data: QuizItemInput, path: str, errors: list[str]) -> QuizItem:
+def _quiz_item(data: QuizItemInput, path: str, errors: Errors) -> QuizItem:
     question = _text(data.question, QUESTION_MAX, f"{path}.question", errors)
     options = tuple(option.strip() for option in data.options)
     options_ok = MIN_OPTIONS <= len(options) <= MAX_OPTIONS and all(
         1 <= len(option) <= OPTION_MAX for option in options
     )
     if not options_ok:
-        errors.append(f"{path}.options")
+        _fail(errors, f"{path}.options", "invalid")  # count outside 2-5, or an option's length
     elif not 0 <= data.answer_index < len(options):
-        errors.append(f"{path}.answer_index")
+        _fail(errors, f"{path}.answer_index", "out_of_range")
     explanation = _optional_text(data.explanation, EXPLANATION_MAX, f"{path}.explanation", errors)
     concept = None
     if data.concept is not None and data.concept.strip():
@@ -482,15 +510,17 @@ def _quiz_item(data: QuizItemInput, path: str, errors: list[str]) -> QuizItem:
     return QuizItem(question, options, data.answer_index, explanation, concept)
 
 
-def _note(data: NoteInput, path: str, *, note_cap: int, errors: list[str]) -> ValidNote:
+def _note(data: NoteInput, path: str, *, note_cap: int, errors: Errors) -> ValidNote:
     title = _name(data.title, TITLE_MAX, f"{path}.title", errors)
     lesson_ref = _optional_name(data.lesson_ref, LESSON_REF_MAX, f"{path}.lesson_ref", errors)
     if data.position is not None and data.position < 0:
-        errors.append(f"{path}.position")
+        _fail(errors, f"{path}.position", "out_of_range")
     raw, had_nul = strip_nul(data.raw_text)
     cleaned = clean_text(raw)
-    if not 1 <= len(raw) <= note_cap or not cleaned:
-        errors.append(f"{path}.raw_text")
+    if not raw or not cleaned:
+        _fail(errors, f"{path}.raw_text", "required")
+    elif len(raw) > note_cap:
+        _fail(errors, f"{path}.raw_text", "too_long")
     concepts = _concepts(data.concepts, f"{path}.concepts", errors)
     links = _links(data.links, f"{path}.links", errors)
     exercises = tuple(
@@ -518,14 +548,14 @@ def _note(data: NoteInput, path: str, *, note_cap: int, errors: list[str]) -> Va
     )
 
 
-def _check_limits(notes: Sequence[NoteInput], origin: Origin) -> None:
-    """Count and total-size caps, in payload order; the first one hit is raised."""
+def _limit_hit(notes: Sequence[NoteInput], origin: Origin) -> FieldError | None:
+    """The first count or total-size cap the payload breaks, in payload order."""
     if len(notes) > MAX_NOTES_PER_CALL:
-        raise ServiceError("limit_exceeded", ("notes",))
+        return FieldError("notes", "too_many")
     if origin == "mcp":
         total = sum(len(strip_nul(note.raw_text)[0]) for note in notes)
         if total > MAX_CALL_CHARS:
-            raise ServiceError("limit_exceeded", ("notes",))
+            return FieldError("notes", "too_long")
     for index, note in enumerate(notes):
         counts = (
             ("concepts", len(note.concepts), MAX_CONCEPTS),
@@ -535,29 +565,32 @@ def _check_limits(notes: Sequence[NoteInput], origin: Origin) -> None:
         )
         for field, count, cap in counts:
             if count > cap:
-                raise ServiceError("limit_exceeded", (f"notes[{index}].{field}",))
+                return FieldError(f"notes[{index}].{field}", "too_many")
+    return None
 
 
 def validate_notes(
     source: SourceInput | None, notes: Sequence[NoteInput], *, origin: Origin
-) -> ValidNotes:
+) -> ValidNotes | NotesErrors:
     """Validate a `save_notes` payload (spec 4.1, 4.2).
 
-    Count and total-character caps raise `limit_exceeded` with the offending field before any
+    Count and total-character caps give `limit_exceeded` with the offending field before any
     field is examined; then every field is checked and `validation_failed` lists each bad field
     path (`notes[2].quiz_items[0].options`) in payload order. Concept names are deduplicated by
     `name_norm` within a note, duplicate links are dropped and self-links are rejected.
     """
     if len(notes) < MIN_NOTES_PER_CALL:
-        raise ServiceError("validation_failed", ("notes",))
-    _check_limits(notes, origin)
+        return NotesErrors("validation_failed", (FieldError("notes", "required"),))
+    limit = _limit_hit(notes, origin)
+    if limit is not None:
+        return NotesErrors("limit_exceeded", (limit,))
     note_cap = MAX_NOTE_CHARS if origin == "mcp" else MAX_WEB_NOTE_CHARS
-    errors: list[str] = []
+    errors: Errors = []
     valid_source = _source(source, errors) if source is not None else None
     valid_notes = tuple(
         _note(note, f"notes[{index}]", note_cap=note_cap, errors=errors)
         for index, note in enumerate(notes)
     )
     if errors:
-        raise ServiceError("validation_failed", tuple(errors))
+        return NotesErrors("validation_failed", tuple(errors))
     return ValidNotes(valid_source, valid_notes)

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Literal, TypeGuard
 
-from tutor.services.errors import ServiceError
+from tutor.domain.errors import FieldError
 
 Preference = Literal["practice_first", "theory_first", "balanced"]
 ExerciseKind = Literal["quiz", "ear", "exercise"]
@@ -77,52 +77,57 @@ def collapse_name(value: str) -> str:
     return _SPACES.sub(" ", value).strip()
 
 
-def _optional_text(value: str | None, limit: int, field: str, errors: list[str]) -> str | None:
+def _optional_text(
+    value: str | None, limit: int, field: str, errors: list[FieldError]
+) -> str | None:
     text = (value or "").strip()
     if len(text) > limit:
-        errors.append(field)
+        errors.append(FieldError(field, "too_long"))
         return None
     return text or None
 
 
-def _exercise_kinds(values: Sequence[str], errors: list[str]) -> tuple[ExerciseKind, ...]:
+def _exercise_kinds(values: Sequence[str], errors: list[FieldError]) -> tuple[ExerciseKind, ...]:
     if not values:
         return DEFAULT_EXERCISE_KINDS
-    if (
-        len(set(values)) != len(values)
-        or not all(_is_exercise_kind(v) for v in values)
-        or not MIN_EXERCISE_KINDS <= len(values) <= MAX_EXERCISE_KINDS
-    ):
-        errors.append("exercise_kinds")
+    if len(set(values)) != len(values) or not all(_is_exercise_kind(v) for v in values):
+        errors.append(FieldError("exercise_kinds", "invalid_choice"))
+        return ()
+    if not MIN_EXERCISE_KINDS <= len(values) <= MAX_EXERCISE_KINDS:
+        errors.append(FieldError("exercise_kinds", "too_many"))
         return ()
     return tuple(k for k in EXERCISE_KINDS if k in values)
 
 
-def validate_subject(data: SubjectInput, today: date) -> Subject:
-    """Validate a subject; raise `validation_failed` with every bad field, in field order."""
-    errors: list[str] = []
+def validate_subject(data: SubjectInput, today: date) -> Subject | tuple[FieldError, ...]:
+    """Validate a subject; return it, or every field error in field order (ruling 13)."""
+    errors: list[FieldError] = []
     name = collapse_name(data.name)
-    if not 1 <= len(name) <= NAME_MAX:
-        errors.append("name")
+    if not name:
+        errors.append(FieldError("name", "required"))
+    elif len(name) > NAME_MAX:
+        errors.append(FieldError("name", "too_long"))
     goal_text = _optional_text(data.goal_text, GOAL_TEXT_MAX, "goal_text", errors)
     context_text = _optional_text(data.context_text, CONTEXT_TEXT_MAX, "context_text", errors)
     preference_value = data.preference.strip()
     preference = preference_value if _is_preference(preference_value) else None
     if preference is None:
-        errors.append("preference")
+        errors.append(
+            FieldError("preference", "required" if not preference_value else "invalid_choice")
+        )
     exercise_kinds = _exercise_kinds(data.exercise_kinds, errors)
     if not MINUTES_MIN <= data.minutes_per_session <= MINUTES_MAX:
-        errors.append("minutes_per_session")
+        errors.append(FieldError("minutes_per_session", "out_of_range"))
     if not SESSIONS_MIN <= data.sessions_per_week <= SESSIONS_MAX:
-        errors.append("sessions_per_week")
+        errors.append(FieldError("sessions_per_week", "out_of_range"))
     if data.target_date is not None and data.target_date < today:
-        errors.append("target_date")
+        errors.append(FieldError("target_date", "invalid"))
     status_value = DEFAULT_STATUS if data.status is None else data.status.strip()
     status = status_value if _is_status(status_value) else None
     if status is None:
-        errors.append("status")
+        errors.append(FieldError("status", "required" if not status_value else "invalid_choice"))
     if errors or preference is None or status is None:
-        raise ServiceError("validation_failed", tuple(errors))
+        return tuple(errors)
     return Subject(
         name=name,
         goal_text=goal_text,
