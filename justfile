@@ -2,9 +2,9 @@
 # One command per line so recipes work under both PowerShell (Windows) and sh (CI).
 set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
 
-export TEST_DATABASE_URL := env("TEST_DATABASE_URL", "postgresql://tutor:tutor@localhost:5433/tutor_test")
+export TEST_DATABASE_URL := env("TEST_DATABASE_URL", "postgresql://tutor:tutor@127.0.0.1:5433/tutor_test")
 # Owner URL for `migrate` (read from the environment by alembic/env.py, never on a command line).
-export MIGRATION_DATABASE_URL := env("MIGRATION_DATABASE_URL", env("DATABASE_URL", "postgresql://tutor:tutor@localhost:5432/tutor"))
+export MIGRATION_DATABASE_URL := env("MIGRATION_DATABASE_URL", env("DATABASE_URL", "postgresql://tutor:tutor@127.0.0.1:5432/tutor"))
 
 # In CI the db-test Postgres is a job service, so compose is skipped there.
 db_test_up := if env("CI", "") == "true" { "uv --version" } else { "docker compose up -d --wait db-test" }

@@ -26,7 +26,7 @@ def pg_settings() -> Settings:
     return Settings.from_env(
         {
             "TUTOR_BASE_URL": BASE,
-            "DATABASE_URL": "postgresql://tutor:tutor@localhost:5433/tutor_test",
+            "DATABASE_URL": "postgresql://tutor:tutor@127.0.0.1:5433/tutor_test",
             "GOOGLE_CLIENT_ID": "id.apps.googleusercontent.com",
             "GOOGLE_CLIENT_SECRET": "test-google-client-secret",
             "TUTOR_JWT_SIGNING_KEY": "j" * 40,

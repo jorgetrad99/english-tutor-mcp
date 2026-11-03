@@ -21,7 +21,7 @@ from tutor.services.ports import IdentityResolver, UowFactory
 
 ROOT = Path(__file__).resolve().parents[2]
 LOGIN_ROLE = "tutor_login_test"
-DEFAULT_URL = "postgresql://tutor:tutor@localhost:5433/tutor_test"
+DEFAULT_URL = "postgresql://tutor:tutor@127.0.0.1:5433/tutor_test"
 NOW = datetime(2026, 10, 14, 15, 0, tzinfo=UTC)  # a Wednesday
 
 
