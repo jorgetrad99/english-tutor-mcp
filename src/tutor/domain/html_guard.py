@@ -14,8 +14,10 @@ from typing import Literal
 MAX_TEMPLATE_BYTES = 40_000
 
 # The one empty element a template must contain: the server puts the parameters (as JSON) in it
-# and its bridge script right after it (spec 15.5).
-TEMPLATE_MARKER = '<script type="application/json" id="tutor-params"></script>'
+# and its bridge script right after it (spec 15.5). The parser must see this exact start tag as
+# the one tutor-params element, at the offset of the marker text (security review P3).
+MARKER_START_TAG = '<script type="application/json" id="tutor-params">'
+TEMPLATE_MARKER = MARKER_START_TAG + "</script>"
 _RESERVED_IDS = frozenset({"tutor-params", "tutor-bridge"})
 
 HtmlProblemCode = Literal[
@@ -59,11 +61,17 @@ def _has_css_token(value: str) -> bool:
 
 
 class _Guard(HTMLParser):
-    def __init__(self) -> None:
+    def __init__(self, html: str) -> None:
         super().__init__(convert_charrefs=True)
         self.problems: list[HtmlProblem] = []
         self._style: list[str] | None = None
         self.reserved_ids: list[str] = []  # tutor-params / tutor-bridge elements, in order
+        self.params_tags: list[tuple[str, int]] = []  # (start tag text, offset) of tutor-params
+        self._line_starts = [0] + [i + 1 for i, ch in enumerate(html) if ch == "\n"]
+
+    def _offset(self) -> int:
+        line, column = self.getpos()  # the parser counts lines by "\n", from 1
+        return self._line_starts[line - 1] + column
 
     def _add(self, code: HtmlProblemCode, detail: str) -> None:
         problem = HtmlProblem(code, detail)
@@ -71,7 +79,10 @@ class _Guard(HTMLParser):
             self.problems.append(problem)
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        self.reserved_ids += [v for n, v in attrs if n == "id" and v in _RESERVED_IDS]
+        ids = [v for n, v in attrs if n == "id" and v in _RESERVED_IDS]
+        self.reserved_ids += ids
+        if "tutor-params" in ids:
+            self.params_tags.append((self.get_starttag_text() or "", self._offset()))
         if tag in _FORBIDDEN_TAGS:
             self._add("tag_forbidden", tag)
             return
@@ -136,24 +147,34 @@ def check_html(html: str) -> tuple[HtmlProblem, ...]:
     return _check(html)[0]
 
 
-def _check(html: str) -> tuple[tuple[HtmlProblem, ...], tuple[str, ...]]:
+def _check(html: str) -> tuple[tuple[HtmlProblem, ...], _Guard | None]:
     if len(html.encode("utf-8", "surrogatepass")) > MAX_TEMPLATE_BYTES:
-        return (HtmlProblem("too_large", "html"),), ()
-    guard = _Guard()
+        return (HtmlProblem("too_large", "html"),), None
+    guard = _Guard(html)
     if not _DOCUMENT_START.match(html.lstrip(_BOM)):
         guard.problems.append(HtmlProblem("not_document", "doctype"))
     guard.feed(html)
     guard.close()
-    return tuple(guard.problems), tuple(guard.reserved_ids)
+    return tuple(guard.problems), guard
 
 
 def check_template_html(html: str) -> tuple[HtmlProblem, ...]:
     """`check_html` plus the marker rule (spec 15.5): exactly one empty
     `<script type="application/json" id="tutor-params"></script>` and no other element with id
-    `tutor-params` or `tutor-bridge`; otherwise `marker_missing` (detail `tutor-params`)."""
-    problems, reserved = _check(html)
-    if problems and problems[0].code == "too_large":
+    `tutor-params` or `tutor-bridge`; otherwise `marker_missing` (detail `tutor-params`).
+
+    The marker text must also be the element the parser sees: the one tutor-params start tag
+    is exactly `MARKER_START_TAG` and starts where the marker text starts, so a marker inside
+    a script string, an attribute or a comment cannot stand in for it (compose_document fills
+    the first marker text)."""
+    problems, guard = _check(html)
+    if guard is None:
         return problems
-    if html.count(TEMPLATE_MARKER) != 1 or reserved != ("tutor-params",):
+    bound = guard.params_tags == [(MARKER_START_TAG, html.find(TEMPLATE_MARKER))]
+    if (
+        html.count(TEMPLATE_MARKER) != 1
+        or tuple(guard.reserved_ids) != ("tutor-params",)
+        or not bound
+    ):
         return (*problems, HtmlProblem("marker_missing", "tutor-params"))
     return problems

@@ -1367,14 +1367,15 @@ _SCRIPT_ESCAPES = (
     ("<", "\\u003c"),
     (">", "\\u003e"),
     ("&", "\\u0026"),
+    ("'", "\\u0027"),
     (chr(0x2028), "\\u2028"),
     (chr(0x2029), "\\u2029"),
 )
 
 
 def encode_payload(payload: Mapping[str, object]) -> str:
-    """Sorted-key JSON safe inside a `<script>` element: `<`, `>`, `&`, U+2028 and U+2029 become
-    JSON escapes, so no value can close the element or start markup (spec 15.5)."""
+    """Sorted-key JSON safe inside a `<script>` element: `<`, `>`, `&`, `'`, U+2028 and U+2029
+    become JSON escapes, so no value can close the element or start markup (spec 15.5)."""
     text = canonical_json(dict(payload))
     for raw, escaped in _SCRIPT_ESCAPES:
         text = text.replace(raw, escaped)

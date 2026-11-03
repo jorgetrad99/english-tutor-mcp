@@ -839,6 +839,7 @@ HOSTILE = (
     "&amp;",
     "a" + chr(0x2028) + "b" + chr(0x2029) + "c",
     "</SCRIPT >",
+    "';alert(1);'",
 )
 
 
@@ -848,7 +849,7 @@ def test_review_focus_8_parameters_cannot_become_markup(value: str) -> None:
     spec = ok(template("exact_text", param("question", "text"), param("k", "text", "answer_key")))
     values = params_ok(spec, ParamPair("question", "text", value), ParamPair("k", "text", "k"))
     encoded = encode_payload(public_payload(INSTANCE, spec, values, Draw()))
-    for raw in ("<", ">", "&", chr(0x2028), chr(0x2029)):
+    for raw in ("<", ">", "&", "'", chr(0x2028), chr(0x2029)):
         assert raw not in encoded
     html = f"<!doctype html><html><body><p>Hola</p>{TEMPLATE_MARKER}<p id='end'>x</p></body></html>"
     document = compose_document(html, encoded, "window.tutorSubmit = function () {};")
@@ -878,6 +879,13 @@ def test_encode_payload_sorts_keys_and_round_trips() -> None:
     text = encode_payload({"b": "é<", "a": [1, None]})
     assert text == '{"a":[1,null],"b":"é\\u003c"}'
     assert json.loads(text) == {"a": [1, None], "b": "é<"}
+
+
+def test_encode_payload_escapes_single_quotes() -> None:
+    # Security review P3: no quote can end a JavaScript string the payload is pasted into.
+    text = encode_payload({"a": "it's"})
+    assert "'" not in text and text == '{"a":"it\\u0027s"}'
+    assert json.loads(text) == {"a": "it's"}
 
 
 # --- text rendering -----------------------------------------------------------------------------

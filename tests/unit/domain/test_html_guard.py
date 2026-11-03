@@ -367,6 +367,51 @@ def test_marker_rule(html: str) -> None:
     assert check_template_html(html)[-1] == HtmlProblem("marker_missing", "tutor-params")
 
 
+# The exact start tag but a different order of attributes, as a real element.
+REORDERED = '<script id="tutor-params" type="application/json"></script>'
+EXACT_START = '<script type="application/json" id="tutor-params">'
+
+
+@pytest.mark.parametrize(
+    "html",
+    [
+        # The marker text where the parser sees no element, plus a real reordered element.
+        MARKED.replace(
+            TEMPLATE_MARKER, f"<script>var m = '{TEMPLATE_MARKER}';</script>{REORDERED}"
+        ),
+        MARKED.replace(TEMPLATE_MARKER, f"<div title='{TEMPLATE_MARKER}'></div>{REORDERED}"),
+        MARKED.replace(TEMPLATE_MARKER, f"<!-- {TEMPLATE_MARKER} -->{REORDERED}"),
+        MARKED.replace(TEMPLATE_MARKER, REORDERED),  # reordered alone
+        MARKED.replace(TEMPLATE_MARKER, "<script id=tutor-params type=application/json></script>"),
+        # The exact start tag as a real element, but not where the marker text is.
+        MARKED.replace(TEMPLATE_MARKER, f"<!-- {TEMPLATE_MARKER} -->{EXACT_START} </script>"),
+        MARKED.replace(
+            TEMPLATE_MARKER, f"<p title='{TEMPLATE_MARKER}'></p>{EXACT_START}\n</script>"
+        ),
+    ],
+    ids=[
+        "js-string",
+        "attribute",
+        "comment",
+        "reordered",
+        "unquoted",
+        "comment-exact",
+        "attr-exact",
+    ],
+)
+def test_marker_must_be_the_real_params_element(html: str) -> None:
+    # Security review P3: compose_document fills the first marker text, so that text must be
+    # the one tutor-params element the parser sees, with exactly the marker's start tag.
+    assert check_template_html(html)[-1] == HtmlProblem("marker_missing", "tutor-params")
+
+
+def test_marker_position_survives_a_bom_and_crlf_lines() -> None:
+    crlf = "\r\n"
+    lines = ["<!doctype html>", "<html>", "<body>", "<p>x</p>", f"  {TEMPLATE_MARKER}", "</html>"]
+    html = chr(0xFEFF) + crlf.join(lines)
+    assert check_template_html(html) == ()
+
+
 def test_marker_problem_comes_after_the_html_problems() -> None:
     html = MARKED.replace("<p>x</p>", "<iframe></iframe>").replace(TEMPLATE_MARKER, "")
     assert check_template_html(html) == (
