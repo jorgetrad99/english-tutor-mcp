@@ -95,9 +95,10 @@ GET_SUBJECTS_DESCRIPTION = (
 SAVE_SUBJECT_DESCRIPTION = (
     "Call after the learner answers the subject onboarding questions from get_subjects, or "
     "when they want to change a subject. Omit subject_id to create a subject; send it to "
-    "replace that subject's settings, for example subject_status 'paused' or 'archived'. Send "
-    "only allowed values and read the answers back before calling. Returns the saved subject; "
-    "keep its subject_id for save_notes and search_notes."
+    "update that subject, for example subject_status 'paused' or 'archived'. On update, an "
+    "omitted optional field keeps its stored value. Send only allowed values and read the "
+    "answers back before calling. Returns the saved subject; keep its subject_id for "
+    "save_notes and search_notes."
 )
 SAVE_NOTES_DESCRIPTION = (
     "Call to store the learner's material for a subject: one note per lesson, sent in order, "

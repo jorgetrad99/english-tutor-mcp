@@ -259,6 +259,83 @@ async def test_onboarding_then_save_subject_then_update() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["paused", "archived"])
+async def test_an_update_without_subject_status_keeps_the_stored_status(status: str) -> None:
+    async with Client(World().mcp) as client:
+        subject_id = await new_subject(client, subject_status=status)
+        updated = await call(
+            client,
+            "save_subject",
+            {**SUBJECT_ARGS, "subject_id": subject_id, "sessions_per_week": 5},
+        )
+    assert updated["subject"]["subject_status"] == status
+    assert updated["subject"]["sessions_per_week"] == 5
+
+
+@pytest.mark.asyncio
+async def test_save_subject_says_how_an_update_merges() -> None:
+    async with Client(World().mcp) as client:
+        tools = {tool.name: tool for tool in await client.list_tools()}
+    props = tools["save_subject"].input_schema["properties"]
+    assert "keeps its stored value" in TOOL_DESCRIPTIONS["save_subject"]
+    for field in ("goal_text", "context_text"):
+        assert "empty string to clear" in props[field]["description"], field
+    assert "null to clear" in props["target_date"]["description"]
+    status = props["subject_status"]["description"]
+    assert "keep the current status" in status and "'active'" in status
+
+
+@pytest.mark.asyncio
+async def test_a_new_subject_without_status_is_active() -> None:
+    async with Client(World().mcp) as client:
+        saved = await call(client, "save_subject", SUBJECT_ARGS)
+    assert saved["subject"]["subject_status"] == "active"
+
+
+KEPT = {"goal_text": "Tocar con mi banda", "context_text": "Dos años", "target_date": "2027-03-01"}
+
+
+@pytest.mark.asyncio
+async def test_an_update_that_omits_text_and_date_keeps_them() -> None:
+    async with Client(World().mcp) as client:
+        subject_id = await new_subject(client, **KEPT)
+        updated = await call(
+            client, "save_subject", {**SUBJECT_ARGS, "subject_id": subject_id, "name": "Bajo"}
+        )
+    subject = updated["subject"]
+    assert {key: subject[key] for key in KEPT} == KEPT
+    assert subject["name"] == "Bajo"
+
+
+@pytest.mark.asyncio
+async def test_an_update_with_null_text_keeps_it_and_empty_text_clears_it() -> None:
+    async with Client(World().mcp) as client:
+        subject_id = await new_subject(client, **KEPT)
+        base = {**SUBJECT_ARGS, "subject_id": subject_id}
+        nulls = await call(
+            client, "save_subject", {**base, "goal_text": None, "context_text": None}
+        )
+        empty = await call(client, "save_subject", {**base, "goal_text": "", "context_text": ""})
+    assert (nulls["subject"]["goal_text"], nulls["subject"]["context_text"]) == (
+        "Tocar con mi banda",
+        "Dos años",
+    )
+    assert (empty["subject"]["goal_text"], empty["subject"]["context_text"]) == (None, None)
+    assert empty["subject"]["target_date"] == "2027-03-01"
+
+
+@pytest.mark.asyncio
+async def test_an_update_with_null_target_date_clears_it() -> None:
+    async with Client(World().mcp) as client:
+        subject_id = await new_subject(client, **KEPT)
+        updated = await call(
+            client, "save_subject", {**SUBJECT_ARGS, "subject_id": subject_id, "target_date": None}
+        )
+    assert updated["subject"]["target_date"] is None
+    assert updated["subject"]["goal_text"] == "Tocar con mi banda"
+
+
+@pytest.mark.asyncio
 async def test_save_subject_rejects_bad_answers_by_field() -> None:
     async with Client(World().mcp) as client:
         past = await error_of(client, "save_subject", {**SUBJECT_ARGS, "target_date": "2020-01-01"})

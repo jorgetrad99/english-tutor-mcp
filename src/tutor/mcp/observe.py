@@ -68,6 +68,9 @@ class CallState:
 
     user_id: UUID | None = None
     error_class: str | None = None
+    # The argument names the client sent (never their values): tells an omitted argument from
+    # an explicit null, which a tool function's defaults cannot (save_subject updates).
+    sent_fields: frozenset[str] = frozenset()
 
 
 CALL_STATE: ContextVar[CallState | None] = ContextVar("tutor_mcp_call", default=None)
@@ -145,7 +148,10 @@ class CallLogMiddleware(Middleware):
         self._clock = clock
 
     async def on_call_tool(self, context: MiddlewareContext[Any], call_next: Any) -> Any:
-        state = CallState()
+        arguments = getattr(context.message, "arguments", None)
+        state = CallState(
+            sent_fields=frozenset(arguments) if isinstance(arguments, dict) else frozenset()
+        )
         token = CALL_STATE.set(state)
         started = self._clock()
         outcome = "ok"

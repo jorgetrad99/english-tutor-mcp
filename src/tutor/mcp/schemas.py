@@ -1038,7 +1038,8 @@ SubjectGoalText = Annotated[
         title="Goal",
         description=(
             f"Optional reason to study, in the learner's own words, at most "
-            f"{SUBJECT_GOAL_MAX} characters."
+            f"{SUBJECT_GOAL_MAX} characters. On update, omit it to keep the stored goal; send "
+            "an empty string to clear it."
         ),
         max_length=SUBJECT_GOAL_MAX,
     ),
@@ -1049,7 +1050,8 @@ SubjectContextText = Annotated[
         title="Context",
         description=(
             "Optional starting point in the learner's words: level, experience, course or "
-            f"material, at most {CONTEXT_TEXT_MAX} characters."
+            f"material, at most {CONTEXT_TEXT_MAX} characters. On update, omit it to keep the "
+            "stored context; send an empty string to clear it."
         ),
         max_length=CONTEXT_TEXT_MAX,
     ),
@@ -1096,14 +1098,20 @@ SubjectTargetDate = Annotated[
     date | None,
     Field(
         title="Target date",
-        description="Optional date the learner aims for, YYYY-MM-DD, today or later.",
+        description=(
+            "Optional date the learner aims for, YYYY-MM-DD, today or later. On update, omit it "
+            "to keep the stored date; send null to clear it."
+        ),
     ),
 ]
 SubjectStatusField = Annotated[
     SubjectStatus | None,
     Field(
         title="Subject status",
-        description="'active' (the default when omitted), 'paused' or 'archived'.",
+        description=(
+            "'active', 'paused' or 'archived'. A new subject without it is 'active'; on update, "
+            "omit it to keep the current status."
+        ),
     ),
 ]
 

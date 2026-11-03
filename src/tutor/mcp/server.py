@@ -79,6 +79,13 @@ def _user() -> UUID:
     return state.user_id
 
 
+def _sent_fields() -> frozenset[str]:
+    state = current_call()
+    if state is None:
+        raise RuntimeError("tool ran outside CallLogMiddleware")
+    return state.sent_fields
+
+
 def _guard[T](tool: str, run: Callable[[], T]) -> T:
     """Runs a tool body: a ServiceError maps by its code; anything else (a database error,
     output drift) becomes a fixed internal_error, so FastMCP never logs its text."""
@@ -165,21 +172,28 @@ def _register_subject_tools(mcp: FastMCP, svc: Services) -> None:
         subject_status: s.SubjectStatusField = None,
     ) -> s.SaveSubjectOutput:
         def run() -> s.SaveSubjectOutput:
-            args = s.SaveSubjectInput(
-                name=name,
-                preference=preference,
-                exercise_kinds=exercise_kinds,
-                minutes_per_session=minutes_per_session,
-                sessions_per_week=sessions_per_week,
-                subject_id=subject_id,
-                goal_text=goal_text,
-                context_text=context_text,
-                target_date=target_date,
-                subject_status=subject_status,
-            )
+            given: dict[str, Any] = {
+                "name": name,
+                "preference": preference,
+                "exercise_kinds": exercise_kinds,
+                "minutes_per_session": minutes_per_session,
+                "sessions_per_week": sessions_per_week,
+                "subject_id": subject_id,
+                "goal_text": goal_text,
+                "context_text": context_text,
+                "target_date": target_date,
+                "subject_status": subject_status,
+            }
+            sent = _sent_fields()
+            # Only what the client sent, so model_fields_set tells omitted from null.
+            args = s.SaveSubjectInput(**{k: v for k, v in given.items() if k in sent})
             try:
                 result = subjects_svc.save_subject(
-                    svc, _user(), args.to_subject_input(), args.subject_id
+                    svc,
+                    _user(),
+                    args.to_subject_input(),
+                    args.subject_id,
+                    keep_target_date="target_date" not in args.model_fields_set,
                 )
             except ServiceError as exc:
                 raise s.mcp_fields(exc) from None

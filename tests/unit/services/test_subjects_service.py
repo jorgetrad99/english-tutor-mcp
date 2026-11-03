@@ -163,3 +163,75 @@ def test_learner_text_round_trips_as_data(svc: Services, user_id: UUID) -> None:
     view = save_subject(svc, user_id, subject_input(goal_text=text, context_text=text)).subject
     assert (view.subject.goal_text, view.subject.context_text) == (text, text)
     assert get_subjects(svc, user_id).subjects[0].subject.goal_text == text
+
+
+# --- update merges: an omitted optional field keeps the stored value --------------------------
+
+
+def stored(svc: Services, user_id: UUID, subject_id: UUID) -> Subject:
+    with svc.uow(user_id) as uow:
+        return present(uow.subjects.get(subject_id)).subject
+
+
+@pytest.mark.parametrize("status", ["paused", "archived"])
+def test_an_update_without_status_keeps_the_stored_status(
+    svc: Services, user_id: UUID, status: str
+) -> None:
+    subject_id = create_subject(svc, user_id, status=status)
+    result = save_subject(svc, user_id, subject_input(minutes_per_session=45), subject_id)
+    assert result.subject.subject.status == status
+    assert stored(svc, user_id, subject_id).status == status
+
+
+def test_create_still_defaults_to_active(svc: Services, user_id: UUID) -> None:
+    assert save_subject(svc, user_id, subject_input()).subject.subject.status == "active"
+
+
+def test_an_update_without_text_or_date_keeps_them(svc: Services, user_id: UUID) -> None:
+    target = TODAY + timedelta(days=30)
+    subject_id = create_subject(
+        svc, user_id, goal_text="Tocar en la boda", context_text="Dos años", target_date=target
+    )
+    save_subject(
+        svc, user_id, subject_input(sessions_per_week=5), subject_id, keep_target_date=True
+    )
+    kept = stored(svc, user_id, subject_id)
+    assert (kept.goal_text, kept.context_text, kept.target_date) == (
+        "Tocar en la boda",
+        "Dos años",
+        target,
+    )
+    assert kept.sessions_per_week == 5
+
+
+def test_an_update_with_empty_text_clears_it(svc: Services, user_id: UUID) -> None:
+    subject_id = create_subject(svc, user_id, goal_text="Tocar", context_text="Dos años")
+    save_subject(svc, user_id, subject_input(goal_text="", context_text="  "), subject_id)
+    cleared = stored(svc, user_id, subject_id)
+    assert (cleared.goal_text, cleared.context_text) == (None, None)
+
+
+def test_an_update_that_sends_no_date_clears_it(svc: Services, user_id: UUID) -> None:
+    subject_id = create_subject(svc, user_id, target_date=TODAY + timedelta(days=30))
+    save_subject(svc, user_id, subject_input(target_date=None), subject_id)
+    assert stored(svc, user_id, subject_id).target_date is None
+
+
+def test_a_kept_target_date_is_not_checked_again(
+    svc: Services, user_id: UUID, clock: FixedClock
+) -> None:
+    """Pausing a subject whose target date has passed must not fail on that date."""
+    subject_id = create_subject(svc, user_id, target_date=TODAY)
+    clock.advance(timedelta(days=3))
+    result = save_subject(
+        svc, user_id, subject_input(status="paused"), subject_id, keep_target_date=True
+    )
+    assert (result.subject.subject.status, result.subject.subject.target_date) == (
+        "paused",
+        TODAY,
+    )
+
+
+def test_keep_target_date_on_create_means_no_date(svc: Services, user_id: UUID) -> None:
+    created = save_subject(svc, user_id, subject_input(), keep_target_date=True)
+    assert created.subject.subject.target_date is None
