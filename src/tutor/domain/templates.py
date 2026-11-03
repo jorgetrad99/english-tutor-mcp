@@ -105,10 +105,12 @@ ANSWER_KINDS: tuple[AnswerKind, ...] = (
     "self_report",
 )
 
-# The guide version Claude must send to save_template, and the hash of the contract it teaches
-# (a test recomputes the hash from contract_constants(); change both together, plan ruling 21).
-TEMPLATE_GUIDE_VERSION = 1
-TEMPLATE_CONTRACT_SHA256 = "1d80ff666b4add5e677f085d566de91c63085f4f52b7bb14fbb4c6239952c4ed"
+# The guide version Claude must send to save_template, and the hash of the guide it names: the
+# contract constants, every rendered guide section and every worked-example file. A test
+# recomputes it (tutor.services.template_files.guide_sha256); change both together (plan
+# rulings 21 and 31).
+TEMPLATE_GUIDE_VERSION = 2
+TEMPLATE_CONTRACT_SHA256 = "758e332cacf508afe6720051b561b93b34801ea0d58c77dc5e42057ed0a32c59"
 
 # Caps (plan ruling 24; spec 15.3, 15.4). The MCP schemas and migration 0006 restate them.
 NAME_MAX = 80
@@ -203,8 +205,8 @@ Errors = list[FieldError]
 def contract_constants() -> Mapping[str, Any]:
     """Every number, name and rule the guide's contract tables show, as plain JSON data.
 
-    `TEMPLATE_CONTRACT_SHA256` is the SHA-256 of this mapping serialised with sorted keys; a
-    change here without a guide version bump fails a test (plan ruling 21)."""
+    `TEMPLATE_CONTRACT_SHA256` covers this mapping with the rendered guide and its examples; a
+    change here without a guide version bump fails a test (plan rulings 21 and 31)."""
     caps_list = f"1-{LIST_MAX_ITEMS} items (max_items, default {LIST_DEFAULT_MAX_ITEMS})"
     value_range = f"min/max within ±{VALUE_LIMIT:,}"
     return {
@@ -372,12 +374,6 @@ def contract_constants() -> Mapping[str, Any]:
             "app_frame": "tutorSubmit hands the answer to the practice app, which records it",
         },
     }
-
-
-def contract_sha256() -> str:
-    """SHA-256 of `contract_constants()` as sorted-key JSON."""
-    data = json.dumps(contract_constants(), sort_keys=True, ensure_ascii=False)
-    return hashlib.sha256(data.encode("utf-8")).hexdigest()
 
 
 # --- types --------------------------------------------------------------------------------------

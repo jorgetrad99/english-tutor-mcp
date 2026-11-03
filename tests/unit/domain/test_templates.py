@@ -23,7 +23,6 @@ from tutor.domain.templates import (
     MAX_TEMPLATE_PARAMS,
     PARAM_TYPES,
     PROMPT_TEXT_MAX,
-    TEMPLATE_CONTRACT_SHA256,
     TEMPLATE_GUIDE_VERSION,
     ChoiceAnswer,
     Draw,
@@ -41,7 +40,6 @@ from tutor.domain.templates import (
     compose_document,
     content_key,
     contract_constants,
-    contract_sha256,
     draw,
     encode_payload,
     grade,
@@ -169,13 +167,6 @@ def test_caps_match_ruling_24() -> None:
     assert (MAX_PARAMS_JSON_BYTES, MAX_PUBLIC_PAYLOAD_BYTES) == (32_768, 8_192)
     assert (MAX_POOL_ENTRIES, PROMPT_TEXT_MAX, INLINE_GUIDE_MAX_CHARS) == (200, 500, 10_000)
     assert len(GUIDE_SECTIONS) == 8
-
-
-def test_contract_hash_matches_the_constants() -> None:
-    # Plan ruling 21: change a contract constant and this fails until the version is bumped
-    # and the hash is updated together.
-    assert contract_sha256() == TEMPLATE_CONTRACT_SHA256
-    assert TEMPLATE_GUIDE_VERSION == 1
 
 
 def test_contract_constants_name_every_type_role_kind_and_rule() -> None:

@@ -15,6 +15,7 @@ from tutor.domain.templates import (
     PARAM_ROLES,
     PARAM_TYPES,
     POOL_DRAWS,
+    TEMPLATE_CONTRACT_SHA256,
     TEMPLATE_GUIDE_VERSION,
     TEXT_MATCHES,
     TemplateSpec,
@@ -29,8 +30,11 @@ from tutor.domain.templates import (
 )
 from tutor.services.template_files import (
     bridge,
+    example_files,
+    guide_digest,
     guide_examples,
     guide_section,
+    guide_sha256,
     inline_guide,
     param_pairs,
 )
@@ -45,6 +49,34 @@ EXAMPLE_KINDS = {
     "example_history_timeline": "exact_sequence",
     "example_music_ear": "choice_index",
 }
+
+
+def test_guide_hash_covers_constants_sections_and_examples() -> None:
+    # Plan rulings 21 and 31: any change to a contract constant, a rendered section or an
+    # example file fails here until the version is bumped and the hash updated together.
+    assert guide_sha256() == TEMPLATE_CONTRACT_SHA256, (
+        "bump TEMPLATE_GUIDE_VERSION and the hash together"
+    )
+
+
+def test_guide_digest_changes_with_each_part() -> None:
+    constants = {"a": 1}
+    sections = {"contract": "text"}
+    examples = {"x.html": "<p>"}
+    base = guide_digest(constants, sections, examples)
+    assert guide_digest({"a": 2}, sections, examples) != base
+    assert guide_digest(constants, {"contract": "text."}, examples) != base
+    assert guide_digest(constants, sections, {"x.html": "<p>."}) != base
+    assert guide_digest(constants, sections, {"y.html": "<p>"}) != base
+
+
+def test_example_files_are_every_file_of_the_examples_folder() -> None:
+    names = set(example_files())
+    for example in guide_examples():
+        assert {f"{example.name}.html", f"{example.name}.json"} <= names
+    assert len(names) == 2 * len(guide_examples())
+    for section in GUIDE_SECTIONS:  # every section takes part through guide_sha256
+        assert guide_section(section)
 
 
 def test_every_section_loads() -> None:

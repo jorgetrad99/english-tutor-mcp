@@ -8,6 +8,7 @@ grading-kind map are rendered from `tutor.domain.templates.contract_constants()`
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -166,6 +167,34 @@ def inline_guide() -> str:
     return guide_section("choosing_exercises") + "\n\n" + guide_section("contract")
 
 
+@cache
+def example_files() -> Mapping[str, str]:
+    """Every file of `guide/examples` (HTML and sample JSON), by name, as text."""
+    folder = files(PACKAGE).joinpath("guide", "examples")
+    return {
+        node.name: node.read_text(encoding="utf-8")
+        for node in sorted(folder.iterdir(), key=lambda n: n.name)
+        if node.is_file()
+    }
+
+
+def guide_digest(
+    constants: Mapping[str, Any], sections: Mapping[str, str], examples: Mapping[str, str]
+) -> str:
+    """SHA-256 of the three parts as one sorted-key JSON document."""
+    data = {"constants": constants, "sections": sections, "examples": examples}
+    text = json.dumps(data, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def guide_sha256() -> str:
+    """What `TEMPLATE_CONTRACT_SHA256` must equal: the contract constants, every rendered guide
+    section and every example file (plan rulings 21 and 31). Text is read with universal
+    newlines, so a checkout's line endings do not change it."""
+    sections = {section: guide_section(section) for section in GUIDE_SECTIONS}
+    return guide_digest(contract_constants(), sections, example_files())
+
+
 def _param_spec(data: Mapping[str, Any]) -> ParamSpecInput:
     return ParamSpecInput(
         name=data["name"],
@@ -253,8 +282,11 @@ def bridge(channel: Channel) -> str:
 __all__ = [
     "GuideExample",
     "bridge",
+    "example_files",
+    "guide_digest",
     "guide_examples",
     "guide_section",
+    "guide_sha256",
     "inline_guide",
     "param_pairs",
     "template_input",
