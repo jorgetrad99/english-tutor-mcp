@@ -5,7 +5,9 @@ Remote MCP server (FastAPI + FastMCP, Postgres) that makes Claude a persistent E
 Source of truth: `docs/requirements.md`. Do not load it whole; read only the section you need.
 
 ## Current phase
-Spike (section 15). Do not build anything beyond the current phase in section 16.
+Two lines in parallel (requirements section 16 plus E37 in `docs/v0/requirements-edits.md`):
+- English: core loop v0, then the 15-session gate. Do not build anything beyond it.
+- Subjects v0: the learner's own material, spec `docs/superpowers/specs/2026-11-02-subjects-and-notes-design.md`, ADR 0004. Do not build beyond that spec.
 
 ## Commands
 All via `uv run just <recipe>` (just is a dev dependency; no make on this machine).
