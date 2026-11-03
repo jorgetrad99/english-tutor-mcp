@@ -110,7 +110,7 @@ ANSWER_KINDS: tuple[AnswerKind, ...] = (
 # recomputes it (tutor.services.template_files.guide_sha256); change both together (plan
 # rulings 21 and 31).
 TEMPLATE_GUIDE_VERSION = 3
-TEMPLATE_CONTRACT_SHA256 = "2e5390da2ae05efd6296f4f6c1ecf598699096782c2ab97cef30a7f41e609732"
+TEMPLATE_CONTRACT_SHA256 = "f35075519c9fa109335ebcf8e682d5fa0a397c5e0d740b622dcedf7e8c05fbc5"
 
 # Caps (plan ruling 24; spec 15.3, 15.4). The MCP schemas and migration 0006 restate them.
 NAME_MAX = 80
@@ -353,7 +353,8 @@ def contract_constants() -> Mapping[str, Any]:
                 "key": "the index of the drawn entry's answer in options",
             },
             "ordered": {
-                "picks": "pool_count entries",
+                "picks": "pool_count entries; every entry needs a distinct order and a cue "
+                "distinct after text_match",
                 "drawn": '{"cues"}: in a seeded order that is not the sorted one',
                 "key": "the cues sorted by order ascending",
             },
@@ -1084,8 +1085,12 @@ def _pool(value: object, spec: TemplateSpec, path: str, errors: Errors) -> list[
     count = spec.pool_count or 0
     if spec.pool_draw == "ordered":
         orders = [e["order"] for e in entries]
-        if len(set(orders)) != len(orders) or len(entries) < count:
-            _fail(errors, path, "invalid")  # orders must be distinct
+        text_match = spec.text_match or "fold_all"
+        cues = {normalise_answer(e["cue"], text_match) for e in entries}
+        if len(set(orders)) != len(orders) or len(cues) != len(entries) or len(entries) < count:
+            # orders and normalised cues must be distinct, as an authored key's items are
+            # (`_check_keys`; plan ruling 42)
+            _fail(errors, path, "invalid")
             return _BAD
     if spec.pool_draw == "one_of_choices":
         answers = {normalise_answer(e["answer"], "fold_all") for e in entries}

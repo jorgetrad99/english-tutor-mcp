@@ -598,6 +598,20 @@ def test_ordered_pool_needs_distinct_orders_and_enough_entries() -> None:
     assert param_fields(spec, ParamPair("deck", "pool", nan)) == ("params[0].pool[4].order",)
 
 
+def test_ordered_pool_needs_distinct_cues_after_normalisation() -> None:
+    # Security review P3 (plan ruling 42): a sequence answer is graded on normalised cues, as
+    # authored keys are, so two cues that normalise alike would make the order ambiguous.
+    spec = ok(TIMELINE)
+    clash = (*entries(4, ordered=True), PoolEntryInput(" Cue  0 ", "a", order=9.0))
+    assert param_fields(spec, ParamPair("deck", "pool", clash)) == ("params[0].pool",)
+    accents = (*entries(4, ordered=True), PoolEntryInput("cué 1", "a", order=9.0))
+    assert param_fields(spec, ParamPair("deck", "pool", accents)) == ("params[0].pool",)
+    kept = template(
+        "exact_sequence", POOL, pool_draw="ordered", pool_count=4, text_match="keep_accents"
+    )
+    assert params_ok(ok(kept), ParamPair("deck", "pool", accents))
+
+
 def test_choices_pool_needs_enough_distinct_answers() -> None:
     spec = ok(CHOICE_POOL)
     assert params_ok(spec, ParamPair("deck", "pool", entries(4)))
