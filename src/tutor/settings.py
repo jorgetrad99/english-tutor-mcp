@@ -102,6 +102,12 @@ class Settings:
     # Dev-only bearer tokens instead of the Google OAuth proxy (dev-environment design D1).
     dev_auth: bool = False
 
+    def __post_init__(self) -> None:
+        # The same guard as from_env and WebConfig, so a Settings built directly (or through
+        # dataclasses.replace) cannot carry the flag outside loopback dev either.
+        if self.dev_auth and not dev_auth_allowed(self.env, self.base_url):
+            raise SystemExit(f"Invalid settings: {DEV_AUTH_GUARD}")
+
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> Settings:
         """Validate every key and exit naming the bad keys; values are never printed."""

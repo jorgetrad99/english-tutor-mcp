@@ -1,4 +1,6 @@
+from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 from cryptography.fernet import Fernet
@@ -232,3 +234,35 @@ def test_a_refused_dev_auth_keeps_the_google_keys_required() -> None:
 def test_the_dev_flag_is_a_dev_only_key() -> None:
     assert DEV_ONLY_KEYS == ("TUTOR_DEV_AUTH",)
     assert not set(DEV_ONLY_KEYS) & set(REQUIRED)
+
+
+def _fields(**overrides: Any) -> dict[str, Any]:
+    return {
+        "database_url": "sqlite://",
+        "google_client_id": "",
+        "google_client_secret": "",
+        "jwt_signing_key": "j" * 40,
+        "oauth_storage_key": Fernet.generate_key().decode(),
+        "oauth_storage_dir": Path("data/oauth"),
+        **overrides,
+    }
+
+
+@pytest.mark.parametrize(
+    ("tutor_env", "url"),
+    [("prod", "https://tutor.example.com"), ("prod", LOOPBACK), ("dev", "https://x.io")],
+)
+def test_settings_built_directly_refuse_dev_auth_outside_loopback_dev(
+    tutor_env: str, url: str
+) -> None:
+    # The guard lives on the dataclass too, not only in from_env (WebConfig does the same).
+    with pytest.raises(SystemExit, match="TUTOR_DEV_AUTH requires TUTOR_ENV"):
+        Settings(env=tutor_env, base_url=url, dev_auth=True, **_fields())  # type: ignore[arg-type]
+
+
+def test_settings_built_directly_accept_dev_auth_on_loopback_dev_and_replace_rechecks() -> None:
+    ok = Settings(env="dev", base_url=LOOPBACK, dev_auth=True, **_fields())
+    assert ok.dev_auth
+    assert not Settings(env="prod", base_url="https://tutor.example.com", **_fields()).dev_auth
+    with pytest.raises(SystemExit, match="TUTOR_DEV_AUTH requires TUTOR_ENV"):
+        replace(ok, env="prod")
