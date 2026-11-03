@@ -9,11 +9,11 @@ requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.16",
     "anyio>=4.4",
-    "authlib>=1.8.0",
+    "authlib>=1.9.1",
     "babel>=2.18",
     "cryptography>=45",
     "fastapi>=0.142.2",
-    "fastmcp>=4.0.10,<5",
+    "fastmcp>=4.1.2,<5",
     "httpx>=0.28.1",
     "jinja2>=3.1",
     "psycopg[binary]>=3.2",

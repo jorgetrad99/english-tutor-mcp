@@ -2708,11 +2708,11 @@ dev = [
 requires-dist = [
     { name = "alembic", specifier = ">=1.16" },
     { name = "anyio", specifier = ">=4.4" },
-    { name = "authlib", specifier = ">=1.8.0" },
+    { name = "authlib", specifier = ">=1.9.1" },
     { name = "babel", specifier = ">=2.18" },
     { name = "cryptography", specifier = ">=45" },
     { name = "fastapi", specifier = ">=0.142.2" },
-    { name = "fastmcp", specifier = ">=4.0.10,<5" },
+    { name = "fastmcp", specifier = ">=4.1.2,<5" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
