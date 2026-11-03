@@ -17,8 +17,9 @@ from urllib.parse import parse_qs
 from uuid import UUID
 
 from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import MutableHeaders
 from starlette.responses import Response
-from starlette.types import Receive, Scope, Send
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from tutor.web.frames import RAW_PATH, FrameTokens
 from tutor.web.security import template_frame_csp
@@ -60,6 +61,30 @@ def raw_html_response(document: str, dashboard_origin: str) -> Response:
     return Response(
         content=document, media_type=HTML_UTF8, headers=template_headers(dashboard_origin)
     )
+
+
+class TemplateHeaders:
+    """Outermost layer of the template stack: every response on the template host, including
+    the guards' 413 and 400, carries `template_headers` and never a cookie."""
+
+    def __init__(self, app: ASGIApp, dashboard_origin: str) -> None:
+        self.app = app
+        self._headers = template_headers(dashboard_origin)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_headers(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                del headers["set-cookie"]
+                for name, value in self._headers.items():
+                    headers[name] = value
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
 
 
 class TemplateOriginApp:

@@ -33,7 +33,6 @@ FRAME_PARTIAL = "partials/instance_frame.html"
 FRAME_ATTRS = [
     ("sandbox", "allow-scripts"),
     ("referrerpolicy", "no-referrer"),
-    ("loading", "lazy"),
     ("src", "{{ frame_src }}"),
     ("title", "{{ prompt_text }}"),
     ("class", "instance-frame instance-frame--{{ purpose }}"),
@@ -117,7 +116,7 @@ def test_python_never_marks_text_safe() -> None:
 # --- the iframe element rule -----------------------------------------------------------------
 
 GOOD_FRAME = (
-    '<iframe sandbox="allow-scripts" referrerpolicy="no-referrer" loading="lazy" '
+    '<iframe sandbox="allow-scripts" referrerpolicy="no-referrer" '
     'src="{{ frame_src }}" title="{{ prompt_text }}" '
     'class="instance-frame instance-frame--{{ purpose }}"></iframe>\n'
     '<p class="instance-prompt">{{ prompt_text }}</p>\n'
@@ -144,9 +143,10 @@ def test_an_iframe_in_any_other_template_is_refused() -> None:
         GOOD_FRAME.replace('sandbox="allow-scripts"', 'sandbox="allow-scripts allow-popups"'),
         GOOD_FRAME.replace('sandbox="allow-scripts"', 'sandbox=""'),
         GOOD_FRAME.replace('sandbox="allow-scripts" ', ""),
-        GOOD_FRAME.replace('loading="lazy"', 'loading="lazy" srcdoc="&lt;p&gt;"'),
-        GOOD_FRAME.replace('loading="lazy"', 'loading="lazy" sandbox="allow-scripts"'),
-        GOOD_FRAME.replace('loading="lazy"', 'loading="lazy" allow="camera"'),
+        GOOD_FRAME.replace("title=", 'srcdoc="&lt;p&gt;" title='),
+        GOOD_FRAME.replace("title=", 'sandbox="allow-scripts" title='),
+        GOOD_FRAME.replace("title=", 'loading="lazy" title='),
+        GOOD_FRAME.replace("title=", 'allow="camera" title='),
         GOOD_FRAME.replace('referrerpolicy="no-referrer"', 'referrerpolicy="origin"'),
         GOOD_FRAME.replace('src="{{ frame_src }}"', 'src="/app/instances/{{ id }}/raw"'),
         GOOD_FRAME + GOOD_FRAME,

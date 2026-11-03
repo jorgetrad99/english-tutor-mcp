@@ -45,7 +45,7 @@ from tutor.web.pg import (
 )
 from tutor.web.profile import ServicesProfiles, install_profiles
 from tutor.web.sessions import ANONYMOUS_LIFETIME
-from tutor.web.template_origin import InstanceDocument, TemplateOriginApp
+from tutor.web.template_origin import InstanceDocument, TemplateHeaders, TemplateOriginApp
 
 Scope = MutableMapping[str, Any]
 Message = MutableMapping[str, Any]
@@ -335,13 +335,14 @@ class PathDispatch:
 
 
 def request_host(scope: Scope) -> str | None:
-    """The Host header's name, lower case, without the port; None when absent."""
+    """The Host header's name, lower case, without the port or a trailing dot (`host.` is the
+    same name in DNS, so it must reach the same app); None when absent."""
     for name, value in scope.get("headers", []):
         if name.lower() == b"host":
             host = value.decode("latin-1").strip().lower()
             if host.startswith("["):  # an IPv6 literal keeps its brackets
                 return host.split("]", 1)[0] + "]"
-            return host.rsplit(":", 1)[0] if ":" in host else host
+            return (host.rsplit(":", 1)[0] if ":" in host else host).rstrip(".")
     return None
 
 
@@ -420,6 +421,8 @@ def build_app(
     )
     if settings.dev_auth:
         template_app = RejectProxyHeaders(template_app)
+    # Outside the guards: their 413 and 400 answers carry the template header set too.
+    template_app = TemplateHeaders(template_app, settings.base_url)
     dispatch = PathDispatch(
         mcp_app,
         web_app=web_app,
