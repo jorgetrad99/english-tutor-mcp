@@ -4,6 +4,7 @@ import asyncio
 import io
 import json
 import re
+import time
 import warnings
 import zoneinfo
 from collections.abc import AsyncIterator
@@ -19,7 +20,13 @@ from cryptography.fernet import Fernet
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 
 from tutor.app import BodySizeGuard, Message, PathDispatch, RequestLog, build_app
-from tutor.auth.dev_auth import DEV_IDENTITIES, DEV_SUBS, build_dev_verifier
+from tutor.auth.dev_auth import (
+    DEV_IDENTITIES,
+    DEV_SUBS,
+    DevJWTVerifier,
+    build_dev_verifier,
+    dev_claims_ok,
+)
 from tutor.mcp.server import build_mcp
 from tutor.ops import dev_token
 from tutor.ops.dev_token import MAX_TOKEN_HOURS, mint_dev_token
@@ -109,6 +116,19 @@ def base_claims(**overrides: Any) -> dict[str, Any]:
     }
 
 
+# Claims the base fastmcp JWTVerifier accepts by the real clock, so only the dev checks can refuse
+# a token built from them. Fixed at import; the test ids below never contain a token.
+LIVE = int(time.time())
+DAY = 24 * 3600
+
+
+def live_claims(*, drop: tuple[str, ...] = (), **overrides: Any) -> dict[str, Any]:
+    claims = {**base_claims(iat=LIVE, exp=LIVE + 3600), **overrides}
+    for key in drop:
+        del claims[key]
+    return claims
+
+
 class World:
     """The production MCP composition over memory services, behind the dev verifier."""
 
@@ -185,6 +205,46 @@ def test_verifier_is_hs256_on_the_signing_key_with_issuer_and_audience(tmp_path:
     assert verifier.get_routes(mcp_path="/mcp") == []  # no OAuth or discovery routes
 
 
+def test_verifier_is_the_dev_subclass(tmp_path: Path) -> None:
+    assert isinstance(build_dev_verifier(dev_settings(tmp_path)), DevJWTVerifier)
+
+
+@pytest.mark.asyncio
+async def test_live_claims_pass_the_verifier(tmp_path: Path) -> None:
+    # The baseline of the lifetime and subject cases below: they differ from this in one claim.
+    access = await build_dev_verifier(dev_settings(tmp_path)).verify_token(sign(live_claims()))
+    assert access is not None and access.claims["sub"] == "dev-ana"
+
+
+@pytest.mark.asyncio
+async def test_a_minted_24_hour_token_is_accepted(tmp_path: Path) -> None:
+    settings = dev_settings(tmp_path)
+    token = mint_dev_token(settings, "dev-nuevo", hours=24, now=datetime.now(UTC))
+    assert await build_dev_verifier(settings).verify_token(token) is not None
+
+
+@pytest.mark.parametrize(
+    ("claims", "ok"),
+    [
+        ({"sub": "dev-ana", "iat": 1000, "exp": 1000 + DAY}, True),  # exactly 24 h
+        ({"sub": "dev-nuevo", "iat": 1000.5, "exp": 2000.5}, True),  # NumericDate may be a float
+        ({"sub": "dev-ana", "iat": 1000, "exp": 1001 + DAY}, False),  # lives 24 h + 1 s
+        ({"sub": "dev-ana", "iat": 5000, "exp": 1000 + DAY + 1}, False),  # 1 s past now + 24 h
+        ({"sub": "dev-ana", "exp": 2000}, False),
+        ({"sub": "dev-ana", "iat": 1000}, False),
+        ({"sub": "dev-ana", "iat": True, "exp": 2000}, False),  # bool is not a NumericDate
+        ({"sub": "dev-ana", "iat": "1000", "exp": 2000}, False),
+        ({"sub": "dev-mallory", "iat": 1000, "exp": 2000}, False),
+        ({"sub": ["dev-ana"], "iat": 1000, "exp": 2000}, False),
+        ({"iat": 1000, "exp": 2000}, False),
+    ],
+)
+def test_dev_claims_need_iat_exp_a_24_hour_lifetime_and_a_seeded_sub(
+    claims: dict[str, Any], ok: bool
+) -> None:
+    assert dev_claims_ok(claims, now=1000.0) is ok
+
+
 def test_verifier_refuses_settings_without_the_flag(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="TUTOR_DEV_AUTH"):
         build_dev_verifier(google_settings(tmp_path))
@@ -240,17 +300,24 @@ async def test_a_minted_token_calls_get_profile_and_resolves_dev_ana(tmp_path: P
     assert world.subs() == {"dev-ana"}
 
 
-@pytest.mark.parametrize(
-    ("label", "token"),
-    [
-        ("wrong audience", sign(base_claims(aud=f"{BASE_URL}/other"))),
-        ("wrong issuer", sign(base_claims(iss="https://tutor.example.com"))),
-        ("wrong key", sign(base_claims(), key="x" * 40)),
-        ("expired", sign(base_claims(exp=int((NOW - timedelta(days=1)).timestamp())))),
-        ("alg none", "eyJhbGciOiJub25lIn0.eyJzdWIiOiJkZXYtYW5hIn0."),
-        ("garbage", "not-a-token"),
-    ],
-)
+BAD_TOKENS = [
+    ("wrong audience", sign(base_claims(aud=f"{BASE_URL}/other"))),
+    ("wrong issuer", sign(base_claims(iss="https://tutor.example.com"))),
+    ("wrong key", sign(base_claims(), key="x" * 40)),
+    ("expired", sign(base_claims(exp=int((NOW - timedelta(days=1)).timestamp())))),
+    ("alg none", "eyJhbGciOiJub25lIn0.eyJzdWIiOiJkZXYtYW5hIn0."),
+    ("garbage", "not-a-token"),
+    # fastmcp 4.0.11 checks exp only when present and never the lifetime or the subject:
+    ("no exp", sign(live_claims(drop=("exp",)))),
+    ("no iat", sign(live_claims(drop=("iat",)))),
+    ("lives over 24 h", sign(live_claims(iat=LIVE - 3600, exp=LIVE + DAY - 60))),
+    ("expires beyond 24 h", sign(live_claims(iat=LIVE + 7200, exp=LIVE + DAY + 3600))),
+    ("unknown sub", sign(live_claims(sub="dev-mallory"))),
+    ("no sub", sign(live_claims(drop=("sub",)))),
+]
+
+
+@pytest.mark.parametrize(("label", "token"), BAD_TOKENS, ids=[label for label, _ in BAD_TOKENS])
 @pytest.mark.asyncio
 async def test_bad_tokens_are_401_and_create_no_user(
     tmp_path: Path, label: str, token: str

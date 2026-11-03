@@ -16,7 +16,14 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import TextIO
 
-from tutor.auth.dev_auth import ALGORITHM, DEV_IDENTITIES, DEV_SUBS, DevSub, mcp_url
+from tutor.auth.dev_auth import (
+    ALGORITHM,
+    DEV_IDENTITIES,
+    DEV_SUBS,
+    MAX_TOKEN_HOURS,
+    DevSub,
+    mcp_url,
+)
 from tutor.settings import Settings
 
 with warnings.catch_warnings():
@@ -27,8 +34,8 @@ with warnings.catch_warnings():
     warnings.simplefilter("ignore", AuthlibDeprecationWarning)
     from authlib.jose import jwt as jose_jwt
 
+# The 24-hour cap (MAX_TOKEN_HOURS) lives in tutor.auth.dev_auth, whose verifier enforces it.
 DEFAULT_TOKEN_HOURS = 12
-MAX_TOKEN_HOURS = 24
 
 
 def mint_dev_token(
