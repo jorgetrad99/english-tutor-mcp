@@ -17,7 +17,7 @@ pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[3]
 DEPLOY = ROOT / "deploy"
-DEV_SERVICES = ("migrate-dev", "app-dev", "inspector")
+DEV_SERVICES = ("migrate-dev", "app-dev")
 PROD_COMPOSE = ("compose.prod.yml", "compose.coolify.yml", "compose.local.yml")
 PROD_EXAMPLES = ("tutor", "local-docker", "local", "db", "migrate", "tunnel")
 
@@ -80,15 +80,20 @@ def test_the_flag_is_set_only_by_services_under_the_dev_profile() -> None:
             assert svc["profiles"] == ["dev"], name
     assert _env("migrate-dev")["TUTOR_DEV_AUTH"] == "1"
     assert _env("app-dev")["TUTOR_DEV_AUTH"] == "1"
-    assert "TUTOR_DEV_AUTH" not in _env("inspector")
     assert "TUTOR_DEV_AUTH" not in _example_keys("dev")  # the file alone enables nothing
 
 
 def test_published_ports_bind_to_loopback_only() -> None:
     services = _services()
     assert services["app-dev"]["ports"] == ["127.0.0.1:8000:8000"]
-    assert services["inspector"]["ports"] == ["127.0.0.1:6274:6274", "127.0.0.1:6277:6277"]
     assert "ports" not in services["migrate-dev"]
+    for name, svc in services.items():
+        if name in ("db", "db-test"):
+            continue  # the databases predate the profile and keep their published ports
+        ports = svc.get("ports", [])
+        assert isinstance(ports, list)
+        for port in ports:
+            assert str(port).startswith("127.0.0.1:"), (name, port)
 
 
 def test_dev_services_run_the_dev_target_from_the_bind_mounted_source() -> None:
@@ -123,7 +128,8 @@ def test_dev_env_feeds_the_app_services_only_and_is_git_ignored() -> None:
     services = _services()
     assert services["migrate-dev"]["env_file"] == "deploy/dev.env"
     assert services["app-dev"]["env_file"] == "deploy/dev.env"
-    assert "env_file" not in services["inspector"]  # a third-party image never sees the secrets
+    for name in ("db", "db-test"):
+        assert "env_file" not in services[name]
     git = shutil.which("git")
     assert git, "git must be on PATH"
     ignored = subprocess.run(  # noqa: S603 - fixed arguments
@@ -141,12 +147,13 @@ def test_dev_env_feeds_the_app_services_only_and_is_git_ignored() -> None:
     assert tracked.returncode != 0
 
 
-def test_inspector_runs_the_official_package_on_node_and_waits_for_the_app() -> None:
-    inspector = _services()["inspector"]
-    assert str(inspector["image"]).startswith("node:22")
-    assert inspector["command"] == ["npx", "-y", "@modelcontextprotocol/inspector"]
-    assert inspector["depends_on"] == {"app-dev": {"condition": "service_healthy"}}
-    assert "volumes" not in inspector
+def test_the_inspector_is_not_a_compose_service() -> None:
+    # Plan ruling 12: the Inspector (v2) refuses to bind a non-loopback host inside a container
+    # without an override flag, so it runs on host Node (`uv run just inspector-dev`) against
+    # http://localhost:8000/mcp instead; no third-party container ever joins the dev network.
+    assert "inspector" not in _services()
+    text = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "DANGEROUSLY_" not in text
 
 
 def test_dockerfile_dev_target_reloads_the_editable_source_as_non_root() -> None:

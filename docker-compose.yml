@@ -81,22 +81,9 @@ services:
       migrate-dev:
         condition: service_completed_successfully
 
-  # MCP Inspector as a service (uv run just inspector-dev): open http://localhost:6274 with the
-  # token its log prints, then connect to http://app-dev:8000/mcp (inside the compose network)
-  # with the Authorization header from `just dev-token`. It never sees deploy/dev.env.
-  inspector:
-    profiles: [dev]
-    image: node:22-alpine
-    command: ["npx", "-y", "@modelcontextprotocol/inspector"]
-    environment:
-      HOST: 0.0.0.0 # bind inside the container; the host side below is loopback only
-      ALLOWED_ORIGINS: http://localhost:6274,http://127.0.0.1:6274
-    ports:
-      - "127.0.0.1:6274:6274"
-      - "127.0.0.1:6277:6277"
-    depends_on:
-      app-dev:
-        condition: service_healthy
+  # MCP Inspector: not a service. Its v2 refuses to bind a non-loopback host inside a container
+  # without an override flag, so it runs on host Node (uv run just inspector-dev) against
+  # http://localhost:8000/mcp with the bearer token from `just dev-token`.
 
 volumes:
   pgdata:
