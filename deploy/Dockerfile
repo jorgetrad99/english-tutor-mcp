@@ -29,6 +29,31 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY deploy/check_package_data.py /tmp/check_package_data.py
 RUN /app/.venv/bin/python /tmp/check_package_data.py
 
+# Dev profile only (root docker-compose.yml, `uv run just dev`; dev-environment design D6): the
+# build stage plus the dev dependency group, the package installed editable so the bind-mounted
+# ./src is what runs, and uvicorn reloading on changes. Never deployed: it sits above `runtime`,
+# so a build without --target gets the product image, every production compose file pins
+# `target: runtime`, and the TUTOR_DEV_AUTH it relies on is refused outside loopback dev.
+FROM build AS dev
+COPY alembic.ini ./
+COPY alembic ./alembic
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked
+RUN groupadd --system --gid 10001 tutor \
+ && useradd --system --uid 10001 --gid tutor --home-dir /app --no-create-home \
+      --shell /usr/sbin/nologin tutor
+ENV PATH="/app/.venv/bin:${PATH}" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    WATCHFILES_FORCE_POLLING=true
+USER 10001:10001
+EXPOSE 8000
+# Under dev auth there is no OAuth discovery route: the probe accepts the MCP endpoint's 401.
+HEALTHCHECK --interval=10s --timeout=5s --start-period=40s --retries=6 \
+  CMD ["python", "-c", "import http.client as h, sys; c = h.HTTPConnection('127.0.0.1', 8000, timeout=4); c.request('GET', '/mcp'); sys.exit(0 if c.getresponse().status in (200, 401, 405, 406) else 1)"]
+CMD ["uvicorn", "--factory", "tutor.dev:create", "--reload", "--reload-dir", "/src/src", "--host", "0.0.0.0", "--port", "8000", "--no-access-log", "--no-server-header"]
+
+# Product image. Keep this stage LAST: a build without --target builds the last stage.
 FROM ${PYTHON_IMAGE} AS runtime
 RUN groupadd --system --gid 10001 tutor \
  && useradd --system --uid 10001 --gid tutor --home-dir /app --no-create-home \

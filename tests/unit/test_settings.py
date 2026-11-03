@@ -1,9 +1,11 @@
+from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 from cryptography.fernet import Fernet
 
-from tutor.settings import REQUIRED, Settings
+from tutor.settings import DEV_ONLY_KEYS, REQUIRED, Settings
 
 pytestmark = pytest.mark.unit
 
@@ -82,7 +84,14 @@ def test_invalid_values_are_named(overrides: dict[str, str], message: str) -> No
 
 
 @pytest.mark.parametrize(
-    "url", ["http://localhost:8000", "http://127.0.0.1:8000", "http://[::1]:8000", "https://x.io/"]
+    "url",
+    [
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://[::1]:8000",
+        "http://app.localhost:8000",  # RFC 6761: *.localhost resolves to loopback
+        "https://x.io/",
+    ],
 )
 def test_loopback_http_and_https_are_accepted(url: str) -> None:
     assert Settings.from_env(env(TUTOR_BASE_URL=url)).base_url == url.rstrip("/")
@@ -157,3 +166,120 @@ def test_prod_refuses_other_roles_credentials(key: str) -> None:
     assert key in str(exc.value)
     assert "hunter2" not in str(exc.value)
     assert Settings.from_env(env(**{key: "postgresql://owner:x@db/x"})).env == "dev"
+
+
+# --- TUTOR_DEV_AUTH (dev-environment design D1, D10) ---------------------------------------------
+
+LOOPBACK = "http://localhost:8000"
+
+
+@pytest.mark.parametrize("value", ["1", "true", "YES", " Yes "])
+def test_dev_auth_flag_is_parsed_on_a_loopback_dev_url(value: str) -> None:
+    assert Settings.from_env(env(TUTOR_DEV_AUTH=value, TUTOR_BASE_URL=LOOPBACK)).dev_auth is True
+
+
+@pytest.mark.parametrize("value", ["", "0", "false", "no", "on"])
+def test_dev_auth_is_off_by_default_and_for_other_values(value: str) -> None:
+    assert Settings.from_env(env(TUTOR_DEV_AUTH=value, TUTOR_BASE_URL=LOOPBACK)).dev_auth is False
+    assert Settings.from_env(env()).dev_auth is False
+
+
+def test_dev_auth_is_refused_in_prod() -> None:
+    with pytest.raises(SystemExit, match="TUTOR_DEV_AUTH requires TUTOR_ENV") as info:
+        Settings.from_env(env(TUTOR_ENV="prod", TUTOR_DEV_AUTH="1", TUTOR_BASE_URL=LOOPBACK))
+    assert PRIVATE_MARKER not in str(info.value)
+
+
+@pytest.mark.parametrize("url", ["https://tutor.example.com", "https://x.io"])
+def test_dev_auth_is_refused_on_a_public_base_url(url: str) -> None:
+    with pytest.raises(SystemExit, match="loopback TUTOR_BASE_URL") as info:
+        Settings.from_env(env(TUTOR_ENV="dev", TUTOR_DEV_AUTH="1", TUTOR_BASE_URL=url))
+    assert PRIVATE_MARKER not in str(info.value)
+
+
+@pytest.mark.parametrize("tutor_env", ["dev", "test"])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://[::1]:8000",
+        "http://app.localhost:8000",
+    ],
+)
+def test_dev_auth_is_accepted_on_every_loopback_form(tutor_env: str, url: str) -> None:
+    s = Settings.from_env(env(TUTOR_ENV=tutor_env, TUTOR_DEV_AUTH="1", TUTOR_BASE_URL=url))
+    assert s.dev_auth and s.base_url == url
+
+
+def test_google_keys_are_optional_only_with_dev_auth() -> None:
+    with_flag = env(TUTOR_DEV_AUTH="1", TUTOR_BASE_URL=LOOPBACK)
+    values = {k: v for k, v in with_flag.items() if not k.startswith("GOOGLE_")}
+    s = Settings.from_env(values)
+    assert (s.google_client_id, s.google_client_secret) == ("", "")
+    without = env(TUTOR_BASE_URL=LOOPBACK)
+    del without["GOOGLE_CLIENT_ID"]
+    with pytest.raises(SystemExit, match="GOOGLE_CLIENT_ID"):
+        Settings.from_env(without)
+
+
+def test_a_refused_dev_auth_keeps_the_google_keys_required() -> None:
+    # Refused in prod, so the flag must not loosen anything: the missing key is still named.
+    values = env(TUTOR_ENV="prod", TUTOR_DEV_AUTH="1", TUTOR_BASE_URL=LOOPBACK)
+    del values["GOOGLE_CLIENT_ID"]
+    with pytest.raises(SystemExit, match="GOOGLE_CLIENT_ID"):
+        Settings.from_env(values)
+
+
+def test_the_dev_flag_is_a_dev_only_key() -> None:
+    assert DEV_ONLY_KEYS == ("TUTOR_DEV_AUTH",)
+    assert not set(DEV_ONLY_KEYS) & set(REQUIRED)
+
+
+def _fields(**overrides: Any) -> dict[str, Any]:
+    return {
+        "database_url": "sqlite://",
+        "google_client_id": "",
+        "google_client_secret": "",
+        "jwt_signing_key": "j" * 40,
+        "oauth_storage_key": Fernet.generate_key().decode(),
+        "oauth_storage_dir": Path("data/oauth"),
+        **overrides,
+    }
+
+
+@pytest.mark.parametrize(
+    ("tutor_env", "url"),
+    [("prod", "https://tutor.example.com"), ("prod", LOOPBACK), ("dev", "https://x.io")],
+)
+def test_settings_built_directly_refuse_dev_auth_outside_loopback_dev(
+    tutor_env: str, url: str
+) -> None:
+    # The guard lives on the dataclass too, not only in from_env (WebConfig does the same).
+    with pytest.raises(SystemExit, match="TUTOR_DEV_AUTH requires TUTOR_ENV"):
+        Settings(env=tutor_env, base_url=url, dev_auth=True, **_fields())  # type: ignore[arg-type]
+
+
+def test_settings_built_directly_accept_dev_auth_on_loopback_dev_and_replace_rechecks() -> None:
+    ok = Settings(env="dev", base_url=LOOPBACK, dev_auth=True, **_fields())
+    assert ok.dev_auth
+    assert not Settings(env="prod", base_url="https://tutor.example.com", **_fields()).dev_auth
+    with pytest.raises(SystemExit, match="TUTOR_DEV_AUTH requires TUTOR_ENV"):
+        replace(ok, env="prod")
+
+
+@pytest.mark.parametrize("allowed", ["172.30.10.3", "127.0.0.1", "*"])
+def test_dev_auth_is_refused_behind_a_proxy(allowed: str) -> None:
+    # FORWARDED_ALLOW_IPS means a proxy (a tunnel) is in front: dev auth must never be reachable.
+    with pytest.raises(SystemExit, match="FORWARDED_ALLOW_IPS") as info:
+        Settings.from_env(
+            env(TUTOR_DEV_AUTH="1", TUTOR_BASE_URL=LOOPBACK, FORWARDED_ALLOW_IPS=allowed)
+        )
+    assert PRIVATE_MARKER not in str(info.value)
+
+
+def test_a_blank_forwarded_allow_ips_is_unset_and_prod_keeps_it() -> None:
+    blank = env(TUTOR_DEV_AUTH="1", TUTOR_BASE_URL=LOOPBACK, FORWARDED_ALLOW_IPS=" ")
+    assert Settings.from_env(blank).dev_auth
+    prod = env(TUTOR_ENV="prod", FORWARDED_ALLOW_IPS="172.30.10.3")
+    assert Settings.from_env(prod).env == "prod"

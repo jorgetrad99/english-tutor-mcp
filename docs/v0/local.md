@@ -10,6 +10,99 @@ tools. The product is a NEW connector at `https://tutor.develancoders.com/mcp` w
 as a separate custom connector in claude.ai. If a connector's tool list looks stale after a server
 change, remove and re-add the connector (or disconnect and reconnect) and start a new chat.
 
+## Dev profile (Docker, hot reload, no Google)
+
+For working on the server and the website from this checkout: MCP Inspector, Claude Code and
+Claude Desktop connect with a bearer token, the website signs in with one click, and a saved file
+under `src/` reloads the app. Design: `docs/superpowers/specs/2026-11-02-dev-environment-design.md`.
+It uses the root `docker-compose.yml` (`dev` profile) and the dev `db` on 5432; `db-test` (5433)
+and `just test-int` are untouched. claude.ai and the mobile app still need the tunnel and real
+Google OAuth (the sections below). Nothing in the dev profile can run in production: the server
+refuses `TUTOR_DEV_AUTH` unless `TUTOR_ENV` is `dev` or `test` and `TUTOR_BASE_URL` is loopback,
+and no production compose or env file carries the flag (tests pin both).
+
+```
+uv run just dev
+```
+
+The first run writes `deploy/dev.env` (random secrets, git-ignored, mode 0600; `scripts/dev_env.py
+--force` rotates them), builds the `dev` image target, starts `db`, runs `migrate-dev` (alembic
+head, `provision_roles`, `dev_seed`), waits for `app-dev` to be healthy and prints:
+
+```
+uv run python scripts/dev_env.py
+C:\...\english-tutor-mcp\deploy\dev.env written (random secrets, git-ignored)
+docker compose --profile dev up -d --build --wait app-dev
+ ...
+ Container english-tutor-mcp-db-1  Healthy
+ Container english-tutor-mcp-migrate-dev-1  Exited
+ Container english-tutor-mcp-app-dev-1  Healthy
+docker compose --profile dev exec -T app-dev python -m tutor.ops.dev_token
+MCP URL: http://localhost:8000/mcp
+Token (12 h): eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkZXYtYW5h...
+
+MCP Inspector CLI (host Node):
+  npx @modelcontextprotocol/inspector --cli http://localhost:8000/mcp --transport http --header "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkZXYtYW5h..." --method tools/list
+
+Claude Code:
+  claude mcp add --transport http tutor-dev http://localhost:8000/mcp --header "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkZXYtYW5h..."
+
+Claude Desktop (claude_desktop_config.json, under mcpServers):
+  "tutor-dev": {"command": "npx", "args": ["mcp-remote", "http://localhost:8000/mcp", "--header", "Authorization:Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkZXYtYW5h..."]}
+```
+
+`docker compose --profile dev logs migrate-dev` ends with the migrations (`0001` to `0005`),
+`roles ready: tutor_login, tutor_report` and `dev seed: created dev-ana, dev-nuevo; existing
+nothing` (on later runs: `created nothing; existing dev-ana, dev-nuevo`). Checked on 2026-11-02
+(Windows 11, Docker Desktop, Node 22): the Inspector CLI line above returns the six tools
+(`get_profile`, `save_profile`, `start_lesson`, `record_review`, `save_glossary`, `end_session`);
+`GET /auth/dev-login?as=dev-ana` is a 303 to `/app/`, `?as=dev-nuevo` a 303 to `/app/profile`,
+`?as=demo-ana` a 422; `POST /mcp` without a token is 401; both `/.well-known/oauth-*` paths are 404.
+If `npx` picks a cached v1 of the Inspector (it says so), use `@modelcontextprotocol/inspector@latest`.
+
+Two seeded identities: `dev-ana` (onboarded: profile and plan) and `dev-nuevo` (onboarding
+pending). Tokens are HS256 JWTs on the local signing key, issuer `http://localhost:8000`, audience
+`http://localhost:8000/mcp`, 12 hours by default and 24 at most. There is no OAuth discovery under
+dev auth (`/.well-known/oauth-protected-resource` and `/.well-known/oauth-authorization-server`
+are 404): clients must send the header; a client that tries the OAuth flow instead gets a 401.
+
+| Client | How |
+| --- | --- |
+| MCP Inspector UI (host Node) | `uv run just inspector-dev` prints the token, then opens the Inspector; in it: transport Streamable HTTP, URL `http://localhost:8000/mcp`, header `Authorization: Bearer <token>` |
+| MCP Inspector CLI (host Node) | `npx @modelcontextprotocol/inspector --cli http://localhost:8000/mcp --transport http --header "Authorization: Bearer <token>" --method tools/list` |
+| Claude Code | `claude mcp add --transport http tutor-dev http://localhost:8000/mcp --header "Authorization: Bearer <token>"` (remove: `claude mcp remove tutor-dev`) |
+| Claude Desktop | in `claude_desktop_config.json` under `mcpServers`: `"tutor-dev": {"command": "npx", "args": ["mcp-remote", "http://localhost:8000/mcp", "--header", "Authorization:Bearer <token>"]}` |
+| claude.ai, mobile | unchanged: the tunnel and real Google OAuth (below) |
+| Website | http://localhost:8000/auth/dev-login?as=dev-ana (or `dev-nuevo`); `/login` still shows the Google button, which does nothing useful without Google keys |
+| Claude in this repo | the in-process tests (`tests/unit/auth/test_dev_auth.py`), `curl` against `localhost:8000/mcp` with the token, or the Inspector CLI |
+
+Recipes: `dev-token sub=dev-nuevo hours=2` (another token from the running app), `dev-logs`
+(follow `app-dev`), `dev-down` (stops `app-dev` and `migrate-dev`; `db` keeps running and keeps
+its data), `dev-reset` (DESTRUCTIVE: stops the whole compose project, `db` included, and deletes
+this project's `pgdata` volume, whose name compose resolves: `uv run python scripts/dev_pgdata.py`
+prints it, so a worktree never touches the main checkout's database; refuses unless `CONFIRM=1`,
+and refuses while `COMPOSE_PROJECT_NAME` is set in the shell, which could point compose at another
+checkout's project: unset it first),
+`inspector-dev` (host Node).
+
+Notes:
+
+- `migrate-dev` runs every time: migrations are idempotent, `provision_roles` re-applies the role
+  passwords from `deploy/dev.env`, and `dev_seed` creates nothing the second time. The dev `db` is
+  shared with the host alternative below (`deploy/local.env`); both create `tutor_login`, so the
+  last `provision_roles` run decides its password. If you use both, keep `APP_DB_PASSWORD` equal in
+  the two files.
+- Hot reload watches `./src` by polling (`WATCHFILES_FORCE_POLLING`, needed for bind mounts on
+  Docker Desktop); a change shows up within a couple of seconds. `alembic/` is bind-mounted into
+  `migrate-dev`, so a new revision applies on the next `just dev` without a rebuild; a change to
+  `pyproject.toml` or `uv.lock` needs the rebuild `just dev` already does.
+- The MCP container's health probe is `GET /mcp` expecting the 401 that proves the server and its
+  auth middleware are up; the website's own `/login` is a 200 at http://localhost:8000/login (use
+  `localhost`, not `127.0.0.1`: TrustedHost).
+- The Inspector is not a compose service: its v2 refuses to bind a non-loopback host inside a
+  container without an override flag, so it runs on host Node with its default loopback bind and
+  session token, and reaches the app through the published `127.0.0.1:8000`.
+
 ## Run with Docker (recommended)
 
 Database, migrations and app in one stack (`deploy/compose.local.yml`, project `tutor-local`): the
@@ -190,8 +283,10 @@ http://localhost:8000/login (not `127.0.0.1`) and add the MCP with
 
   ```
   docker compose rm -sfv db
-  docker volume rm english_tutor_mcp_pgdata
+  uv run python scripts/dev_pgdata.py --remove
   ```
+
+  (`--remove` refuses while `COMPOSE_PROJECT_NAME` is set in the shell; unset it first.)
 
   then repeat steps 1 and 3.
 - Local smoke check, bypassing the tunnel:
