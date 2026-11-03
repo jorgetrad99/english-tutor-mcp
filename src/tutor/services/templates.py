@@ -1,5 +1,5 @@
-"""get_template_guide, list_templates, save_template, create_instance and get_instance_view
-(subjects spec 15; plan rulings 21-29).
+"""get_template_guide, list_templates, save_template, retire_template, create_instance and
+get_instance_view (subjects spec 15; plan rulings 21-29; slice D ruling 59).
 
 One unit of work per call. The server validates everything (the template's contract and HTML,
 an instance's parameters against its template), derives the practice kind, and sends a client
@@ -13,6 +13,7 @@ import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from tutor.domain.errors import FieldError
@@ -157,6 +158,34 @@ def save_template(
         return TemplateSaved(
             template_id=row.id, practice_kind=row.spec.practice_kind, outcome=outcome
         )
+
+
+RetireOutcome = Literal["retired", "already_retired"]
+
+
+def retire_template(svc: Services, user_id: UUID, template_id: UUID) -> RetireOutcome | None:
+    """Retire one of the user's templates (spec 15.13 D9, slice D ruling 59): it leaves
+    `list_templates` and takes no new instance, while its active instances stay active, shown
+    and drawn (amendment A56). Idempotent: `already_retired` the second time. None, with nothing
+    changed or recorded, for another user's or a missing template."""
+    now = svc.clock()
+    with svc.uow(user_id) as uow:
+        row = uow.templates.get(template_id)
+        if row is None:
+            return None
+        outcome: RetireOutcome = (
+            "retired" if uow.templates.retire(template_id, now) else "already_retired"
+        )
+        uow.audit.record(
+            "template_retired",
+            {
+                "template_id": str(row.id),
+                "subject_id": str(row.subject_id),
+                "retire_outcome": outcome,
+            },
+            now,
+        )
+    return outcome
 
 
 def _sha256(text: str) -> str:

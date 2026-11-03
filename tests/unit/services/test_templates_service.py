@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+from datetime import timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -37,6 +38,7 @@ from tutor.services.context import Services
 from tutor.services.errors import ServiceError
 from tutor.services.memory import MemoryStore
 from tutor.services.notes import get_note, save_notes
+from tutor.services.practice import start_practice
 from tutor.services.subject_views import InstanceSaved, TemplateSaved
 from tutor.services.template_files import inline_guide
 from tutor.services.templates import (
@@ -44,6 +46,7 @@ from tutor.services.templates import (
     get_instance_view,
     get_template_guide,
     list_templates,
+    retire_template,
     save_template,
 )
 
@@ -637,3 +640,93 @@ def test_a_note_with_one_concept_gives_it_to_instances_without_one(
     assert [i.concept for i in get_note(svc, user_id, first.note_id).instances] == ["Suma"]
     assert [i.concept for i in get_note(svc, user_id, second.note_id).instances] == [None]
     assert sorted(c.name for c in store.tables.concepts.values()) == ["Resta", "Suma"]
+
+
+# --- retire_template (slice D ruling 59, spec 15.13 D9, amendment A56) -------------------------
+
+
+def test_review_focus_6_retire_template_once_then_already_retired(
+    svc: Services, store: MemoryStore, user_id: UUID, clock: FixedClock
+) -> None:
+    subject_id = create_subject(svc, user_id)
+    numeric = saved(svc, user_id, subject_id, NUMERIC)
+    table = saved(svc, user_id, subject_id, TABLE)
+    created = clock.now
+    retired_at = clock.advance(timedelta(minutes=5))
+    assert retire_template(svc, user_id, numeric) == "retired"
+    assert [t.template_id for t in list_templates(svc, user_id, subject_id).templates] == [table]
+    [one] = list_templates(svc, user_id, subject_id, numeric).templates
+    assert one.status == "retired"
+    rec = store.tables.exercise_templates[numeric]
+    assert (rec.created_at, rec.retired_at, rec.updated_at) == (created, retired_at, retired_at)
+    clock.advance(timedelta(minutes=5))
+    assert retire_template(svc, user_id, numeric) == "already_retired"
+    assert rec.retired_at == retired_at  # the second call changes nothing
+    metas = events(store, user_id, "template_retired")
+    assert metas == [
+        {
+            "template_id": str(numeric),
+            "subject_id": str(subject_id),
+            "retire_outcome": "retired",
+        },
+        {
+            "template_id": str(numeric),
+            "subject_id": str(subject_id),
+            "retire_outcome": "already_retired",
+        },
+    ]
+    # Ids and enums only: no name, description or html.
+    dumped = json.dumps(metas)
+    assert NUMERIC.name not in dumped and "html" not in dumped
+
+
+def test_review_focus_6_a_retired_template_is_not_found_for_new_instances(
+    svc: Services, user_id: UUID
+) -> None:
+    subject_id = create_subject(svc, user_id)
+    numeric = saved(svc, user_id, subject_id, NUMERIC)
+    retire_template(svc, user_id, numeric)
+    lesson = note(instances=(InstanceInput(numeric, numeric_params(), "Suma."),))
+    with pytest.raises(ServiceError) as info:
+        save_notes(svc, user_id, subject_id, None, [lesson])
+    assert fields_of(info) == ("not_found", ("notes[0].instances[0].template_id",))
+    with pytest.raises(ServiceError) as info:
+        create_instance(svc, user_id, subject_id, InstanceInput(numeric, numeric_params(), "S."))
+    assert fields_of(info) == ("not_found", ("template_id",))
+
+
+def test_review_focus_3_retire_template_of_another_user_or_missing(
+    svc: Services, store: MemoryStore, user_id: UUID, other_user_id: UUID
+) -> None:
+    theirs = create_subject(svc, other_user_id)
+    their_template = saved(svc, other_user_id, theirs, NUMERIC)
+    for template_id in (their_template, uuid4()):
+        assert retire_template(svc, user_id, template_id) is None
+    assert store.tables.exercise_templates[their_template].status == "active"
+    assert [t.template_id for t in list_templates(svc, other_user_id, theirs).templates] == [
+        their_template
+    ]
+    assert events(store, user_id, "template_retired") == []
+    assert events(store, other_user_id, "template_retired") == []
+
+
+def test_a56_instances_of_a_retired_template_stay_active_and_drawn(
+    svc: Services, store: MemoryStore, user_id: UUID
+) -> None:
+    subject_id = create_subject(svc, user_id, exercise_kinds=["quiz"])
+    numeric = saved(svc, user_id, subject_id, NUMERIC)
+    lesson = note(instances=(InstanceInput(numeric, numeric_params(), "Suma."),))
+    [outcome] = save_notes(svc, user_id, subject_id, None, [lesson]).notes
+    [instance_id] = outcome.instance_ids
+    assert retire_template(svc, user_id, numeric) == "retired"
+    assert store.tables.template_instances[instance_id].status == "active"
+    [shown] = get_note(svc, user_id, outcome.note_id).instances
+    assert shown.instance_id == instance_id
+    started = start_practice(svc, user_id, subject_id, "text")
+    assert started.first is not None and started.first.instance_id == instance_id
+    drawn = {
+        i.instance_id
+        for i in store.tables.practice_items.values()
+        if i.session_id == started.session_id
+    }
+    assert drawn == {instance_id}

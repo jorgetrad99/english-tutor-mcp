@@ -1435,6 +1435,13 @@ class MemoryTemplateRepo(_Repo):
         self._t.exercise_templates[rec.id] = rec
         return _template_row(rec, with_html=True)
 
+    def retire(self, template_id: UUID, now: datetime) -> bool:
+        rec = self._t.exercise_templates.get(template_id)
+        if rec is None or rec.user_id != self._uid or rec.status != "active":
+            return False
+        rec.status, rec.retired_at, rec.updated_at = "retired", now, now
+        return True
+
 
 class MemoryInstanceRepo(_Repo):
     def _row(self, rec: InstanceRecord) -> InstanceRow:

@@ -200,6 +200,19 @@ class PgTemplateRepo:
             raise ValueError("an active template of this subject has this name")
         return _template_row(m, with_html=True)
 
+    def retire(self, template_id: UUID, now: datetime) -> bool:
+        # One conditional UPDATE: a concurrent retirement (or replacement) matches no row here.
+        done = self._conn.execute(
+            update(exercise_templates)
+            .where(
+                exercise_templates.c.id == template_id,
+                exercise_templates.c.user_id == self._user_id,
+                exercise_templates.c.status == "active",
+            )
+            .values(status="retired", retired_at=now, updated_at=now)
+        )
+        return done.rowcount == 1
+
 
 _INSTANCE = select(template_instances, concepts.c.name.label("concept_name")).outerjoin(
     concepts,

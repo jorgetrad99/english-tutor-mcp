@@ -1783,6 +1783,29 @@ class RepoContract:
             assert [t.id for t in uow.templates.list_active(subject_id)] == [new.id]
             assert present(uow.templates.get(new.id)).status == "active"
 
+    def test_template_retire_once_and_only_the_users(
+        self, uow_factory: UowFactory, user_id: UUID, other_user_id: UUID, now: datetime
+    ) -> None:
+        # Slice D ruling 59: only status, retired_at and updated_at change (the 0006 grant).
+        later = now + timedelta(minutes=5)
+        with uow_factory(user_id) as uow:
+            subject_id = uow.subjects.create(sample_subject(), now).id
+            template = uow.templates.create(subject_id, spec(NUMERIC), HTML, 1, now)
+            kept = uow.templates.create(subject_id, spec(TABLE), HTML + " ", 1, now)
+        with uow_factory(other_user_id) as uow:  # Review Focus 5
+            assert uow.templates.retire(template.id, later) is False
+        with uow_factory(user_id) as uow:
+            assert present(uow.templates.get(template.id)).status == "active"
+            assert uow.templates.retire(uuid4(), later) is False
+            assert uow.templates.retire(template.id, later) is True
+        with uow_factory(user_id) as uow:
+            assert uow.templates.retire(template.id, later + timedelta(minutes=1)) is False
+            assert uow.templates.get(template.id) == replace(
+                template, status="retired", retired_at=later, updated_at=later
+            )
+            assert [t.id for t in uow.templates.list_active(subject_id)] == [kept.id]
+            assert uow.templates.active_by_name(subject_id, "respuesta numerica") is None
+
     # Instances (spec 15.4; plan ruling 28)
 
     def test_instance_insert_with_a_note_and_a_repeat(
