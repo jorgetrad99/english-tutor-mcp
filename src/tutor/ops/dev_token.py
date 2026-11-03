@@ -20,8 +20,11 @@ from tutor.auth.dev_auth import ALGORITHM, DEV_IDENTITIES, DEV_SUBS, DevSub, mcp
 from tutor.settings import Settings
 
 with warnings.catch_warnings():
-    # authlib 1.8 deprecates authlib.jose in favour of joserfc; it stays until authlib 2.0.
-    warnings.simplefilter("ignore", DeprecationWarning)
+    # authlib 1.8 deprecates authlib.jose in favour of joserfc (it stays until authlib 2.0) and
+    # installs an "always" filter for its warning at import; ours must go in front of that one.
+    from authlib.deprecate import AuthlibDeprecationWarning
+
+    warnings.simplefilter("ignore", AuthlibDeprecationWarning)
     from authlib.jose import jwt as jose_jwt
 
 DEFAULT_TOKEN_HOURS = 12

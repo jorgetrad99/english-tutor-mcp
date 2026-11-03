@@ -17,19 +17,21 @@ import pytest
 import sqlalchemy
 from cryptography.fernet import Fernet
 from fastmcp.server.auth.providers.jwt import JWTVerifier
-from tutor.auth.dev_auth import DEV_IDENTITIES, DEV_SUBS, build_dev_verifier
-from tutor.ops.dev_token import MAX_TOKEN_HOURS, mint_dev_token
 
 from tutor.app import BodySizeGuard, Message, PathDispatch, RequestLog, build_app
+from tutor.auth.dev_auth import DEV_IDENTITIES, DEV_SUBS, build_dev_verifier
 from tutor.mcp.server import build_mcp
 from tutor.ops import dev_token
+from tutor.ops.dev_token import MAX_TOKEN_HOURS, mint_dev_token
 from tutor.services.context import Services
 from tutor.services.memory import MemoryIdentity, MemoryStore, memory_uow
 from tutor.settings import Settings
 from tutor.web.config import WebConfig
 
 with warnings.catch_warnings():
-    warnings.simplefilter("ignore", DeprecationWarning)
+    from authlib.deprecate import AuthlibDeprecationWarning  # installs its own "always" filter
+
+    warnings.simplefilter("ignore", AuthlibDeprecationWarning)
     from authlib.jose import jwt as jose_jwt
 
 pytestmark = pytest.mark.unit
