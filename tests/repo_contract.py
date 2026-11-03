@@ -87,6 +87,7 @@ from tutor.services.ports import (
     PracticePlanRow,
     PracticeSessionRow,
     ReviewLogRow,
+    SessionItemCounts,
     SessionRow,
     TemplateRow,
     UnitOfWork,
@@ -2718,6 +2719,27 @@ class PracticeContract:
             assert uow.practice.sessions_for_subject(uuid4()) == ()
         with uow_factory(other_user_id) as uow:
             assert uow.practice.sessions_for_subject(world.subject_id) == ()
+
+    def test_item_counts_group_items_answers_and_right_answers_per_session(
+        self, uow_factory: UowFactory, user_id: UUID, other_user_id: UUID, now: datetime
+    ) -> None:
+        # Slice D ruling 55 (security review P3: one query for the whole history)
+        def at(minutes: int) -> datetime:
+            return now + timedelta(minutes=minutes)
+
+        with uow_factory(user_id) as uow:
+            world = practice_world(uow, now)
+            right, wrong, unanswered = (drawn(world.quiz, n) for n in (1, 2, 3))
+            busy = open_practice(uow, world, at(0), items=(right, wrong, unanswered))
+            answer_item(uow, right.item_id, at(1))
+            answer_item(uow, wrong.item_id, at(2), score=0)
+            uow.practice.close(busy.id, summary={}, self_rating=None, now=at(3))
+            empty = open_practice(uow, world, at(4))  # one open session per subject at a time
+            counts = uow.practice.item_counts([busy.id, empty.id, uuid4()])
+            assert counts == {busy.id: SessionItemCounts(items=3, answered=2, correct=1)}
+            assert uow.practice.item_counts([]) == {}
+        with uow_factory(other_user_id) as uow:
+            assert uow.practice.item_counts([busy.id]) == {}
 
     def test_active_counts_count_active_instances_per_template(
         self, uow_factory: UowFactory, user_id: UUID, other_user_id: UUID, now: datetime

@@ -103,6 +103,21 @@ def test_the_note_page_lists_active_instances_with_their_template(
     assert page.instances[0].prompt_text == "Suma dos y dos."
 
 
+def test_the_note_page_names_templates_whatever_their_subject(
+    subjects: MemorySubjects, demo: DemoUsers, ana_world: SubjectWorld
+) -> None:
+    # Security review P3: a template whose subject differs from the note's (or that cannot be
+    # read) never turns the note page into a 500.
+    record = subjects.store.tables.exercise_templates[ana_world.template_id]
+    record.subject_id = ana_world.empty_subject_id
+    page = subjects.note(demo.ana, ana_world.note_id)
+    assert page is not None
+    assert [i.template_name for i in page.instances] == [
+        "Respuesta numérica",
+        "Tabla de la lección",
+    ]
+
+
 def test_instance_documents_are_served_retired_ones_included(
     subjects: MemorySubjects, demo: DemoUsers, ana_world: SubjectWorld
 ) -> None:

@@ -260,11 +260,14 @@ class ServicesSubjects:
             if exc.code == "not_found":
                 return None
             raise
+        # The template names in one read, by id and whatever the template's subject or status;
+        # an instance whose template cannot be read (a race) is left out, never a 500.
         names: dict[UUID, str] = {}
-        for item in note.instances:
-            if item.template_id not in names:
-                one = list_templates(self._svc, user_id, note.subject_id, item.template_id)
-                names[item.template_id] = one.templates[0].name
+        with self._svc.uow(user_id) as uow:
+            for template_id in dict.fromkeys(i.template_id for i in note.instances):
+                row = uow.templates.get(template_id)
+                if row is not None:
+                    names[template_id] = row.spec.name
         return NotePage(
             note=note,
             instances=tuple(
@@ -275,6 +278,7 @@ class ServicesSubjects:
                     prompt_text=i.prompt_text,
                 )
                 for i in note.instances
+                if i.template_id in names
             ),
         )
 

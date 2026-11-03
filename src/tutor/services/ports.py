@@ -629,6 +629,16 @@ class PracticeSessionRow:
 
 
 @dataclass(frozen=True, slots=True)
+class SessionItemCounts:
+    """One practice session's items, answered items and right answers (the website's history,
+    slice D ruling 55)."""
+
+    items: int
+    answered: int
+    correct: int
+
+
+@dataclass(frozen=True, slots=True)
 class PracticeItemRow:
     """One showing of an instance. `answer` is learner data: never logged, never a metric."""
 
@@ -703,6 +713,11 @@ class PracticeRepo(Protocol):
 
     def items(self, session_id: UUID) -> tuple[PracticeItemRow, ...]:
         """The session's items by seq; () for another user's session."""
+
+    def item_counts(self, session_ids: Sequence[UUID]) -> Mapping[UUID, SessionItemCounts]:
+        """Per session, in one query: its items, answered items (`answered_at` set) and right
+        answers (`correct` true). Sessions without items, another user's or missing ones are
+        left out."""
 
     def item(self, item_id: UUID) -> PracticeItemRow | None:
         """The user's practice item, or None."""

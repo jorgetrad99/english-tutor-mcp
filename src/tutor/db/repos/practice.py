@@ -38,6 +38,7 @@ from tutor.services.ports import (
     PracticeItemRow,
     PracticePlanRow,
     PracticeSessionRow,
+    SessionItemCounts,
 )
 
 OPEN_SESSION_INDEX = "ux_practice_sessions_one_open_per_user"
@@ -357,6 +358,27 @@ class PgPracticeRepo:
             .order_by(practice_items.c.seq)
         ).mappings()
         return tuple(_item_row(m) for m in rows)
+
+    def item_counts(self, session_ids: Sequence[UUID]) -> Mapping[UUID, SessionItemCounts]:
+        if not session_ids:
+            return {}
+        rows = self._conn.execute(
+            select(
+                practice_items.c.session_id,
+                func.count().label("items"),
+                func.count(practice_items.c.answered_at).label("answered"),
+                func.count().filter(practice_items.c.correct.is_(True)).label("correct"),
+            )
+            .where(
+                practice_items.c.user_id == self._user_id,
+                practice_items.c.session_id.in_(list(session_ids)),
+            )
+            .group_by(practice_items.c.session_id)
+        )
+        return {
+            r.session_id: SessionItemCounts(items=r.items, answered=r.answered, correct=r.correct)
+            for r in rows
+        }
 
     def item(self, item_id: UUID) -> PracticeItemRow | None:
         m = (

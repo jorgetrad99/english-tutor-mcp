@@ -97,6 +97,7 @@ from tutor.services.ports import (
     ReviewLogRow,
     ReviewRepo,
     SearchHit,
+    SessionItemCounts,
     SessionRepo,
     SessionRow,
     SessionStatus,
@@ -1797,6 +1798,18 @@ class MemoryPracticeRepo(_Repo):
 
     def items(self, session_id: UUID) -> tuple[PracticeItemRow, ...]:
         return tuple(_practice_item_row(i) for i in self._items_of(session_id))
+
+    def item_counts(self, session_ids: Sequence[UUID]) -> Mapping[UUID, SessionItemCounts]:
+        counts: dict[UUID, SessionItemCounts] = {}
+        for session_id in dict.fromkeys(session_ids):
+            rows = self._items_of(session_id)
+            if rows:
+                counts[session_id] = SessionItemCounts(
+                    items=len(rows),
+                    answered=sum(1 for r in rows if r.answered_at is not None),
+                    correct=sum(1 for r in rows if r.correct is True),
+                )
+        return counts
 
     def item(self, item_id: UUID) -> PracticeItemRow | None:
         rec = self._t.practice_items.get(item_id)

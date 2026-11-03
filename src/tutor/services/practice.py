@@ -55,6 +55,7 @@ from tutor.services.ports import (
     OpenPracticeExists,
     PracticeItemRow,
     PracticeSessionRow,
+    SessionItemCounts,
     TemplateRow,
     UnitOfWork,
 )
@@ -573,10 +574,10 @@ def counts_toward_plan(session: PracticeSessionRow, answered: int) -> bool:
     return session.status == "closed"
 
 
-def _history_row(uow: UnitOfWork, session: PracticeSessionRow) -> HistoryRow:
-    rows = uow.practice.items(session.id)
-    answered = [r for r in rows if r.answered_at is not None]
-    correct = sum(1 for r in answered if r.correct is True)
+def _history_row(session: PracticeSessionRow, counts: SessionItemCounts | None) -> HistoryRow:
+    items = counts.items if counts is not None else 0
+    answered = counts.answered if counts is not None else 0
+    correct = counts.correct if counts is not None else 0
     minutes = None
     if session.status == "closed" and session.summary is not None:
         minutes = int(session.summary.get("minutes", 0))
@@ -585,11 +586,11 @@ def _history_row(uow: UnitOfWork, session: PracticeSessionRow) -> HistoryRow:
         started_at=session.started_at,
         mode=session.mode,
         status=session.status,
-        items=len(rows),
-        answered=len(answered),
-        accuracy=correct / len(answered) if answered else None,
+        items=items,
+        answered=answered,
+        accuracy=correct / answered if answered else None,
         minutes=minutes,
-        counted=counts_toward_plan(session, len(answered)),
+        counted=counts_toward_plan(session, answered),
     )
 
 
@@ -602,6 +603,6 @@ def history(
     with svc.uow(user_id) as uow:
         if uow.subjects.get(subject_id) is None:
             raise ServiceError("not_found", ("subject_id",))
-        return tuple(
-            _history_row(uow, s) for s in uow.practice.sessions_for_subject(subject_id, limit)
-        )
+        sessions = uow.practice.sessions_for_subject(subject_id, limit)
+        counts = uow.practice.item_counts([s.id for s in sessions])
+        return tuple(_history_row(s, counts.get(s.id)) for s in sessions)
