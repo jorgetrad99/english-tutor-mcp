@@ -226,7 +226,9 @@ def search_notes(
     subject_id: UUID | None = None,
     limit: int = DEFAULT_SEARCH_LIMIT,
 ) -> SearchResult:
-    """Deterministic search over the learner's notes (spec 5.1); the repository ranks."""
+    """Deterministic search over the learner's notes (spec 5.1); the repository ranks. Each call
+    records `notes_searched` with the subject filter, the hit count and whether a fuzzy path
+    found any hit, never the query (spec 16.6, slice B ruling 69)."""
     text = query.strip()
     if not 1 <= len(text) <= QUERY_MAX:
         raise ServiceError("validation_failed", ("query",))
@@ -256,6 +258,15 @@ def search_notes(
                     ),
                 )
             )
+        uow.audit.record(
+            "notes_searched",
+            {
+                "subject_id": str(subject_id) if subject_id is not None else None,
+                "hits": len(hits),
+                "fuzzy": any(h.why.fuzzy for h in hits),
+            },
+            svc.clock(),
+        )
     return SearchResult(hits=tuple(hits))
 
 
