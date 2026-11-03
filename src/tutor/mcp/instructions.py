@@ -1,6 +1,7 @@
 """Server instructions (spec 8.3, <= 400 words), tool descriptions (<= 120 words), the prompt."""
 
 from tutor.domain.html_guard import MAX_ARTIFACT_BYTES
+from tutor.domain.notes import MAX_NOTE_CHARS
 
 INSTRUCTIONS = (
     "You are an English tutor for Spanish-speaking professionals. Speak English unless the "
@@ -103,8 +104,9 @@ SAVE_SUBJECT_DESCRIPTION = (
 SAVE_NOTES_DESCRIPTION = (
     "Call to store the learner's material for a subject: one note per lesson, sent in order, "
     "with the optional source (course, PDF, text) they come from. At most 4 notes and 16,000 "
-    "characters of raw_text per call, 6,000 per note; send more in further calls. Split a long "
-    "lesson into parts with the same lesson_ref plus a suffix ('... / parte 2'). Send the text "
+    "characters of raw_text per call, 6,000 per note; send more in further calls. If a note's "
+    f"text is over {MAX_NOTE_CHARS:,} characters, split it into several notes with the same "
+    "lesson_ref plus a suffix ('... / parte 2'). Send the text "
     "as the learner gave it; you may fix obvious extraction damage. Describe images in text "
     "and never download media. Add concepts, links, exercises and quiz items found in the "
     "lesson. Sending the same lesson again changes nothing; a corrected text replaces it."

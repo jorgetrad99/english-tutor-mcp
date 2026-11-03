@@ -199,6 +199,25 @@ async def test_the_artifact_html_field_states_the_byte_cap_from_the_constant() -
     assert "KiB" not in TOOL_DESCRIPTIONS["save_artifact"]
 
 
+def test_save_notes_says_to_split_a_note_over_the_note_cap() -> None:
+    ingest = TOOL_DESCRIPTIONS["save_notes"]
+    assert f"over {MAX_NOTE_CHARS:,} characters" in ingest
+    assert "several notes" in ingest
+    assert "split" not in rules.ERRORS["validation_failed"].lower()
+
+
+@pytest.mark.asyncio
+async def test_the_two_exercise_kind_lists_say_they_differ() -> None:
+    async with Client(World().mcp) as client:
+        tools = {tool.name: tool for tool in await client.list_tools()}
+    subject = tools["save_subject"].input_schema["properties"]["exercise_kinds"]["description"]
+    note = tools["save_notes"].input_schema["properties"]["notes"]["items"]
+    exercise = note["properties"]["exercises"]["items"]["properties"]["exercise_kind"]
+    exercise = exercise["description"]
+    assert "not the same list" in subject.lower() and "exercise_kind" in subject
+    assert "not the same list" in exercise.lower() and "exercise_kinds" in exercise
+
+
 # --- subjects -----------------------------------------------------------------------------------
 
 

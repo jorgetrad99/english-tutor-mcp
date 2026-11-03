@@ -1070,7 +1070,8 @@ ExerciseKindsField = Annotated[
         description=(
             f"{MIN_EXERCISE_KINDS} to {MAX_EXERCISE_KINDS} practice kinds without repeats: "
             "'quiz' (theory questions), 'ear' (ear training, for music), 'exercise' "
-            "(exercises from the material)."
+            "(exercises from the material). Not the same list as a note exercise's "
+            "exercise_kind."
         ),
         min_length=MIN_EXERCISE_KINDS,
         max_length=MAX_EXERCISE_KINDS,
@@ -1204,7 +1205,10 @@ class ExerciseIn(StrictInput):
     )
     exercise_kind: NoteExerciseKind = Field(
         title="Exercise kind",
-        description="technique, repertoire, theory, ear or other.",
+        description=(
+            "technique, repertoire, theory, ear or other. Not the same list as the subject's "
+            "exercise_kinds."
+        ),
     )
     tempo_bpm: int | None = Field(
         default=None,
