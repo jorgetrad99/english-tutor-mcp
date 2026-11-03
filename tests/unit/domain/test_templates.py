@@ -886,6 +886,9 @@ class _Elements(HTMLParser):
             self.data[self._current] = self.data.get(self._current, "") + data
 
 
+# The prefix the marker must follow (amendments A51, A52); compose_document checks it too.
+HEAD = "<!doctype html><html><head><meta charset='utf-8'>"
+
 HOSTILE = (
     "</script><script>alert(1)</script>",
     "<!--",
@@ -904,7 +907,7 @@ def test_review_focus_8_parameters_cannot_become_markup(value: str) -> None:
     encoded = encode_payload(public_payload(INSTANCE, spec, values, Draw()))
     for raw in ("<", ">", "&", "'", chr(0x2028), chr(0x2029)):
         assert raw not in encoded
-    html = f"<!doctype html><html><body><p>Hola</p>{TEMPLATE_MARKER}<p id='end'>x</p></body></html>"
+    html = f"{HEAD}{TEMPLATE_MARKER}</head><body><p>Hola</p><p id='end'>x</p></body></html>"
     document = compose_document(html, encoded, "window.tutorSubmit = function () {};")
     parsed = _Elements()
     parsed.feed(document)
@@ -913,11 +916,11 @@ def test_review_focus_8_parameters_cannot_become_markup(value: str) -> None:
 
 
 def test_compose_document_inserts_payload_and_bridge_at_the_marker_only() -> None:
-    html = f"<!doctype html><html><body>{TEMPLATE_MARKER}</body></html>"
+    html = f"{HEAD}{TEMPLATE_MARKER}</head><body></body></html>"
     document = compose_document(html, '{"v":1}', "var x = 1;")
     assert document == (
-        '<!doctype html><html><body><script type="application/json" id="tutor-params">'
-        '{"v":1}</script><script id="tutor-bridge">var x = 1;</script></body></html>'
+        f'{HEAD}<script type="application/json" id="tutor-params">'
+        '{"v":1}</script><script id="tutor-bridge">var x = 1;</script></head><body></body></html>'
     )
     for bad in ("<!doctype html>", html + TEMPLATE_MARKER):
         with pytest.raises(ValueError, match="marker"):
@@ -926,6 +929,23 @@ def test_compose_document_inserts_payload_and_bridge_at_the_marker_only() -> Non
         compose_document(html, "{}", "x = '</script>';")
     with pytest.raises(ValueError, match="end its script"):
         compose_document(html, '{"a":"<"}', "")
+
+
+@pytest.mark.parametrize(
+    "html",
+    [
+        f"<!doctype html><html><body><p>Hola</p>{TEMPLATE_MARKER}</body></html>",
+        f"<!doctype html><html><head>{TEMPLATE_MARKER}</head></html>",
+        f"{HEAD}<!-- a -->{TEMPLATE_MARKER}</head></html>",
+        f"{HEAD}<title>t</title>{TEMPLATE_MARKER}</head></html>",
+    ],
+    ids=["in-body", "no-meta", "comment", "title"],
+)
+def test_compose_document_refuses_a_marker_that_does_not_come_first(html: str) -> None:
+    # Security re-review P3: compose fills the first marker text, so it checks the same prefix
+    # as check_template_html (amendments A51, A52) instead of trusting its caller.
+    with pytest.raises(ValueError, match="marker"):
+        compose_document(html, "{}", "")
 
 
 def test_encode_payload_sorts_keys_and_round_trips() -> None:

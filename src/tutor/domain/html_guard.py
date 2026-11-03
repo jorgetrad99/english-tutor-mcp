@@ -4,6 +4,7 @@ Hygiene only: the sandbox (`Content-Security-Policy: sandbox allow-scripts`, `<i
 is the security boundary (spec 10). Problems name the tag or attribute, never the content.
 """
 
+import html as html_lib
 import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
@@ -50,17 +51,20 @@ _SAFE_NAME = re.compile(r"[a-z][a-z0-9:_.-]{0,31}")
 _WHITESPACE = re.compile(r"\s+")
 _BOM = chr(0xFEFF)
 
-# What may precede the marker (amendment A51): each part optional, in this order, with ASCII
-# whitespace only around them: one BOM, `<!doctype html>`, `<html>` with plain attributes,
-# `<head>` without attributes, `<meta charset=utf-8>`. No comment, text or other tag, so the
-# marker is the first content of the head however the rest of the document parses. Written by
+# What may precede the marker (amendments A51, A52), in this order, with ASCII whitespace only
+# around them: optionally one BOM, `<!doctype html>`, `<html>` with plain attributes and
+# `<head>` without attributes; then, required, `<meta charset=utf-8>`. No comment, text or other
+# tag, so the marker is the first content of the head however the rest of the document parses,
+# and the page declares its encoding before any content. Written by
 # hand rather than with html.parser, whose quirks differ from browsers and between Python
 # patch releases (security pass P2, P3). re.ASCII keeps IGNORECASE from folding non-ASCII
 # letters (such as U+017F, long s) into ASCII ones.
 _WS = r"[\t\n\f\r ]"
 _ATTR_VALUE = r"""(?:"[^"<>\x00]*"|'[^'<>\x00]*'|[^\t\n\f\r "'=<>`\x00]+)"""
 _HTML_ATTR = rf"{_WS}+[a-z][a-z0-9-]*(?:{_WS}*={_WS}*{_ATTR_VALUE})?"
-_CHARSET = r"""(?:"utf-8"|'utf-8'|utf-8)"""  # another charset could re-decode the page
+# Another charset could re-decode the page. A browser reads an unquoted value up to whitespace
+# or `>`, so `charset=utf-8/>` names `utf-8/`: unquoted, `/` may follow only after whitespace.
+_CHARSET = rf"""(?:(?:"utf-8"|'utf-8'){_WS}*/?|utf-8(?:{_WS}+/?)?)"""
 _MARKER_PREFIX = re.compile(
     "".join(
         (
@@ -68,11 +72,25 @@ _MARKER_PREFIX = re.compile(
             rf"(?:<!doctype html>{_WS}*)?",
             rf"(?:<html(?:{_HTML_ATTR})*{_WS}*>{_WS}*)?",
             rf"(?:<head>{_WS}*)?",
-            rf"(?:<meta{_WS}+charset{_WS}*={_WS}*{_CHARSET}{_WS}*/?>{_WS}*)?",
+            rf"<meta{_WS}+charset{_WS}*={_WS}*{_CHARSET}>{_WS}*",
         )
     ),
     re.ASCII | re.IGNORECASE,
 )
+
+
+# Raw scans behind the parser (amendment A52): html.parser reads some comments and CDATA
+# differently from a browser, so markup after the marker could hide from it. These look at the
+# whole text, in any case and after decoding character references, and refuse what a browser
+# might build: `http-equiv` anywhere, `tutor-bridge` anywhere, an `id=tutor-params` beyond the
+# marker's own. `getElementById("tutor-params")` has no `=` and stays allowed.
+_HTTP_EQUIV = "http-equiv"
+_PARAMS_ID = re.compile(rf"id{_WS}*={_WS}*[\"'`]?tutor-params", re.ASCII | re.IGNORECASE)
+
+
+def _raw_views(html: str) -> tuple[str, str]:
+    """The text and the text with character references decoded, both lowercased."""
+    return html.lower(), html_lib.unescape(html).lower()
 
 
 def _safe(name: str, fallback: str) -> str:
@@ -84,10 +102,18 @@ def _has_css_token(value: str) -> bool:
     return any(token in compact for token in _CSS_TOKENS)
 
 
-def _marker_comes_first(html: str) -> bool:
-    """True when the marker text sits right after an allowed prefix (`_MARKER_PREFIX`)."""
+def _marker_start(html: str) -> int | None:
+    """Where the marker text starts when it sits right after an allowed prefix
+    (`_MARKER_PREFIX`); None otherwise."""
     prefix = _MARKER_PREFIX.match(html)
-    return prefix is not None and html.startswith(TEMPLATE_MARKER, prefix.end())
+    if prefix is None or not html.startswith(TEMPLATE_MARKER, prefix.end()):
+        return None
+    return prefix.end()
+
+
+def marker_comes_first(html: str) -> bool:
+    """True when the marker text sits right after an allowed prefix (amendments A51, A52)."""
+    return _marker_start(html) is not None
 
 
 class _Guard(HTMLParser):
@@ -167,8 +193,9 @@ def check_html(html: str) -> tuple[HtmlProblem, ...]:
     """Every rule of spec 4.4 the document breaks, in document order, without duplicates.
 
     An oversized document is reported alone. `too_large` and `not_document` carry `html` and
-    `doctype`; tag problems carry the tag (`meta[http-equiv]` for a meta refresh); attribute and
-    inline-style problems carry `tag[attr]`; a `<style>` element carries `style`.
+    `doctype`; tag problems carry the tag (`meta[http-equiv]` for a meta refresh, and for the
+    text `http-equiv` anywhere, by raw scan: amendment A52); attribute and inline-style problems
+    carry `tag[attr]`; a `<style>` element carries `style`.
     """
     return _check(html)[0]
 
@@ -181,26 +208,43 @@ def _check(html: str) -> tuple[tuple[HtmlProblem, ...], _Guard | None]:
         guard.problems.append(HtmlProblem("not_document", "doctype"))
     guard.feed(html)
     guard.close()
+    if _HTTP_EQUIV in html.lower():  # the parser's own finding, when it has one, comes first
+        guard._add("tag_forbidden", "meta[http-equiv]")
     return tuple(guard.problems), guard
+
+
+def _reserved_ids_hidden(html: str) -> bool:
+    """True when the raw text names `tutor-bridge` or a second `id=tutor-params`."""
+    return any(
+        "tutor-bridge" in view or len(_PARAMS_ID.findall(view)) > 1 for view in _raw_views(html)
+    )
 
 
 def check_template_html(html: str) -> tuple[HtmlProblem, ...]:
     """`check_html` plus the marker rule (spec 15.5, amendment A51): exactly one empty
     `<script type="application/json" id="tutor-params"></script>`, as the first content of the
     head, and no other element with id `tutor-params` or `tutor-bridge`; otherwise
-    `marker_missing` (detail `tutor-params`).
+    `marker_missing` (detail `tutor-params`). Behind the parser, a raw scan (amendment A52)
+    also gives `marker_missing` for `tutor-bridge` anywhere or a second `id=tutor-params`.
 
-    Only `<!doctype html>`, `<html ...>`, `<head>` and `<meta charset="utf-8">` may precede the
-    marker, in that order and with ASCII whitespace between (`_MARKER_PREFIX`). A browser then
-    builds the marker as the head's first element before anything that could hide or swallow
-    it, and compose_document fills that same first marker text."""
+    Only `<!doctype html>`, `<html ...>` and `<head>`, then the required
+    `<meta charset="utf-8">`, may precede the marker, in that order and with ASCII whitespace
+    between (`_MARKER_PREFIX`). A browser then builds the marker as the head's first element
+    before anything that could hide or swallow it, and compose_document fills that same first
+    marker text. After the marker the word `charset` may not appear in any case (amendment
+    A52): a second meta could re-decode a page served without a charset; `tag_forbidden`,
+    detail `meta[charset]`."""
     problems, guard = _check(html)
     if guard is None:
         return problems
+    start = _marker_start(html)
+    if start is not None and "charset" in html[start:].lower():
+        problems = (*problems, HtmlProblem("tag_forbidden", "meta[charset]"))
     if (
-        not _marker_comes_first(html)
+        start is None
         or html.count(TEMPLATE_MARKER) != 1
         or tuple(guard.reserved_ids) != ("tutor-params",)
+        or _reserved_ids_hidden(html)
     ):
         return (*problems, HtmlProblem("marker_missing", "tutor-params"))
     return problems
