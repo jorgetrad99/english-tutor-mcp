@@ -1,0 +1,131 @@
+{# Progreso (slice D rulings 72-73): SubjectProgress rendered as is; nothing computed here. #}
+{% import "macros/subjects.html" as sl %}
+{% set p = progress %}
+<p class="streak"><span class="streak__num" aria-hidden="true">{{ p.streak.current_days|integer }}</span> <span aria-hidden="true">{{ _("día seguido") if p.streak.current_days == 1 else _("días seguidos") }}</span><span class="sr-only">{% trans n=p.streak.current_days|integer %}Días seguidos: {{ n }}{% endtrans %}</span></p>
+<p class="muted">{% trans n=p.streak.longest_days|integer %}Máxima: {{ n }} días{% endtrans %}{% if p.streak.last_practice_day %} · {% trans day=p.streak.last_practice_day|day("long") %}Última práctica: {{ day }}{% endtrans %}{% endif %}</p>
+{% if p.overall.all_time.attempts %}
+<dl class="facts">
+  <dt>{{ _("Aciertos, últimos 14 días") }}</dt><dd>{{ sl.share(p.overall.recent.accuracy) }}</dd>
+  <dt>{{ _("Aciertos en total") }}</dt><dd>{{ sl.share(p.overall.all_time.accuracy) }}</dd>
+</dl>
+<div class="table-wrap">
+  <table class="table table--stack">
+    <caption>{{ _("Conceptos, del más débil al más fuerte") }}</caption>
+    <thead>
+      <tr>
+        <th scope="col">{{ _("Concepto") }}</th>
+        <th scope="col">{{ _("Estado") }}</th>
+        <th scope="col">{{ _("Intentos 14 días") }}</th>
+        <th scope="col">{{ _("Crédito 14 días") }}</th>
+        <th scope="col">{{ _("Intentos en total") }}</th>
+        <th scope="col">{{ _("Crédito total") }}</th>
+        <th scope="col">{{ _("Tiempo mediano") }}</th>
+        <th scope="col">{{ _("Tiempo p90") }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in p.concepts %}
+      <tr>
+        <td data-label="{{ _('Concepto') }}">{{ c.name }}</td>
+        <td data-label="{{ _('Estado') }}">{{ sl.concept_rank(c.concept_rank) }}</td>
+        <td data-label="{{ _('Intentos 14 días') }}">{{ c.recent.attempts|integer }}</td>
+        <td data-label="{{ _('Crédito 14 días') }}">{{ sl.credit(c.recent.mean_score) }}</td>
+        <td data-label="{{ _('Intentos en total') }}">{{ c.all_time.attempts|integer }}</td>
+        <td data-label="{{ _('Crédito total') }}">{{ sl.credit(c.all_time.mean_score) }}</td>
+        <td data-label="{{ _('Tiempo mediano') }}">{{ sl.seconds(c.timing.median_seconds) }}</td>
+        <td data-label="{{ _('Tiempo p90') }}">{{ sl.seconds(c.timing.p90_seconds) }}</td>
+      </tr>
+      {% endfor %}
+      {% set u = p.unassigned %}
+      {% if u.all_time.attempts %}
+      <tr>
+        <td data-label="{{ _('Concepto') }}">{{ _("Sin concepto") }}</td>
+        <td data-label="{{ _('Estado') }}">{{ sl.nil() }}</td>
+        <td data-label="{{ _('Intentos 14 días') }}">{{ u.recent.attempts|integer }}</td>
+        <td data-label="{{ _('Crédito 14 días') }}">{{ sl.credit(u.recent.mean_score) }}</td>
+        <td data-label="{{ _('Intentos en total') }}">{{ u.all_time.attempts|integer }}</td>
+        <td data-label="{{ _('Crédito total') }}">{{ sl.credit(u.all_time.mean_score) }}</td>
+        <td data-label="{{ _('Tiempo mediano') }}">{{ sl.seconds(u.timing.median_seconds) }}</td>
+        <td data-label="{{ _('Tiempo p90') }}">{{ sl.seconds(u.timing.p90_seconds) }}</td>
+      </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+{% if p.templates %}
+<div class="table-wrap">
+  <table class="table table--stack">
+    <caption>{{ _("Tiempo por plantilla") }}</caption>
+    <thead>
+      <tr>
+        <th scope="col">{{ _("Plantilla") }}</th>
+        <th scope="col">{{ _("Tipo de calificación") }}</th>
+        <th scope="col">{{ _("Retirada") }}</th>
+        <th scope="col">{{ _("Respuestas medidas") }}</th>
+        <th scope="col">{{ _("Mediana") }}</th>
+        <th scope="col">{{ _("p90") }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in p.templates %}
+      <tr>
+        <td data-label="{{ _('Plantilla') }}">{{ t.name }}</td>
+        <td data-label="{{ _('Tipo de calificación') }}">{{ sl.grading_label(t.grading_kind) }}</td>
+        <td data-label="{{ _('Retirada') }}">{% if t.template_status == "retired" %}{{ _("Sí") }}{% endif %}</td>
+        <td data-label="{{ _('Respuestas medidas') }}">{{ t.timing.timed|integer }}</td>
+        <td data-label="{{ _('Mediana') }}">{{ sl.seconds(t.timing.median_seconds) }}</td>
+        <td data-label="{{ _('p90') }}">{{ sl.seconds(t.timing.p90_seconds) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% else %}
+<p class="empty">{{ _("Aún no hay respuestas en esta materia.") }}</p>
+{% endif %}
+<div class="table-wrap">
+  <table class="table table--stack">
+    <caption>{{ _("Actividad por semana") }}</caption>
+    <thead>
+      <tr>
+        <th scope="col">{{ _("Semana") }}</th>
+        <th scope="col">{{ _("Notas") }}</th>
+        <th scope="col">{{ _("Plantillas") }}</th>
+        <th scope="col">{{ _("Ejercicios creados") }}</th>
+        <th scope="col">{{ _("Búsquedas") }}</th>
+        <th scope="col">{{ _("Prácticas iniciadas") }}</th>
+        <th scope="col">{{ _("Completadas") }}</th>
+        <th scope="col">{{ _("Abandonadas") }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for w in p.weeks %}
+      <tr>
+        <td data-label="{{ _('Semana') }}">{{ w.week_start|day("short") }}</td>
+        <td data-label="{{ _('Notas') }}">{{ w.notes_ingested|integer }}</td>
+        <td data-label="{{ _('Plantillas') }}">{{ w.templates_created|integer }}</td>
+        <td data-label="{{ _('Ejercicios creados') }}">{{ w.instances_created|integer }}</td>
+        <td data-label="{{ _('Búsquedas') }}">{{ w.searches|integer }}</td>
+        <td data-label="{{ _('Prácticas iniciadas') }}">{{ w.practice_started|integer }}</td>
+        <td data-label="{{ _('Completadas') }}">{{ w.practice_completed|integer }}</td>
+        <td data-label="{{ _('Abandonadas') }}">{{ w.practice_abandoned|integer }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    {% set t = p.totals %}
+    <tfoot>
+      <tr>
+        <th scope="row" data-label="{{ _('Semana') }}">{{ _("Total") }}</th>
+        <td data-label="{{ _('Notas') }}">{{ t.notes_ingested|integer }}</td>
+        <td data-label="{{ _('Plantillas') }}">{{ t.templates_created|integer }}</td>
+        <td data-label="{{ _('Ejercicios creados') }}">{{ t.instances_created|integer }}</td>
+        <td data-label="{{ _('Búsquedas') }}">{{ t.searches|integer }}</td>
+        <td data-label="{{ _('Prácticas iniciadas') }}">{{ t.practice_started|integer }}</td>
+        <td data-label="{{ _('Completadas') }}">{{ t.practice_completed|integer }}</td>
+        <td data-label="{{ _('Abandonadas') }}">{{ t.practice_abandoned|integer }}</td>
+      </tr>
+    </tfoot>
+  </table>
+</div>
+<p class="muted">{% trans n=p.over_cap|integer %}{{ n }} respuestas de más de 10 minutos no cuentan en los tiempos.{% endtrans %}</p>

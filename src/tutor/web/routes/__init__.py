@@ -8,7 +8,17 @@ from tutor.web.config import WebConfig
 
 
 def all_routers(config: WebConfig) -> list[APIRouter]:
-    from tutor.web.routes import auth, connect, glossary, home, profile, public, pwa, sessions
+    from tutor.web.routes import (
+        auth,
+        connect,
+        glossary,
+        home,
+        profile,
+        public,
+        pwa,
+        sessions,
+        subjects,
+    )
 
     routers: list[APIRouter] = [
         public.router,
@@ -20,5 +30,6 @@ def all_routers(config: WebConfig) -> list[APIRouter]:
         sessions.router,
         glossary.router,
         profile.router,
+        subjects.router,
     ]
     return routers

@@ -44,6 +44,22 @@ def _day_filter(lang: Lang) -> Callable[..., str]:
     return day
 
 
+def _duration_filter(lang: Lang) -> Callable[[int], str]:
+    """`{{ seconds|duration_seconds }}`: "45 s", or "1 min 5 s" from 60 s (slice D ruling 73)."""
+    translations = load_translations(lang)
+
+    def duration_seconds(value: int) -> str:
+        if value < 60:
+            return translations.gettext("%(s)s s") % {"s": fmt_int(value, lang)}
+        minutes, seconds = divmod(value, 60)
+        return translations.gettext("%(m)s min %(s)s s") % {
+            "m": fmt_int(minutes, lang),
+            "s": fmt_int(seconds, lang),
+        }
+
+    return duration_seconds
+
+
 class Views:
     def __init__(self, assets: AssetManifest) -> None:
         self.envs = {lang: self._env(lang, assets) for lang in Lang}
@@ -66,6 +82,7 @@ class Views:
         env.filters["percent"] = partial(fmt_percent, lang=lang)
         env.filters["money"] = partial(fmt_money, lang=lang)
         env.filters["day"] = _day_filter(lang)
+        env.filters["duration_seconds"] = _duration_filter(lang)
         return env
 
 

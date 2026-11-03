@@ -1,0 +1,10 @@
+{% extends "layouts/app.html" %}
+{% set active_nav = "subjects" %}
+{% block title %}{{ _("Materias") }} · English Tutor{% endblock %}
+{% block content %}
+<header class="page-head">
+  <h1>{{ _("Materias") }}</h1>
+</header>
+<p class="muted">{{ _("Lo que estudias además de inglés: tus apuntes, tus ejercicios y tu plan.") }}</p>
+{% include "partials/subjects_list.html" %}
+{% endblock %}

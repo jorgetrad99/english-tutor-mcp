@@ -765,3 +765,304 @@ msgstr "Too many requests"
 
 msgid "Espera un minuto e intenta de nuevo."
 msgstr "Wait a minute and try again."
+
+# Materias, Materia, Nota (slice D)
+msgid "%(answered)s de %(items)s"
+msgstr "%(answered)s of %(items)s"
+
+msgid "%(done)s de %(expected)s esperadas"
+msgstr "%(done)s of %(expected)s expected"
+
+msgid "%(n)s de 100"
+msgstr "%(n)s of 100"
+
+msgid "%(n)s días"
+msgstr "%(n)s days"
+
+msgid "%(n)s respuestas de más de 10 minutos no cuentan en los tiempos."
+msgstr "Answers over 10 minutes left out of the times: %(n)s."
+
+msgid "%(s)s s"
+msgstr "%(s)s s"
+
+msgid "%(m)s min %(s)s s"
+msgstr "%(m)s min %(s)s s"
+
+msgid "Abandonadas"
+msgstr "Abandoned"
+
+msgid "Aciertos"
+msgstr "Correct"
+
+msgid "Aciertos en total"
+msgstr "Correct overall"
+
+msgid "Aciertos, últimos 14 días"
+msgstr "Correct, last 14 days"
+
+msgid "Activa"
+msgstr "Active"
+
+msgid "Actividad por semana"
+msgstr "Activity by week"
+
+msgid "Apuntes"
+msgstr "Notes"
+
+msgid "Aquí puedes probar el ejercicio; la calificación cuenta solo en una práctica con Claude."
+msgstr "You can try the exercise here; grading counts only in a practice with Claude."
+
+msgid "Archivada"
+msgstr "Archived"
+
+msgid "Autoevaluación"
+msgstr "Self-assessment"
+
+msgid "Aún no has practicado esta materia. Pídele a Claude una práctica."
+msgstr "You have not practised this subject yet. Ask Claude for a practice."
+
+msgid "Aún no hay apuntes en esta materia. Compártelos con Claude o agrégalos aquí."
+msgstr "This subject has no notes yet. Share them with Claude or add them here."
+
+msgid "Aún no hay plantillas. Claude las crea cuando preparas ejercicios."
+msgstr "No templates yet. Claude creates them when you prepare exercises."
+
+msgid "Aún no hay respuestas en esta materia."
+msgstr "No answers in this subject yet."
+
+msgid "Aún no tienes materias. Pídele a Claude que cree una materia y aparecerá aquí."
+msgstr "You have no subjects yet. Ask Claude to create a subject and it will show up here."
+
+msgid "Aún sin plan de práctica."
+msgstr "No practice plan yet."
+
+msgid "Búsquedas"
+msgstr "Searches"
+
+msgid "Clase"
+msgstr "Class"
+
+msgid "Completadas"
+msgstr "Completed"
+
+msgid "Concepto"
+msgstr "Concept"
+
+msgid "Conceptos"
+msgstr "Concepts"
+
+msgid "Conceptos, del más débil al más fuerte"
+msgstr "Concepts, weakest first"
+
+msgid "Conjunto exacto"
+msgstr "Exact set"
+
+msgid "Crédito 14 días"
+msgstr "Credit 14 days"
+
+msgid "Crédito total"
+msgstr "Credit overall"
+
+msgid "Cuenta para el plan"
+msgstr "Counts toward the plan"
+
+msgid "Cumplimiento"
+msgstr "Adherence"
+
+msgid "Curso"
+msgstr "Course"
+
+msgid "Desde Claude"
+msgstr "From Claude"
+
+msgid "Desde la web"
+msgstr "From the website"
+
+msgid "Ejercicio"
+msgstr "Exercise"
+
+msgid "Ejercicios activos"
+msgstr "Active exercises"
+
+msgid "Ejercicios creados"
+msgstr "Exercises created"
+
+msgid "Ejercicios y material"
+msgstr "Exercises and material"
+
+msgid "Enlace"
+msgstr "Link"
+
+msgid "Esta nota aún no tiene ejercicios."
+msgstr "This note has no exercises yet."
+
+msgid "Fecha meta"
+msgstr "Target date"
+
+msgid "Fin estimado"
+msgstr "Projected end"
+
+msgid "Intentos 14 días"
+msgstr "Attempts 14 days"
+
+msgid "Intentos en total"
+msgstr "Attempts overall"
+
+msgid "Lo que estudias además de inglés: tus apuntes, tus ejercicios y tu plan."
+msgstr "What you study besides English: your notes, your exercises and your plan."
+
+msgid "Material de consulta"
+msgstr "Reference material"
+
+msgid "Materias"
+msgstr "Subjects"
+
+msgid "Mediana"
+msgstr "Median"
+
+msgid "Meta"
+msgstr "Goal"
+
+msgid "Minutos"
+msgstr "Minutes"
+
+msgid "Minutos por sesión"
+msgstr "Minutes per session"
+
+msgid "Máxima: %(n)s días"
+msgstr "Longest: %(n)s days"
+
+msgid "No"
+msgstr "No"
+
+msgid "Notas"
+msgstr "Notes"
+
+msgid "Número"
+msgstr "Number"
+
+msgid "Opción múltiple"
+msgstr "Multiple choice"
+
+msgid "Orden exacto"
+msgstr "Exact order"
+
+msgid "Otra fuente"
+msgstr "Other source"
+
+msgid "Para cambiar tu materia, pídeselo a Claude."
+msgstr "To change your subject, ask Claude."
+
+msgid "Para repasar"
+msgstr "To review"
+
+msgid "Plan de práctica"
+msgstr "Practice plan"
+
+msgid "Plantilla"
+msgstr "Template"
+
+msgid "Plantillas"
+msgstr "Templates"
+
+msgid "Plantillas activas de esta materia"
+msgstr "Active templates of this subject"
+
+msgid "Pocos intentos"
+msgstr "Few attempts"
+
+msgid "Prácticas"
+msgstr "Practices"
+
+msgid "Prácticas iniciadas"
+msgstr "Practices started"
+
+msgid "Reemplazada"
+msgstr "Replaced"
+
+msgid "Respondidos"
+msgstr "Answered"
+
+msgid "Respuestas medidas"
+msgstr "Timed answers"
+
+msgid "Retirada"
+msgstr "Retired"
+
+msgid "Retraso"
+msgstr "Delay"
+
+msgid "Semana"
+msgstr "Week"
+
+msgid "Sesiones hechas"
+msgstr "Sessions done"
+
+msgid "Sesiones perdidas"
+msgstr "Sessions missed"
+
+msgid "Sesiones por semana"
+msgstr "Sessions per week"
+
+msgid "Sin calificación"
+msgstr "Not graded"
+
+msgid "Sin concepto"
+msgstr "No concept"
+
+msgid "Sin fuente"
+msgstr "No source"
+
+msgid "Sin practicar"
+msgstr "Not practised"
+
+msgid "Sí"
+msgstr "Yes"
+
+msgid "Texto exacto"
+msgstr "Exact text"
+
+msgid "Texto pegado"
+msgstr "Pasted text"
+
+msgid "Tiempo mediano"
+msgstr "Median time"
+
+msgid "Tiempo p90"
+msgstr "p90 time"
+
+msgid "Tiempo por plantilla"
+msgstr "Time per template"
+
+msgid "Tipo de calificación"
+msgstr "Grading"
+
+msgid "Todas las materias"
+msgstr "All subjects"
+
+msgid "Total"
+msgstr "Total"
+
+msgid "Tu materia"
+msgstr "Your subject"
+
+msgid "Tus prácticas de esta materia, de la más reciente a la más antigua"
+msgstr "Your practices of this subject, newest first"
+
+msgid "Uso"
+msgstr "Use"
+
+msgid "Vista de práctica"
+msgstr "Practice view"
+
+msgid "Volver a la materia"
+msgstr "Back to the subject"
+
+msgid "p90"
+msgstr "p90"
+
+msgid "sin datos"
+msgstr "no data"
+
+msgid "Última práctica: %(day)s"
+msgstr "Last practice: %(day)s"

@@ -45,6 +45,7 @@ from tutor.web.pg import (
 )
 from tutor.web.profile import ServicesProfiles, install_profiles
 from tutor.web.sessions import ANONYMOUS_LIFETIME, COOKIE
+from tutor.web.subjects import ServicesSubjects, install_frame_url, install_subjects
 from tutor.web.template_origin import InstanceDocument, TemplateHeaders, TemplateOriginApp
 
 Scope = MutableMapping[str, Any]
@@ -479,6 +480,10 @@ def build_app(
         mcp_app = PeriodicPurge(mcp_app, _session_purge(deps.sessions, config, deps.clock))
     web = create_app(deps, config)
     install_profiles(web, ServicesProfiles(svc))  # Perfil saves through the same Services
+    subjects = ServicesSubjects(svc)
+    install_subjects(web, subjects)  # Materias reads through the same Services
+    if instance_document is None:
+        instance_document = subjects.instance_document  # the frames' composed documents
     web_app: ASGIApp = BodySizeGuard(web)
     if settings.dev_auth:
         web_app = RejectProxyHeaders(web_app)  # covers /auth/dev-login
@@ -500,6 +505,7 @@ def build_app(
         template_host=urlsplit(settings.template_origin).hostname,
     )
     dispatch.frame_url = make_frame_url(tokens, settings.template_origin)
+    install_frame_url(web, dispatch.frame_url)  # the note page's frame src
     return dispatch
 
 

@@ -333,6 +333,20 @@ class PgPracticeRepo:
         m = self._session(session_id)
         return None if m is None else _session_row(m)
 
+    def sessions_for_subject(
+        self, subject_id: UUID, limit: int = 50
+    ) -> tuple[PracticeSessionRow, ...]:
+        rows = self._conn.execute(
+            select(practice_sessions)
+            .where(
+                practice_sessions.c.user_id == self._user_id,
+                practice_sessions.c.subject_id == subject_id,
+            )
+            .order_by(practice_sessions.c.started_at.desc(), practice_sessions.c.id.desc())
+            .limit(limit)
+        ).mappings()
+        return tuple(_session_row(m) for m in rows)
+
     def items(self, session_id: UUID) -> tuple[PracticeItemRow, ...]:
         rows = self._conn.execute(
             select(practice_items)

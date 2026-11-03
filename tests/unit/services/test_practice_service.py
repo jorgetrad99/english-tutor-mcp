@@ -33,9 +33,11 @@ from tutor.domain.templates import TEMPLATE_GUIDE_VERSION, ParamPair, TemplateIn
 from tutor.services.context import Services
 from tutor.services.errors import ServiceError
 from tutor.services.memory import MemoryStore, PracticeItemRecord, PracticeSessionRecord
-from tutor.services.ports import UnitOfWork
+from tutor.services.ports import PracticeSessionRow, UnitOfWork
 from tutor.services.practice import (
+    counts_toward_plan,
     end_practice,
+    history,
     next_exercise,
     record_result,
     show_exercise,
@@ -719,3 +721,87 @@ def test_a_session_that_keeps_racing_is_a_practice_conflict(
     with pytest.raises(ServiceError) as info:
         show_exercise(contested, user_id, subject_id, instance_id)
     assert fields_of(info) == ("practice_conflict", ())
+
+
+# --- history (slice D ruling 55) ----------------------------------------------------------------
+
+
+def test_history_lists_sessions_newest_first_with_the_attendance_flag(
+    svc: Services, store: MemoryStore, clock: FixedClock, user_id: UUID, other_user_id: UUID
+) -> None:
+    subject_id = quiz_subject(svc, user_id)
+    quiz_id = next(
+        i.id for i in store.tables.template_instances.values() if i.subject_id == subject_id
+    )
+    # A closed text session with one right answer counts.
+    closed = start_practice(svc, user_id, subject_id, "text")
+    assert closed.first is not None
+    right = right_numeric(store, closed.first)
+    record_result(svc, user_id, closed.session_id, closed.first.item_id, right)
+    clock.advance(timedelta(minutes=7))
+    end_practice(svc, user_id, closed.session_id)
+    # A text session left open, then replaced: incomplete, does not count.
+    clock.advance(timedelta(minutes=1))
+    dropped = start_practice(svc, user_id, subject_id, "text")
+    clock.advance(timedelta(minutes=1))
+    unanswered = start_practice(svc, user_id, subject_id, "text")
+    end_practice(svc, user_id, unanswered.session_id)  # closed text: counts without answers
+    # A class session without an answer (then replaced) does not count.
+    clock.advance(timedelta(minutes=1))
+    empty = show_exercise(svc, user_id, subject_id, quiz_id)
+    clock.advance(timedelta(minutes=1))
+    later = start_practice(svc, user_id, subject_id, "text")  # the class one becomes incomplete
+    end_practice(svc, user_id, later.session_id)
+    # A class session with a wrong answer counts while it is open.
+    clock.advance(timedelta(minutes=1))
+    taught = show_exercise(svc, user_id, subject_id, quiz_id)
+    wrong = {"answer_kind": "number", "value": "999"}
+    record_result(svc, user_id, taught.session_id, taught.item.item_id, wrong)
+
+    rows = history(svc, user_id, subject_id)
+    by_id = {r.session_id: r for r in rows}
+    assert [r.started_at for r in rows] == sorted((r.started_at for r in rows), reverse=True)
+    assert rows[0].session_id == taught.session_id
+    first = by_id[closed.session_id]
+    assert (first.mode, first.status, first.counted, first.minutes) == ("text", "closed", True, 7)
+    assert (first.answered, first.accuracy, first.items) == (1, 1.0, closed.item_count)
+    gone = by_id[dropped.session_id]
+    assert (gone.status, gone.counted, gone.minutes, gone.accuracy) == (
+        "incomplete",
+        False,
+        None,
+        None,
+    )
+    assert (by_id[empty.session_id].mode, by_id[empty.session_id].counted) == ("class", False)
+    assert by_id[empty.session_id].status == "incomplete"
+    assert (by_id[unanswered.session_id].counted, by_id[unanswered.session_id].answered) == (
+        True,
+        0,
+    )
+    assert len(rows) == 6
+    last = by_id[taught.session_id]
+    assert (last.status, last.answered, last.accuracy, last.counted) == ("open", 1, 0.0, True)
+    assert history(svc, user_id, subject_id, limit=2) == rows[:2]
+    with pytest.raises(ServiceError) as info:
+        history(svc, other_user_id, subject_id)
+    assert fields_of(info) == ("not_found", ("subject_id",))
+
+
+def test_a_session_without_a_plan_never_counts() -> None:
+    row = PracticeSessionRow(
+        id=uuid4(),
+        subject_id=uuid4(),
+        plan_id=None,
+        mode="text",
+        status="closed",
+        started_at=NOW,
+        ended_at=NOW,
+        self_rating=None,
+        summary={},
+        item_count=0,
+    )
+    assert not counts_toward_plan(row, 3)
+    assert counts_toward_plan(dataclasses.replace(row, plan_id=uuid4()), 0)
+    assert not counts_toward_plan(dataclasses.replace(row, plan_id=uuid4(), status="open"), 0)
+    klass = dataclasses.replace(row, plan_id=uuid4(), mode="class", status="incomplete")
+    assert counts_toward_plan(klass, 1) and not counts_toward_plan(klass, 0)

@@ -1,0 +1,16 @@
+{% import "macros/subjects.html" as sl %}
+<div id="subjects-list">
+  {% if page.subjects %}
+  <div class="grid">
+    {% for s in page.subjects %}
+    <section class="card subject-card" aria-labelledby="subject-{{ s.id }}">
+      <h2 id="subject-{{ s.id }}" class="card__title"><a href="/app/subjects/{{ s.id }}">{{ s.name }}</a></h2>
+      <p>{{ sl.subject_status(s.status) }}</p>
+      {% with plan=s.plan, per_week=s.sessions_per_week %}{% include "partials/plan_facts.html" %}{% endwith %}
+    </section>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="empty">{{ _("Aún no tienes materias. Pídele a Claude que cree una materia y aparecerá aquí.") }} <a href="/app/connect">{{ _("Cómo conectar") }}</a></p>
+  {% endif %}
+</div>

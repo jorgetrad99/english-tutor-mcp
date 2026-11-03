@@ -67,3 +67,12 @@ def test_spanish_needs_no_catalog_and_english_translates() -> None:
 
 def test_every_template_string_has_an_english_translation() -> None:
     assert missing_translations() == []
+
+
+def test_python_side_msgids_of_the_subjects_pages_are_translated() -> None:
+    # The duration_seconds filter (slice D ruling 73) formats through the catalog.
+    en = load_translations(Lang.EN)
+    for msgid in ("%(s)s s", "%(m)s min %(s)s s"):
+        assert en.gettext(msgid) != "" and "%(s)s" in en.gettext(msgid)
+    for msgid in ("Materias", "Aún no hay respuestas en esta materia.", "sin datos"):
+        assert en.gettext(msgid) != msgid

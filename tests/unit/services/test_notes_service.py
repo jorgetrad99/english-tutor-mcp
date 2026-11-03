@@ -10,7 +10,14 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from repo_contract import ContractAbort, FailPoint, failing_uow, long_paragraph
+from repo_contract import (
+    ContractAbort,
+    FailPoint,
+    add_note,
+    failing_uow,
+    long_paragraph,
+    valid_note,
+)
 from template_fixtures import HTML, NUMERIC, numeric_params
 
 from tutor.domain.notes import (
@@ -30,6 +37,8 @@ from tutor.services.memory import MemoryStore
 from tutor.services.notes import (
     MAX_NOTE_TEXT_CHARS,
     get_note,
+    get_whole_note,
+    list_notes,
     save_notes,
     save_web_note,
     search_notes,
@@ -392,6 +401,38 @@ def test_search_notes_validates_query_and_limit(svc: Services, user_id: UUID) ->
             search_notes(svc, user_id, **kwargs)
         assert (info.value.code, info.value.fields) == ("validation_failed", (field,))
     assert search_notes(svc, user_id, " nada ", limit=10).hits == ()
+
+
+# --- list_notes and the whole text (slice D rulings 50 and 56) ---------------------------------
+
+
+def test_list_notes_lists_every_note_and_flags_the_superseded_one(
+    svc: Services, clock: FixedClock, user_id: UUID, other_user_id: UUID
+) -> None:
+    subject_id = create_subject(svc, user_id)
+    first = save_notes(svc, user_id, subject_id, SOURCE, [note()]).notes[0].note_id
+    clock.advance(timedelta(minutes=1))
+    fixed = save_notes(svc, user_id, subject_id, SOURCE, [note(raw_text="Otro texto.")])
+    assert fixed.notes[0].outcome == "superseded"
+    loose = save_notes(svc, user_id, subject_id, None, [note(lesson_ref=None, position=None)])
+    rows = list_notes(svc, user_id, subject_id)
+    assert [r.id for r in rows] == [first, fixed.notes[0].note_id, loose.notes[0].note_id]
+    assert [r.superseded for r in rows] == [True, False, False]
+    assert rows[0].source_title == "Curso de guitarra" and rows[0].source_kind == "course"
+    assert rows[2].source_id is None
+    with pytest.raises(ServiceError) as info:
+        list_notes(svc, other_user_id, subject_id)
+    assert info.value.code == "not_found"
+
+
+def test_get_note_whole_text_is_not_cut(svc: Services, user_id: UUID) -> None:
+    subject_id = create_subject(svc, user_id)
+    big = valid_note("Largo", *(long_paragraph(f"parte {n}.") for n in range(30)))
+    with svc.uow(user_id) as uow:  # a web-sized note, over the MCP caps
+        note_id = add_note(uow, subject_id, big, NOW, origin="web").id
+    assert get_note(svc, user_id, note_id).truncated
+    whole = get_whole_note(svc, user_id, note_id)
+    assert not whole.truncated and len(whole.clean_text) > MAX_NOTE_TEXT_CHARS
 
 
 # --- save_web_note (slice D ruling 57) --------------------------------------------------------

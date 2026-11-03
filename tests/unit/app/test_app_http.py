@@ -40,6 +40,7 @@ from tutor.settings import Settings
 from tutor.web.config import WebConfig
 from tutor.web.profile import ServicesProfiles
 from tutor.web.security import CSP
+from tutor.web.subjects import ServicesSubjects
 
 pytestmark = pytest.mark.unit
 
@@ -245,6 +246,7 @@ def test_build_app_installs_the_profile_port(tmp_path: Path) -> None:
     web = logged.app.app
     assert isinstance(web, FastAPI)
     assert isinstance(web.state.profiles, ServicesProfiles)
+    assert isinstance(web.state.subjects, ServicesSubjects)  # slice D ruling 50
 
 
 # --- per-path body limits (slice D controller decision Q5, security review P2-2) -------------

@@ -1,0 +1,24 @@
+{# Labels of the subjects pages (slice D). Import with: import "macros/subjects.html" as sl #}
+{% macro nil() %}<span aria-hidden="true">—</span><span class="sr-only">{{ _("sin datos") }}</span>{% endmacro %}
+
+{% macro subject_status(status) %}{% if status == "paused" %}<span class="chip chip--muted">{{ _("En pausa") }}</span>{% elif status == "archived" %}<span class="chip chip--muted">{{ _("Archivada") }}</span>{% else %}<span class="chip chip--ok">{{ _("Activa") }}</span>{% endif %}{% endmacro %}
+
+{% macro source_kind(kind) %}{% if kind == "course" %}{{ _("Curso") }}{% elif kind == "pdf" %}PDF{% elif kind == "text" %}{{ _("Texto pegado") }}{% elif kind == "url" %}{{ _("Enlace") }}{% elif kind == "other" %}{{ _("Otra fuente") }}{% else %}{{ _("Sin fuente") }}{% endif %}{% endmacro %}
+
+{% macro origin_chip(origin) %}{% if origin == "web" %}<span class="chip chip--muted">{{ _("Desde la web") }}</span>{% else %}<span class="chip chip--muted">{{ _("Desde Claude") }}</span>{% endif %}{% endmacro %}
+
+{% macro purpose_label(purpose) %}{% if purpose == "display" %}{{ _("Material de consulta") }}{% else %}{{ _("Ejercicio") }}{% endif %}{% endmacro %}
+
+{% macro grading_label(kind) %}{% if kind == "choice_index" %}{{ _("Opción múltiple") }}{% elif kind == "exact_text" %}{{ _("Texto exacto") }}{% elif kind == "exact_set" %}{{ _("Conjunto exacto") }}{% elif kind == "exact_sequence" %}{{ _("Orden exacto") }}{% elif kind == "numeric" %}{{ _("Número") }}{% elif kind == "self_report" %}{{ _("Autoevaluación") }}{% else %}{{ _("Sin calificación") }}{% endif %}{% endmacro %}
+
+{% macro practice_mode(mode) %}{% if mode == "app" %}{{ _("Vista de práctica") }}{% elif mode == "class" %}{{ _("Clase") }}{% else %}{{ _("Texto") }}{% endif %}{% endmacro %}
+
+{% macro practice_status(status) %}{% if status == "incomplete" %}<span class="chip chip--muted">{{ _("Incompleta") }}</span>{% elif status == "open" %}<span class="chip chip--muted">{{ _("En curso") }}</span>{% else %}<span class="chip chip--ok">{{ _("Completa") }}</span>{% endif %}{% endmacro %}
+
+{% macro concept_rank(rank) %}{% if rank == "ranked" %}{{ _("Para repasar") }}{% elif rank == "few_attempts" %}{{ _("Pocos intentos") }}{% else %}{{ _("Sin practicar") }}{% endif %}{% endmacro %}
+
+{% macro credit(score) %}{% if score is none %}{{ nil() }}{% else %}{% trans n=score|integer %}{{ n }} de 100{% endtrans %}{% endif %}{% endmacro %}
+
+{% macro share(fraction) %}{% if fraction is none %}{{ nil() }}{% else %}{{ fraction|percent }}{% endif %}{% endmacro %}
+
+{% macro seconds(value) %}{% if value is none %}{{ nil() }}{% else %}{{ value|duration_seconds }}{% endif %}{% endmacro %}

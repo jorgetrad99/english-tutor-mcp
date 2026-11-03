@@ -77,6 +77,7 @@ from tutor.services.ports import (
     InstanceRepo,
     InstanceRow,
     Mode,
+    NoteListRow,
     NoteRepo,
     NoteRow,
     OpenPracticeExists,
@@ -1227,6 +1228,43 @@ class MemoryNoteRepo(_Repo):
         rec = self._note(note_id)
         return None if rec is None else _note_row(rec)
 
+    def list_for_subject(self, subject_id: UUID) -> tuple[NoteListRow, ...]:
+        mine = self._mine()
+        replaced = {n.supersedes_note_id for n in mine if n.supersedes_note_id is not None}
+        rows: list[NoteListRow] = []
+        for n in mine:
+            if n.subject_id != subject_id:
+                continue
+            src = self._source(n.source_id) if n.source_id is not None else None
+            rows.append(
+                NoteListRow(
+                    id=n.id,
+                    source_id=n.source_id,
+                    source_title=src.title if src is not None else None,
+                    source_kind=src.kind if src is not None else None,
+                    title=n.title,
+                    lesson_ref=n.lesson_ref,
+                    position=n.position,
+                    origin=n.origin,
+                    created_at=n.created_at,
+                    supersedes_note_id=n.supersedes_note_id,
+                    superseded=n.id in replaced,
+                )
+            )
+        return tuple(
+            sorted(
+                rows,
+                key=lambda r: (
+                    r.source_title is None,
+                    r.source_title or "",
+                    r.position is None,
+                    r.position or 0,
+                    r.created_at,
+                    r.id,
+                ),
+            )
+        )
+
     def _passages_of(self, note_id: UUID) -> list[PassageRecord]:
         rows = [p for p in self._t.note_passages if p.user_id == self._uid and p.note_id == note_id]
         return sorted(rows, key=lambda p: p.seq)
@@ -1552,6 +1590,13 @@ class MemoryInstanceRepo(_Repo):
         )
         return tuple(self._row(i) for i in rows)
 
+    def active_counts(self, subject_id: UUID) -> Mapping[UUID, int]:
+        counts: dict[UUID, int] = {}
+        for i in self._mine():
+            if i.subject_id == subject_id and i.status == "active":
+                counts[i.template_id] = counts.get(i.template_id, 0) + 1
+        return counts
+
 
 def _plan_row(rec: PracticePlanRecord) -> PracticePlanRow:
     return PracticePlanRow(
@@ -1738,6 +1783,17 @@ class MemoryPracticeRepo(_Repo):
     def session(self, session_id: UUID) -> PracticeSessionRow | None:
         rec = self._session(session_id)
         return _practice_session_row(rec) if rec is not None else None
+
+    def sessions_for_subject(
+        self, subject_id: UUID, limit: int = 50
+    ) -> tuple[PracticeSessionRow, ...]:
+        mine = [
+            r
+            for r in self._t.practice_sessions.values()
+            if r.user_id == self._uid and r.subject_id == subject_id
+        ]
+        mine.sort(key=lambda r: (r.started_at, r.id), reverse=True)
+        return tuple(_practice_session_row(r) for r in mine[:limit])
 
     def items(self, session_id: UUID) -> tuple[PracticeItemRow, ...]:
         return tuple(_practice_item_row(i) for i in self._items_of(session_id))

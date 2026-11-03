@@ -411,3 +411,15 @@ class PgInstanceRepo:
             ).order_by(template_instances.c.seq, template_instances.c.id)
         ).mappings()
         return tuple(_instance_row(m) for m in rows)
+
+    def active_counts(self, subject_id: UUID) -> Mapping[UUID, int]:
+        rows = self._conn.execute(
+            select(template_instances.c.template_id, func.count())
+            .where(
+                template_instances.c.user_id == self._user_id,
+                template_instances.c.subject_id == subject_id,
+                template_instances.c.status == "active",
+            )
+            .group_by(template_instances.c.template_id)
+        )
+        return {template_id: int(n) for template_id, n in rows}

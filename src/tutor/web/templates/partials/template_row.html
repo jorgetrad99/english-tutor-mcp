@@ -1,0 +1,8 @@
+{# One active template on the subject page. The retire button comes with slice D Task 5. #}
+{% import "macros/subjects.html" as sl %}
+<tr id="template-{{ t.id }}">
+  <td data-label="{{ _('Plantilla') }}">{{ t.name }}{% if t.description %}<br><span class="muted">{{ t.description }}</span>{% endif %}</td>
+  <td data-label="{{ _('Uso') }}">{{ sl.purpose_label(t.purpose) }}</td>
+  <td data-label="{{ _('Tipo de calificación') }}">{{ sl.grading_label(t.grading_kind) }}</td>
+  <td data-label="{{ _('Ejercicios activos') }}">{{ t.active_instances|integer }}</td>
+</tr>
