@@ -9,6 +9,7 @@ import yaml
 
 from tutor.ops.provision_roles import KEYS as MIGRATE_KEYS
 from tutor.settings import REQUIRED as APP_REQUIRED
+from tutor.settings import TEMPLATE_ORIGIN_KEYS
 
 pytestmark = pytest.mark.unit
 
@@ -110,6 +111,7 @@ def test_each_service_reads_only_its_own_secrets() -> None:
         "GOOGLE_CLIENT_SECRET",
         "TUTOR_JWT_SIGNING_KEY",
         "TUTOR_OAUTH_STORAGE_KEY",
+        *TEMPLATE_ORIGIN_KEYS,
     }
     assert _refs("cloudflared") == {"TUNNEL_TOKEN"}
 
@@ -131,7 +133,11 @@ def test_every_service_refuses_an_empty_value_itself() -> None:
     # db: the postgres image refuses to initialise without POSTGRES_PASSWORD; an empty
     #     POSTGRES_USER or POSTGRES_DB breaks MIGRATION_DATABASE_URL, so migrate fails.
     # cloudflared: no tunnel without TUNNEL_TOKEN, so nothing is reachable.
-    app_checked = set(APP_REQUIRED) | {"TUTOR_SUPPORT_EMAIL", "TUTOR_MCP_URL"}
+    # The template origin pair is optional: both empty turns the frames off, and Settings
+    # refuses one without the other.
+    app_checked = (
+        set(APP_REQUIRED) | {"TUTOR_SUPPORT_EMAIL", "TUTOR_MCP_URL"} | set(TEMPLATE_ORIGIN_KEYS)
+    )
     app_values = {key: value for key, value in _env("app").items() if REF.search(value)}
     assert set(app_values) <= app_checked
     assert set(_env("migrate")) == set(MIGRATE_KEYS)

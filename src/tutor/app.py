@@ -11,6 +11,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import time
 import zoneinfo
 from collections.abc import Awaitable, Callable, Mapping, MutableMapping
@@ -34,6 +35,7 @@ from tutor.services.context import Services
 from tutor.settings import Settings, is_loopback
 from tutor.web.app import create_app
 from tutor.web.config import MCP_PATH, WebConfig
+from tutor.web.frames import FrameTokens, FrameUrl, make_frame_url
 from tutor.web.pg import (
     PURGE_ABSOLUTE,
     PURGE_ANONYMOUS,
@@ -43,7 +45,8 @@ from tutor.web.pg import (
 )
 from tutor.web.profile import ServicesProfiles, install_profiles
 from tutor.web.sessions import ANONYMOUS_LIFETIME
-from tutor.web.subjects import ServicesSubjects, install_subjects
+from tutor.web.subjects import ServicesSubjects, install_frame_url, install_subjects
+from tutor.web.template_origin import InstanceDocument, TemplateOriginApp
 
 Scope = MutableMapping[str, Any]
 Message = MutableMapping[str, Any]
@@ -102,8 +105,27 @@ class RejectProxyHeaders:
         await self.app(scope, receive, send)
 
 
+_UUID_PART = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+# Fixed per-path body limits (slice D controller decision Q5): a POST whose whole path matches
+# gets that limit; every other request keeps MAX_BODY_BYTES. Nothing in a request changes it.
+UPLOAD_BODY_LIMITS: tuple[tuple[re.Pattern[str], int], ...] = (
+    (re.compile(rf"/app/subjects/{_UUID_PART}/pdf"), 20 * 1024 * 1024 + MAX_BODY_BYTES),
+    (re.compile(rf"/app/subjects/{_UUID_PART}/text"), 2 * 1024 * 1024),
+)
+
+
+def body_limit(method: str | None, path: str, default: int = MAX_BODY_BYTES) -> int:
+    """The body limit for one request: an upload route's from the table, else `default`."""
+    if method == "POST":
+        for pattern, limit in UPLOAD_BODY_LIMITS:
+            if pattern.fullmatch(path):
+                return limit
+    return default
+
+
 class BodySizeGuard:
-    """Rejects bodies over 64 KB (POST, PUT, PATCH, DELETE) with 413 before the app reads them.
+    """Rejects bodies over the limit (POST, PUT, PATCH, DELETE) with 413 before the app reads
+    them: 64 KB, except the two upload routes of UPLOAD_BODY_LIMITS.
 
     Spec section 5. It wraps both the MCP app and the website.
     """
@@ -116,9 +138,10 @@ class BodySizeGuard:
         if scope["type"] != "http" or scope.get("method") not in BODY_METHODS:
             await self.app(scope, receive, send)
             return
+        limit = body_limit(scope.get("method"), scope.get("path", ""), self._limit)
         headers = {k.decode("latin-1").lower(): v for k, v in scope.get("headers", [])}
         declared = headers.get("content-length")
-        if declared is not None and (not declared.isdigit() or int(declared) > self._limit):
+        if declared is not None and (not declared.isdigit() or int(declared) > limit):
             await send_json(send, 413, {"error": "payload_too_large"})
             return
         chunks: list[bytes] = []
@@ -131,7 +154,7 @@ class BodySizeGuard:
                 break
             chunk = message.get("body", b"")
             size += len(chunk)
-            if size > self._limit:
+            if size > limit:
                 await send_json(send, 413, {"error": "payload_too_large"})
                 return
             chunks.append(chunk)
@@ -270,13 +293,31 @@ class PeriodicPurge:
 
 
 class PathDispatch:
-    """Lifespan goes to the MCP app; requests go by path; no web app means 404 JSON."""
+    """Lifespan goes to the MCP app; a request on the template host goes to the template
+    origin whatever its path (spec 10, binding (d)); other requests go by path; no web app
+    means 404 JSON."""
 
-    def __init__(self, mcp_app: ASGIApp, web_app: ASGIApp | None) -> None:
+    def __init__(
+        self,
+        mcp_app: ASGIApp,
+        web_app: ASGIApp | None,
+        *,
+        template_app: ASGIApp | None = None,
+        template_host: str | None = None,
+    ) -> None:
+        if (template_app is None) != (template_host is None):
+            raise ValueError("template_app and template_host go together")
         self.mcp_app = mcp_app
         self.web_app = web_app
+        self.template_app = template_app
+        self.template_host = template_host.lower() if template_host else None
+        # The website's frame src factory (tutor.web.frames.make_frame_url); integration
+        # installs it on the web app. None when no template origin is configured.
+        self.frame_url: FrameUrl | None = None
 
-    def route(self, path: str) -> ASGIApp | None:
+    def route(self, path: str, host: str | None = None) -> ASGIApp | None:
+        if self.template_host is not None and host == self.template_host:
+            return self.template_app
         if path in MCP_PATHS or path.startswith(WELL_KNOWN_PREFIX):
             return self.mcp_app
         return self.web_app
@@ -285,13 +326,24 @@ class PathDispatch:
         if scope["type"] == "lifespan":
             await self.mcp_app(scope, receive, send)
             return
-        app = self.route(scope.get("path", ""))
+        app = self.route(scope.get("path", ""), request_host(scope))
         if app is not None:
             await app(scope, receive, send)
         elif scope["type"] == "websocket":
             await send({"type": "websocket.close", "code": 1000})
         else:
             await send_json(send, 404, {"error": "not_found"})
+
+
+def request_host(scope: Scope) -> str | None:
+    """The Host header's name, lower case, without the port; None when absent."""
+    for name, value in scope.get("headers", []):
+        if name.lower() == b"host":
+            host = value.decode("latin-1").strip().lower()
+            if host.startswith("["):  # an IPv6 literal keeps its brackets
+                return host.split("]", 1)[0] + "]"
+            return host.rsplit(":", 1)[0] if ":" in host else host
+    return None
 
 
 def _utc_now() -> datetime:
@@ -316,20 +368,28 @@ def dev_mcp_hosts(settings: Settings) -> list[str]:
 
 
 def build_app(
-    settings: Settings, *, engine: Engine | None = None, web_config: WebConfig | None = None
+    settings: Settings,
+    *,
+    engine: Engine | None = None,
+    web_config: WebConfig | None = None,
+    instance_document: InstanceDocument | None = None,
 ) -> PathDispatch:
-    """MCP + OAuth proxy and the website, both behind the 64 KB guard and the request log.
+    """MCP + OAuth proxy and the website, both behind the body-size guard and the request log.
 
     On Postgres the login role is checked first (RLS must bind it), and the server lifespan
     purges expired web sessions at startup and then hourly. With TUTOR_DEV_AUTH (loopback dev
     only) the OAuth proxy and its discovery routes are replaced by the dev token verifier, and
     the MCP side answers only loopback Host names (TrustedHost, as the website does), and both
-    sides refuse requests carrying Forwarded or X-Forwarded-* headers (RejectProxyHeaders)."""
+    sides refuse requests carrying Forwarded or X-Forwarded-* headers (RejectProxyHeaders).
+    With a template origin, requests on its host reach only `TemplateOriginApp`, which serves
+    `instance_document` (404 for everything while it is None)."""
     engine = engine if engine is not None else make_engine(settings.database_url)
     on_postgres = engine.dialect.name == "postgresql"
     if on_postgres:
         check_app_role(engine)  # RLS must bind this login role; SystemExit otherwise
     config = web_config if web_config is not None else web_config_from_env(os.environ)
+    if config.template_origin != settings.template_origin:
+        raise SystemExit("TUTOR_TEMPLATE_ORIGIN must be the same for the website and the server")
     svc = Services(
         uow=pg_uow_factory(engine),
         clock=_utc_now,
@@ -349,13 +409,31 @@ def build_app(
         mcp_app = PeriodicPurge(mcp_app, _session_purge(deps.sessions, config, deps.clock))
     web = create_app(deps, config)
     install_profiles(web, ServicesProfiles(svc))  # Perfil saves through the same Services
-    install_subjects(web, ServicesSubjects(svc))  # Materias reads through the same Services
-    # TODO(slice D frame origin): install_frame_url(web, <the template origin's signer>)
+    subjects = ServicesSubjects(svc)
+    install_subjects(web, subjects)  # Materias reads through the same Services
+    if instance_document is None:
+        instance_document = subjects.instance_document  # the frames' composed documents
     web_app: ASGIApp = BodySizeGuard(web)
     if settings.dev_auth:
         web_app = RejectProxyHeaders(web_app)  # covers /auth/dev-login
     web_app = RequestLog(web_app)
-    return PathDispatch(mcp_app, web_app=web_app)
+    if settings.template_origin is None or settings.frame_token_key is None:
+        return PathDispatch(mcp_app, web_app=web_app)
+    tokens = FrameTokens(settings.frame_token_key, settings.template_origin)
+    template_app: ASGIApp = BodySizeGuard(
+        TemplateOriginApp(tokens, instance_document, settings.base_url)
+    )
+    if settings.dev_auth:
+        template_app = RejectProxyHeaders(template_app)
+    dispatch = PathDispatch(
+        mcp_app,
+        web_app=web_app,
+        template_app=RequestLog(template_app),
+        template_host=urlsplit(settings.template_origin).hostname,
+    )
+    dispatch.frame_url = make_frame_url(tokens, settings.template_origin)
+    install_frame_url(web, dispatch.frame_url)  # the note page's frame src
+    return dispatch
 
 
 def _session_purge(

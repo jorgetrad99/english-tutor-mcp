@@ -33,12 +33,12 @@ from tutor.services.progress import subject_progress
 from tutor.services.subject_views import HistoryRow, NoteView, PlanStatus, SubjectView
 from tutor.services.subjects import get_subjects
 from tutor.services.templates import instance_counts, list_templates, web_instance_document
+from tutor.web.frames import FrameUrl
 from tutor.web.profile import iana_zones
 
 SUBJECTS_PATH = "/app/subjects"
 
 RetireOutcome = Literal["retired", "already_retired"]
-FrameUrl = Callable[[UUID, UUID], str]  # (user_id, instance_id) -> the frame's src
 
 
 @dataclass(frozen=True, slots=True)

@@ -16,7 +16,19 @@ from fastapi import FastAPI
 from key_value.aio.stores.memory import MemoryStore
 from mcp_lesson import NOW
 
-from tutor.app import BodySizeGuard, Message, PathDispatch, RequestLog, build_app
+from tutor.app import (
+    MAX_BODY_BYTES,
+    BodySizeGuard,
+    Message,
+    PathDispatch,
+    Receive,
+    RequestLog,
+    Scope,
+    Send,
+    body_limit,
+    build_app,
+    send_json,
+)
 from tutor.auth.mcp_auth import build_google_provider
 from tutor.mcp.server import build_mcp
 from tutor.services.context import Services
@@ -233,3 +245,107 @@ def test_build_app_installs_the_profile_port(tmp_path: Path) -> None:
     assert isinstance(web, FastAPI)
     assert isinstance(web.state.profiles, ServicesProfiles)
     assert isinstance(web.state.subjects, ServicesSubjects)  # slice D ruling 50
+
+
+# --- per-path body limits (slice D controller decision Q5) -----------------------------------
+
+SUBJECT = "0b5e7c1a-3f2d-4e6b-9a8c-1d2e3f4a5b6c"
+PDF_LIMIT = 20 * 1024 * 1024 + MAX_BODY_BYTES
+TEXT_LIMIT = 2 * 1024 * 1024
+
+
+async def read_body(scope: Scope, receive: Receive, send: Send) -> None:
+    """An app that reads the whole body and answers its size."""
+    size = 0
+    while True:
+        message = await receive()
+        size += len(message.get("body", b""))
+        if not message.get("more_body", False):
+            break
+    await send_json(send, 200, {"size": size})
+
+
+async def post_sizes(path: str, *sizes: int, method: str = "POST") -> list[int]:
+    transport = httpx.ASGITransport(app=BodySizeGuard(read_body))
+    async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
+        return [
+            (await client.request(method, path, content=b"x" * size)).status_code for size in sizes
+        ]
+
+
+def test_the_upload_limits_are_a_fixed_table() -> None:
+    assert body_limit("POST", f"/app/subjects/{SUBJECT}/pdf") == PDF_LIMIT
+    assert body_limit("POST", f"/app/subjects/{SUBJECT}/text") == TEXT_LIMIT
+    near_misses = [
+        f"/app/subjects/{SUBJECT}/pdf/",
+        f"/app/subjects/{SUBJECT}/pdfx",
+        f"/app/subjects/{SUBJECT}/text/extra",
+        f"/x/app/subjects/{SUBJECT}/pdf",
+        f"/app/subjects/{SUBJECT.upper()}/pdf",
+        f"/app/subjects/{SUBJECT[:-1]}/pdf",
+        "/app/subjects/------------------------------------/pdf",
+        f"/app/subjects/{SUBJECT}/../{SUBJECT}/pdf",
+        f"/app/notes/{SUBJECT}/pdf",
+        f"/app/subjects/{SUBJECT}",
+        "/mcp",
+        "/app/lang",
+    ]
+    for path in near_misses:
+        assert body_limit("POST", path) == MAX_BODY_BYTES, path
+    for method in ("PUT", "PATCH", "DELETE", "GET"):
+        assert body_limit(method, f"/app/subjects/{SUBJECT}/pdf") == MAX_BODY_BYTES
+
+
+@pytest.mark.asyncio
+async def test_the_pdf_route_takes_20_mb_and_64_kb() -> None:
+    path = f"/app/subjects/{SUBJECT}/pdf"
+    assert await post_sizes(path, PDF_LIMIT, PDF_LIMIT + 1) == [200, 413]
+    assert await post_sizes(path, 70_000, method="PUT") == [413]
+
+
+@pytest.mark.asyncio
+async def test_the_text_route_takes_2_mb() -> None:
+    path = f"/app/subjects/{SUBJECT}/text"
+    assert await post_sizes(path, TEXT_LIMIT, TEXT_LIMIT + 1) == [200, 413]
+
+
+@pytest.mark.asyncio
+async def test_every_other_path_keeps_64_kb() -> None:
+    for path in (
+        "/mcp",
+        "/app/lang",
+        f"/app/subjects/{SUBJECT}",
+        f"/app/subjects/{SUBJECT}/pdf/",
+        f"/app/templates/{SUBJECT}/retire",
+    ):
+        assert await post_sizes(path, MAX_BODY_BYTES, MAX_BODY_BYTES + 1) == [200, 413], path
+
+
+@pytest.mark.asyncio
+async def test_a_streamed_upload_over_the_limit_is_413() -> None:
+    async def chunks() -> AsyncIterator[bytes]:
+        for _ in range(3):
+            yield b"x" * (TEXT_LIMIT // 2)
+
+    transport = httpx.ASGITransport(app=BodySizeGuard(read_body))
+    async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
+        response = await client.post(f"/app/subjects/{SUBJECT}/text", content=chunks())
+    assert response.status_code == 413
+
+
+@pytest.mark.asyncio
+async def test_build_app_keeps_64_kb_on_mcp_and_lets_an_upload_past_the_guard(
+    tmp_path: Path,
+) -> None:
+    app = build_app(
+        settings(tmp_path), engine=sqlalchemy.create_engine("sqlite://"), web_config=WEB_CONFIG
+    )
+    async with serving(app) as client:
+        mcp = await client.post("/mcp", content=b"x" * 70_000, headers=HEADERS)
+        upload = await client.post(
+            f"/app/subjects/{SUBJECT}/text",
+            content=b"x" * 1_000_000,
+            headers={"content-type": "application/x-www-form-urlencoded"},
+        )
+    assert mcp.status_code == 413
+    assert upload.status_code != 413  # past the guard; the website answers (no route yet)

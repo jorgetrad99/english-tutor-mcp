@@ -63,6 +63,7 @@ AuditEvent = Literal[
     "subject_saved",
     "notes_saved",
     "template_saved",
+    "template_retired",
     "instance_created",
     "practice_plan_created",
     "practice_started",
@@ -554,6 +555,11 @@ class TemplateRepo(Protocol):
         the same call (status retired, retired_at = updated_at = now). LookupError when the
         subject or the superseded template is not the user's, or is of another subject;
         ValueError when an active template of the subject has the same name_norm."""
+
+    def retire(self, template_id: UUID, now: datetime) -> bool:
+        """Retire the user's active template (status retired, retired_at = updated_at = now;
+        the only columns tutor_app may update). False, and nothing changes, for an already
+        retired, another user's or a missing template. Its instances are untouched (A56)."""
 
 
 class InstanceRepo(Protocol):

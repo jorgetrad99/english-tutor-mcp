@@ -302,3 +302,32 @@ def list_notes(svc: Services, user_id: UUID, subject_id: UUID) -> tuple[NoteList
         if uow.subjects.get(subject_id) is None:
             raise ServiceError("not_found", ("subject_id",))
         return uow.notes.list_for_subject(subject_id)
+
+
+WEB_SOURCE_KINDS = frozenset({"pdf", "text"})
+_WEB_NOTE_PATH = "notes[0]."
+
+
+def save_web_note(
+    svc: Services,
+    user_id: UUID,
+    subject_id: UUID,
+    source: SourceInput,
+    title: str,
+    lesson_ref: str | None,
+    raw_text: str,
+) -> NoteOutcome:
+    """One note added on the website from an uploaded PDF or a pasted text (slice D ruling 57):
+    `save_notes` with `origin = web`, so up to MAX_WEB_NOTE_CHARS, the same idempotency and
+    supersede rules and one `notes_saved` event with counts only. No concepts, links or
+    instances. The source is `{kind: pdf | text, title}`; another kind fails on `source.kind`.
+    Field paths name the form's fields: `title`, `lesson_ref`, `raw_text`, `source.title`."""
+    if source.kind not in WEB_SOURCE_KINDS:
+        raise ServiceError("validation_failed", ("source.kind",))
+    note = NoteInput(title=title, lesson_ref=lesson_ref, position=None, raw_text=raw_text)
+    try:
+        result = save_notes(svc, user_id, subject_id, source, [note], origin="web")
+    except ServiceError as error:
+        fields = tuple(field.removeprefix(_WEB_NOTE_PATH) for field in error.fields)
+        raise ServiceError(error.code, fields) from None
+    return result.notes[0]

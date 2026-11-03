@@ -26,6 +26,7 @@ PLACEHOLDER = re.compile(r"<([A-Z][A-Z0-9_]*)>")
 GENERATORS: dict[str, Callable[[], str]] = {
     "TUTOR_JWT_SIGNING_KEY": lambda: secrets.token_urlsafe(48),
     "TUTOR_OAUTH_STORAGE_KEY": lambda: Fernet.generate_key().decode(),
+    "TUTOR_FRAME_TOKEN_KEY": lambda: secrets.token_urlsafe(48),
     "APP_DB_PASSWORD": lambda: secrets.token_hex(24),
     "REPORT_DB_PASSWORD": lambda: secrets.token_hex(24),
 }

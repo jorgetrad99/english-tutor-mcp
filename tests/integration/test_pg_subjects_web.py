@@ -1,17 +1,22 @@
 """Materias, Materia and Nota on Postgres: ServicesSubjects end to end under row-level
 security, as production connects (slice D Tasks 1-2; Review Focus 3, 5 and 7)."""
 
+import html
 import re
 import zoneinfo
+from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, select
 from subject_web_fixtures import seed_subject_world
-from web_pg_support import BASE, google_login, pg_web_app
+from web_pg_support import BASE, WEB_CONFIG, google_login, pg_settings, pg_web_app
 
+from tutor.app import BodySizeGuard, RequestLog, build_app
 from tutor.db.tables import users
 from tutor.db.uow import PgIdentity, pg_uow_factory
 from tutor.services.context import Services
@@ -104,3 +109,56 @@ def test_the_postgres_adapter_renders_the_three_pages(engine: Engine, login_engi
     assert port.instance_document(ana, theirs.instance_id) is None
     document = port.instance_document(ana, world.retired_instance_id)
     assert document is not None and document.count('id="tutor-params"') == 1
+
+
+ORIGIN = "https://templates.testserver"
+
+
+def test_build_app_frames_a_note_on_the_template_origin_with_a_single_use_token(
+    engine: Engine, login_engine: Engine, tmp_path: Path
+) -> None:
+    settings = replace(
+        pg_settings(),
+        oauth_storage_dir=tmp_path / "oauth",
+        template_origin=ORIGIN,
+        frame_token_key="f" * 48,
+    )
+    app = build_app(
+        settings, engine=login_engine, web_config=replace(WEB_CONFIG, template_origin=ORIGIN)
+    )
+    logged = app.web_app
+    assert isinstance(logged, RequestLog) and isinstance(logged.app, BodySizeGuard)
+    web = logged.app.app
+    assert isinstance(web, FastAPI)
+    google = FakeGoogle()
+    web.state.deps = replace(web.state.deps, google=google)  # no real Google in tests
+    svc = Services(
+        uow=pg_uow_factory(login_engine),
+        clock=_utc_now,
+        valid_timezones=frozenset(zoneinfo.available_timezones()),
+    )
+    with (
+        TestClient(app, base_url=BASE, follow_redirects=False) as dashboard,
+        TestClient(app, base_url=ORIGIN, follow_redirects=False) as templates,
+    ):
+        identity = GoogleIdentity("g-ana-frames", "ana-frames@example.com", "Ana", True)
+        google_login(dashboard, google, identity)
+        with engine.connect() as conn:
+            ana = conn.execute(
+                select(users.c.id).where(users.c.google_sub == "g-ana-frames")
+            ).scalar_one()
+        world = seed_subject_world(svc, ana)
+        note = dashboard.get(f"/app/notes/{world.note_id}")
+        assert note.status_code == 200
+        sources = re.findall(r'<iframe\b[^>]*\ssrc="([^"]+)"', note.text)
+        assert len(sources) == 2
+        src = html.unescape(sources[0])
+        prefix = f"{ORIGIN}/app/instances/{world.instance_id}/raw?t="
+        assert src.startswith(prefix)
+        path = src.removeprefix(ORIGIN)
+        served = templates.get(path)
+        assert served.status_code == 200
+        assert served.headers["content-type"] == "text/html; charset=utf-8"
+        assert served.text.count('id="tutor-params"') == 1
+        assert templates.get(path).status_code == 404  # single use
+        assert dashboard.get(path).status_code == 404  # never on the dashboard host
