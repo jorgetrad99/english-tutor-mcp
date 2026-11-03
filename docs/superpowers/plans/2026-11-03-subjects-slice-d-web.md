@@ -10,12 +10,15 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-02-subjects-and-notes-design.md` sections 1 (pasted text), 4.1 (`origin = web`, 400,000 characters), 9, 10 (template bullet, PDFs), 11 (web tests), 15.4.1 (preview draw), 15.5 (`web` bridge), 15.7 (website row), 15.11, 15.13 D9 (the retire button). ADR 0004 decisions 4 and 6, ADR 0005 decision 8. Patterns: `docs/superpowers/plans/2026-10-04-dashboard-web-2-pages.md` "Conventions for page tasks" and Task 29 (route sweep). This plan's rulings are numbered from 49 (slice C ends at 48).
 
+**Amended 2026-11-03 (subject metrics):** spec section 16. The subject page gains a **Progreso** section (spec 16.9) that renders the `SubjectProgress` slice B computes (accuracy per concept, time per item, streak, weekly counts). Rulings 72–73 (after slice B's metrics rulings 63–71); the additions are marked "(16)" in the task text. No new table, column or dependency in this slice.
+
 **Execution:** subagent-driven, as slice A. **Branch:** `feat/subjects-v0`.
 
 ## Dependencies
 
 - **Slice A Task 4b** (in progress; names follow spec section 15 and may still shift): `TemplateRepo` (`list_active`, `get`), `InstanceRepo` (`get`, `for_note`), `services.templates.get_instance_view` (or the composition helper under it) with the `web` channel, `template_files.bridge("web")`, `public_payload` and the preview draw seeded by the instance id (slice A ruling 26), `services.notes.get_note` with instances, `tutor.domain.notes.MAX_WEB_NOTE_CHARS = 400_000` and `validate_notes(..., origin="web")`, the 0006 grant `exercise_templates UPDATE (status, retired_at, updated_at)` (no migration in this slice).
 - **Slice B** (in progress): the real `PlanStatus` from `get_subjects`, `PracticeRepo` sessions with `mode`, `status`, `started_at`, `ended_at`, `summary` (items, answered, accuracy, minutes), and the attendance rule (a `class` session counts when at least one item is answered, spec 15.13 D5). Task 2's practice history needs one read method on `PracticeRepo` (ruling 55).
+- **Slice B, metrics (16):** `services.progress.subject_progress(svc, user_id, subject_id) -> SubjectProgress` and the `tutor.domain.subject_metrics` dataclasses (slice B rulings 63–71). The web layer calls it and computes nothing.
 - **Slice C:** none.
 
 ## Before Task 1
@@ -49,6 +52,9 @@ Decided while planning, from the code. Task 6 records them in the spec's Amendme
 61. **Navigation:** "Materias" after "Glosario" in `layouts/app.html` (key `subjects`, a new `subjects` symbol in `sprite.svg`); `test_web_v0_nav.py`'s `NAV` gains `/app/materias` in that position.
 62. **Learner text is data on every page:** subject names, goals, context, note titles, lesson refs, clean text, concept names, template names and descriptions, prompt texts, source titles and upload titles are autoescaped Jinja output only; `clean_text` is shown in a `<pre class="note-text">` block; nothing is marked safe; template HTML is never read by a page template, only by the raw route.
 
+72. **(16) The Progreso section is a read of slice B's `SubjectProgress`, rendered as is.** `SubjectPage` gains `progress: SubjectProgress`; `ServicesSubjects.subject` calls `services.progress.subject_progress` once per page, and `MemorySubjects` calls the same service over the memory store, so both adapters show the numbers the MCP tool returns. No metric is computed, rounded differently, filtered or re-sorted in the port, the route or the template; the web shows **all** concepts (the tool caps at 20), in the service's order, so the service exposes the full ordered tuple and the MCP layer cuts it.
+73. **(16) Server-rendered, no chart, the dashboard's patterns.** `partials/subject_progress.html`, included in `subject.html` under the plan status; no new route. Content, in order: the streak line in the home page's `.streak` markup ("n días seguidos", then "Máxima: n días" and the last practice day through the `day` filter); a concepts table (`table table--stack`, a `caption`, columns Concepto, Estado (the rank as text: "Para repasar", "Pocos intentos", "Sin practicar"), Intentos 14 días, Crédito 14 días, Intentos en total, Crédito total, Tiempo mediano, Tiempo p90), with a "Sin concepto" row last when `unassigned` has attempts; a templates table (Plantilla, Tipo de calificación, Retirada (yes or empty), Respuestas medidas, Mediana, p90); the activity table (Semana from the `day` filter, Notas, Plantillas, Ejercicios creados, Búsquedas, Prácticas iniciadas, completadas, abandonadas; the totals as the `tfoot` row); and one muted line "n respuestas de más de 10 minutos no cuentan en los tiempos." Credit is `mean_score` as "n de 100" through `integer`; accuracy through `percent`; seconds as "n s" (and "m min s s" from 60 s) via a new `duration_seconds` filter in `views.py` with es and en forms in the catalog; null values render as "—" with an `sr-only` "sin datos". No `<canvas>`, no SVG chart, no inline style, no script, no colour-only meaning. Empty state: "Aún no hay respuestas en esta materia." Concept and template names are autoescaped text (ruling 62).
+
 ## Global Constraints
 
 As the slice A plan and the dashboard plan's page conventions, plus:
@@ -66,6 +72,7 @@ As the slice A plan and the dashboard plan's page conventions, plus:
 4. **Uploads that should fail:** a 20 MB + 1 byte file, a file that is not a PDF, an encrypted PDF, a 201-page PDF, a PDF with images only, a PDF whose text is over 400,000 characters, an empty pasted text, a pasted text of 400,001 characters, a title of 201 characters: each a 422 page with the field message, nothing stored. The same PDF twice gives `existing`. Task 4.
 5. **Learner text that looks like markup:** a note title, a concept name, a template name and a `prompt_text` holding `<script>alert(1)</script>` render as text on every page. Task 2.
 6. **Retiring:** a template retired from the website disappears from `list_templates`, `save_notes` with its id is `not_found`, the button no longer shows, a second POST is `already_retired`, and its instances behave as Open question 2 decides. Task 5.
+7. **(16) Progreso shows the server's numbers:** for the slice B metrics fixture, every number on the page equals the `get_subject_progress` result for the same user and clock (memory and Postgres); a concept named `<script>alert(1)</script>` renders as text; Beto's practice never appears on Ana's page; a subject with no answers shows the empty state and the activity table. Task 2.
 
 ## File structure
 
@@ -85,6 +92,8 @@ src/tutor/app.py                              # T1 install_subjects in build_app
 src/tutor/web/demo_server.py                  # T1 MemorySubjects
 src/tutor/web/templates/pages/subjects.html, subject.html, note.html, subject_upload_result.html   # T2, T4
 src/tutor/web/templates/partials/instance_frame.html, template_row.html, upload_forms.html       # T2, T3, T4, T5
+src/tutor/web/templates/partials/subject_progress.html          # T2 (16) the Progreso section
+src/tutor/web/views.py                        # T2 (16) duration_seconds filter
 src/tutor/web/templates/layouts/app.html      # T2 nav
 src/tutor/web/static/css/app.css, static/icons/sprite.svg   # T2, T3
 src/tutor/web/locale/en/LC_MESSAGES/messages.po             # T2–T5
@@ -96,7 +105,7 @@ tests/unit/web/test_web_instances.py          # T3 (new)
 tests/unit/services/test_pdf_text.py          # T4 (new, PDFs generated in the test)
 tests/unit/web/test_web_sweep.py, test_web_template_safety.py, test_web_v0_nav.py, test_web_i18n.py   # T2, T3
 tests/integration/test_pg_subjects_web.py     # T2–T5 (new; Postgres adapter end to end)
-docs: spec Amendments (A49–A62), runbook upload note     # T6
+docs: spec Amendments (A49–A62, A72–A73), runbook upload note     # T6
 ```
 
 ## Task index
@@ -104,7 +113,7 @@ docs: spec Amendments (A49–A62), runbook upload note     # T6
 | # | Task | Reviewers (controller) |
 | --- | --- | --- |
 | 1 | Web port and adapters, the two read methods | security-reviewer |
-| 2 | Pages: Materias, Materia, Nota; navigation and i18n | — |
+| 2 | Pages: Materias, Materia, Nota; navigation and i18n; (16) the Progreso section | — |
 | 3 | The raw instance route, its headers and the frame partial | security-reviewer |
 | 4 | PDF upload and pasted text (`pypdf`) | security-reviewer |
 | 5 | The template retire button | security-reviewer |
@@ -121,7 +130,7 @@ Spec 9 ("Routes use the `app.state` port pattern"); rulings 50, 55, 56.
 - Modify: `src/tutor/services/ports.py`, `src/tutor/services/memory.py`, `src/tutor/services/notes.py` (`list_notes`), `src/tutor/services/practice.py` (`history`), `src/tutor/db/repos/notes.py`, `src/tutor/db/repos/practice.py`, `src/tutor/app.py` (`install_subjects(web, ServicesSubjects(svc))`), `src/tutor/web/demo_server.py`
 - Test: `tests/repo_contract.py`, `tests/unit/services/test_notes_service.py`, `tests/unit/services/test_practice_service.py`, `tests/unit/web/conftest.py`, `tests/unit/app/test_app_http.py` (the port is installed)
 
-**Interfaces (produces):** frozen page dataclasses `SubjectsPage(subjects: tuple[SubjectCard, ...])`, `SubjectCard(id, name, status, plan: PlanStatus | None)`, `SubjectPage(subject: SubjectView, sources: tuple[SourceGroup, ...], templates: tuple[TemplateCard, ...], history: tuple[HistoryRow, ...])`, `SourceGroup(source_id, title, kind, notes: tuple[NoteListRow, ...])`, `TemplateCard(id, name, description, purpose, grading_kind, practice_kind, active_instances: int)`, `HistoryRow(session_id, started_at, mode, answered, items, accuracy, minutes, status, counted: bool)`, `NotePage(note: NoteView, instances: tuple[InstanceCard, ...])`, `InstanceCard(id, template_name, purpose, prompt_text)`, `WebNoteSaved(note_id, outcome)`, `RetireOutcome = Literal["retired","already_retired"]`; the `SubjectsPort` Protocol and both adapters of ruling 50; `install_subjects`, `optional_subjects`, `get_subjects_port`.
+**Interfaces (produces):** frozen page dataclasses `SubjectsPage(subjects: tuple[SubjectCard, ...])`, `SubjectCard(id, name, status, plan: PlanStatus | None)`, `SubjectPage(subject: SubjectView, sources: tuple[SourceGroup, ...], templates: tuple[TemplateCard, ...], history: tuple[HistoryRow, ...], progress: SubjectProgress)` ((16) ruling 72), `SourceGroup(source_id, title, kind, notes: tuple[NoteListRow, ...])`, `TemplateCard(id, name, description, purpose, grading_kind, practice_kind, active_instances: int)`, `HistoryRow(session_id, started_at, mode, answered, items, accuracy, minutes, status, counted: bool)`, `NotePage(note: NoteView, instances: tuple[InstanceCard, ...])`, `InstanceCard(id, template_name, purpose, prompt_text)`, `WebNoteSaved(note_id, outcome)`, `RetireOutcome = Literal["retired","already_retired"]`; the `SubjectsPort` Protocol and both adapters of ruling 50; `install_subjects`, `optional_subjects`, `get_subjects_port`.
 
 - [ ] **Step 1: Write the failing tests:** `RepoContract` for `list_for_subject` (order, superseded flag, foreign subject empty) and `sessions_for_subject` (newest first, limit, foreign subject empty); service tests for `list_notes` and `history` (the `counted` flag for a closed session, an incomplete one and a `class` session with and without an answered item); the memory adapter returns `None` for another user's ids; `build_app` installs `ServicesSubjects`.
 - [ ] **Step 2: Implement**; `uv run just fmt && uv run just check-fast && uv run just test-int`.
@@ -138,10 +147,10 @@ Spec 9 (first three bullets), 4.1; rulings 49, 53 (the partial is only included 
 - Test: `tests/unit/web/test_web_subjects.py`, `test_web_v0_nav.py`, `test_web_sweep.py` (`_other_users_ids` gains `subject_id`, `note_id`, `instance_id`, `template_id` from Beto's seeded rows), `test_web_i18n.py`, `tests/integration/test_pg_subjects_web.py`
 
 - `/app/materias`: one card per subject (name, status chip, sessions per week, `missed`, `projected_end`, `delay_days`, adherence) or an empty state that says subjects are created by talking to Claude ("Pídele a Claude que cree una materia"). The plan numbers come from `PlanStatus` only.
-- `/app/materias/{subject_id}`: settings read-only (goal and context as text), plan status, notes by source (title links to the note page, lesson ref, origin chip), templates (ruling 59 list, no button yet), practice history table (ruling 55), and the upload and paste forms from Task 4 (placeholder include until then).
+- `/app/materias/{subject_id}`: settings read-only (goal and context as text), plan status, (16) the Progreso section (ruling 73), notes by source (title links to the note page, lesson ref, origin chip), templates (ruling 59 list, no button yet), practice history table (ruling 55), and the upload and paste forms from Task 4 (placeholder include until then).
 - `/app/notas/{note_id}`: title, lesson ref, source, concepts as chips, `clean_text` in `<pre class="note-text">`, the ruling 54 line, then each active instance as the frame partial with its `prompt_text` and template name beside it.
 
-- [ ] **Step 1: Write the failing tests** (the dashboard plan's page-task minimum): Ana with two subjects and notes from two sources; a subject with no notes; a new user with no subjects; the HTMX partial carries no `<html`; one string in English; `# Review Focus 5`; `# Review Focus 3` for the GETs; the nav order; the frame partial is rendered once per active instance with `sandbox="allow-scripts"` and the raw URL; retired instances are not listed; `missing_translations()` is empty; the Postgres adapter renders the three pages from seeded rows.
+- [ ] **Step 1: Write the failing tests** (the dashboard plan's page-task minimum): (16) `# Review Focus 7`, the `duration_seconds` filter in both languages, the page has no `<canvas>`, `<svg` chart or `<script>` in the Progreso section; Ana with two subjects and notes from two sources; a subject with no notes; a new user with no subjects; the HTMX partial carries no `<html`; one string in English; `# Review Focus 5`; `# Review Focus 3` for the GETs; the nav order; the frame partial is rendered once per active instance with `sandbox="allow-scripts"` and the raw URL; retired instances are not listed; `missing_translations()` is empty; the Postgres adapter renders the three pages from seeded rows.
 - [ ] **Step 2: Implement**; `uv run just fmt && uv run just check-fast`.
 - [ ] **Step 3: Manual (controller):** `uv run just dashboard-demo`, both themes, phone width, keyboard only; note the result in the commit body.
 - [ ] **Step 4: Commit** `feat(web): Materias, Materia and Nota pages`.
@@ -195,7 +204,7 @@ Spec 15.13 D9, slice A ruling 29; ruling 59.
 
 ### Task 6: Docs, amendments, phase audit
 
-- [ ] Spec `## Amendments` A49–A62 and the answers to the open questions; `docs/v0/runbook.md` (the upload body limit and where PDFs are never stored); propose to the author the E37 wording ("artifacts" becomes "template instances" in the Subjects v0 acceptance row; the author edits `docs/v0/requirements-edits.md`); `uv run just check`; **(controller)** `phase-auditor`; commit `docs(subjects): slice D amendments`.
+- [ ] Spec `## Amendments` A49–A62 and A72–A73 (section 16 already holds the metrics design) and the answers to the open questions; `docs/v0/runbook.md` (the upload body limit and where PDFs are never stored); propose to the author the E37 wording ("artifacts" becomes "template instances" in the Subjects v0 acceptance row; the author edits `docs/v0/requirements-edits.md`); `uv run just check`; **(controller)** `phase-auditor`; commit `docs(subjects): slice D amendments`.
 
 ## Notes for the controller
 
