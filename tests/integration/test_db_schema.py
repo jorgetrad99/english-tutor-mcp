@@ -25,8 +25,10 @@ TRACK_ID = "zz-rls-01"
 # concepts.subject_id, note_concepts.note_id, note_concepts.concept_id, concept_links.from_id,
 # concept_links.to_id, exercise_templates.subject_id, exercise_templates.supersedes_template_id,
 # template_instances.subject_id, template_instances.note_id, template_instances.concept_id,
-# template_instances.supersedes_instance_id).
-COMPOSITE_FKS = 23
+# template_instances.supersedes_instance_id) plus 5 from 0007 (practice_plans.subject_id,
+# practice_sessions.subject_id, practice_sessions.plan_id, practice_items.session_id,
+# practice_items.instance_id).
+COMPOSITE_FKS = 28
 # template_instances.template_id is wider (plan ruling 39): (template_id, user_id,
 # template_purpose, grading_kind) always, and (template_id, user_id, practice_kind) when the
 # practice kind is not null.
@@ -89,6 +91,15 @@ _SEED_SQL = (
     " 'Mira.', :c, 'ingest', repeat('d', 64), 'active', now())",
     "INSERT INTO note_concepts (note_id, concept_id, user_id) VALUES (:n, :c, :u)",
     "INSERT INTO concept_links (from_id, to_id, kind, user_id) VALUES (:c, :c2, 'related', :u)",
+    # Practice (0007).
+    "INSERT INTO practice_plans (id, user_id, subject_id, version, status, start_date,"
+    " minutes_per_session, sessions_per_week, rationale, created_at)"
+    " VALUES (:pp, :u, :subj, 1, 'active', current_date, 30, 3, '{}', now())",
+    "INSERT INTO practice_sessions (id, user_id, subject_id, plan_id, mode, status, started_at,"
+    " item_count) VALUES (:ps, :u, :subj, :pp, 'text', 'open', now(), 1)",
+    "INSERT INTO practice_items (id, user_id, session_id, seq, instance_id, draw_seed, draw)"
+    " VALUES (:pi, :u, :ps, 1, :inst, 7,"
+    " jsonb_build_object('entries', '[]'::jsonb, 'order', '[]'::jsonb))",
 )
 
 
@@ -110,6 +121,9 @@ def _seed_user(conn: Connection, sub: str, track_item_id: str) -> UUID:
         "inst": uuid4(),
         "c": uuid4(),
         "c2": uuid4(),
+        "pp": uuid4(),
+        "ps": uuid4(),
+        "pi": uuid4(),
     }
     for sql in _SEED_SQL:
         conn.execute(text(sql), params)
@@ -263,6 +277,8 @@ _PARENT_IDS = {
     "c": "SELECT id FROM concepts WHERE user_id = :u AND name_norm = 'ritmo'",
     "tpl": "SELECT id FROM exercise_templates WHERE user_id = :u",
     "inst": "SELECT id FROM template_instances WHERE user_id = :u",
+    "pp": "SELECT id FROM practice_plans WHERE user_id = :u",
+    "ps": "SELECT id FROM practice_sessions WHERE user_id = :u",
 }
 
 
@@ -300,6 +316,20 @@ _INSTANCE_INSERT = (
     " status, supersedes_instance_id, created_at) VALUES (:b, {subject}, {note}, {template},"
     " 'display', 'none', '{{}}', 'x', {concept}, 'class', repeat('e', 64), 'active',"
     " {supersedes}, now())"
+)
+_PLAN_INSERT = (
+    "INSERT INTO practice_plans (user_id, subject_id, version, status, start_date,"
+    " minutes_per_session, sessions_per_week, rationale, created_at)"
+    " VALUES (:b, :a_subj, 1, 'superseded', current_date, 30, 3, '{}', now())"
+)
+_SESSION_INSERT = (
+    "INSERT INTO practice_sessions (user_id, subject_id, plan_id, mode, status, started_at,"
+    " ended_at, item_count) VALUES (:b, {subject}, {plan}, 'text', 'incomplete', now(), now(), 0)"
+)
+_ITEM_INSERT = (
+    "INSERT INTO practice_items (user_id, session_id, seq, instance_id, draw_seed, draw)"
+    " VALUES (:b, {session}, 2, {instance}, 1,"
+    " jsonb_build_object('entries', '[]'::jsonb, 'order', '[]'::jsonb))"
 )
 # Each statement runs as user B and points at user A's parent row.
 _CROSS_USER_CHILDREN = {
@@ -356,6 +386,12 @@ _CROSS_USER_CHILDREN = {
     " VALUES (:a_c, :b_c, 'prerequisite', :b)",
     "concept_links.to_id": "INSERT INTO concept_links (from_id, to_id, kind, user_id)"
     " VALUES (:b_c, :a_c, 'prerequisite', :b)",
+    # Practice (0007).
+    "practice_plans.subject_id": _PLAN_INSERT,
+    "practice_sessions.subject_id": _SESSION_INSERT.format(subject=":a_subj", plan="NULL"),
+    "practice_sessions.plan_id": _SESSION_INSERT.format(subject=":b_subj", plan=":a_pp"),
+    "practice_items.session_id": _ITEM_INSERT.format(session=":a_ps", instance=":b_inst"),
+    "practice_items.instance_id": _ITEM_INSERT.format(session=":b_ps", instance=":a_inst"),
 }
 
 
@@ -387,6 +423,10 @@ def test_composite_foreign_keys_reject_another_users_parent(
         "a_tpl": a_ids["tpl"],
         "b_tpl": b_ids["tpl"],
         "a_inst": a_ids["inst"],
+        "b_inst": b_ids["inst"],
+        "a_pp": a_ids["pp"],
+        "a_ps": a_ids["ps"],
+        "b_ps": b_ids["ps"],
     }
     with pytest.raises(DBAPIError) as err, scoped_connection(engine, user_id=b) as conn:
         conn.execute(text(_CROSS_USER_CHILDREN[reference]), params)

@@ -1,4 +1,4 @@
-"""SQLAlchemy Core tables mirroring alembic/versions/0001_core_schema.py and 0006.
+"""SQLAlchemy Core tables mirroring alembic/versions/0001_core_schema.py, 0006 and 0007.
 
 Constraints, defaults, grants and policies live in the migrations; these objects only build
 queries. tests/integration/test_db_schema.py checks that names and nullability match.
@@ -35,6 +35,10 @@ USER_TABLES: tuple[str, ...] = (
     "concept_links",
     "exercise_templates",
     "template_instances",
+    # Practice (migration 0007).
+    "practice_plans",
+    "practice_sessions",
+    "practice_items",
 )
 # Seed tables: no RLS, read only for tutor_app.
 TRACK_TABLES: tuple[str, ...] = ("track_items", "track_chunks")
@@ -427,4 +431,55 @@ template_instances = sa.Table(
     _opt("supersedes_instance_id", sa.Uuid),
     _req("created_at", TS),
     _opt("retired_at", TS),
+)
+
+practice_plans = sa.Table(
+    "practice_plans",
+    metadata,
+    _uuid_pk(),
+    _req("user_id", sa.Uuid),
+    _req("subject_id", sa.Uuid),
+    _req("version", sa.Integer),
+    _req("status", sa.Text),
+    _req("start_date", sa.Date),
+    _req("minutes_per_session", sa.SmallInteger),
+    _req("sessions_per_week", sa.SmallInteger),
+    _opt("target_date", sa.Date),
+    _opt("total_sessions", sa.Integer),
+    _req("rationale", JSONB),
+    _req("created_at", TS),
+)
+
+practice_sessions = sa.Table(
+    "practice_sessions",
+    metadata,
+    _uuid_pk(),
+    _req("user_id", sa.Uuid),
+    _req("subject_id", sa.Uuid),
+    _opt("plan_id", sa.Uuid),
+    _req("mode", sa.Text),
+    _req("status", sa.Text),
+    _req("started_at", TS),
+    _opt("ended_at", TS),
+    _opt("self_rating", sa.SmallInteger),
+    _opt("summary", JSONB),
+    _req("item_count", sa.Integer),
+)
+
+practice_items = sa.Table(
+    "practice_items",
+    metadata,
+    _uuid_pk(),
+    _req("user_id", sa.Uuid),
+    _req("session_id", sa.Uuid),
+    _req("seq", sa.Integer),
+    _req("instance_id", sa.Uuid),
+    _req("draw_seed", sa.BigInteger),
+    _req("draw", JSONB),
+    _opt("shown_at", TS),
+    _opt("answer", JSONB),
+    _opt("correct", sa.Boolean),
+    _opt("score", sa.SmallInteger),
+    _opt("answered_at", TS),
+    _opt("source", sa.Text),
 )

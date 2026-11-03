@@ -104,6 +104,7 @@ PostgreSQL 16 or later is required, and the compose file pins `postgres:16`. The
 - Never edit an applied migration; a fix is a new revision. Downgrade only to recover, right after a backup.
 - Migration 0006 (subjects and notes, E37) adds nine user-scoped tables (`subjects`, `sources`, `notes`, `note_passages`, `concepts`, `note_concepts`, `concept_links`, `exercise_templates`, `template_instances`), the `unaccent` and `pg_trgm` extensions (trusted, so the migration owner needs no extra privilege) and the `tutor_es` and `tutor_en` text search configurations. It changes no existing table or row. Every new table has forced RLS; `tutor_app` cannot update a note's `raw_text`, may update only `status`, `retired_at` and `updated_at` on templates and `status`, `retired_at` on instances, and deletes neither; `tutor_report` gets nothing. After deploying it, `current` shows `0006`.
 - Downgrading below 0006 drops the nine subjects and notes tables. The migration refuses unless `notes` and `subjects` are empty (checked as the migration owner, a superuser that bypasses RLS; a role that bypasses neither is always refused) or `TUTOR_ALLOW_DESTRUCTIVE_DOWNGRADE=1` is set for that one run, after `./backup.sh`: `docker compose -f compose.prod.yml run --rm -e TUTOR_ALLOW_DESTRUCTIVE_DOWNGRADE=1 --entrypoint alembic migrate -c /app/alembic.ini downgrade 0005`.
+- Migration 0007 (practice, slice B) adds three user-scoped tables (`practice_plans`, `practice_sessions`, `practice_items`) and changes no existing table or row. Every new table has forced RLS; `tutor_app` may update only a plan's `status`, a session's `status`, `ended_at`, `self_rating` and `summary`, and a showing's `shown_at`, `answer`, `correct`, `score`, `answered_at` and `source`, and deletes nothing; `tutor_report` gets nothing. Downgrading below 0007 refuses while `practice_plans` or `practice_sessions` hold rows (same guard and flag as 0006). After deploying it, `current` shows `0007`.
 - Image pins: python, uv, postgres, cloudflared and alpine are referenced by `@sha256:` digest (`deploy/Dockerfile`, `compose.prod.yml`, `backup.sh`). To bump one: `docker pull <tag>`, `docker image inspect <tag> --format '{{index .RepoDigests 0}}'`, replace the digest, rebuild, run the smoke checks. A Postgres major version change is a dump and restore, never a new tag over the data volume.
 - Dependency bumps: before bumping `fastmcp` read its auth/OAuth changelog (the OAuth proxy, token storage and consent behaviour are security relevant) and re-run `uv run just check`, `test-int` and the smoke checks above. Rebuild `uv.lock` deliberately, and run `pip-audit` (part of `just check`).
 
@@ -189,7 +190,8 @@ VALUES (NULL, 'user_deleted',
         jsonb_build_object('user_hash', left(encode(sha256(convert_to(:'uid', 'UTF8')), 'hex'), 12)),
         now());
 -- Cascades to profiles, plans, sessions, glossary, reviews, web_sessions and the subjects tables (subjects, sources, notes,
--- note_passages, concepts, note_concepts, concept_links, exercise_templates, template_instances); audit_log.user_id becomes NULL.
+-- note_passages, concepts, note_concepts, concept_links, exercise_templates, template_instances) and practice
+-- (practice_plans, practice_sessions, practice_items); audit_log.user_id becomes NULL.
 DELETE FROM users WHERE id = :'uid';
 COMMIT;
 ```
