@@ -6,6 +6,7 @@
 - **Spec:** `docs/superpowers/specs/2026-11-02-subjects-and-notes-design.md`
 - **Requirement edit:** E37 in `docs/v0/requirements-edits.md`
 - **Number note:** 0001 is reserved for the spike go/no-go.
+- **Amended by:** `0005-exercise-templates.md` (decision 6: free per-note HTML artifacts replaced by templates; decision 8: 0006 rewritten before merge).
 
 ## Context
 

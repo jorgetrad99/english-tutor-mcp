@@ -8,7 +8,9 @@
 
 **Tech Stack:** as slice A. No new dependency.
 
-**Spec:** `docs/superpowers/specs/2026-11-02-subjects-and-notes-design.md` sections 6, 7.1 (last four rows), 7.2 (text fallback only), 8.2, 11. Builds on the slice A plan's rulings; this plan's rulings are numbered from 13.
+**Spec:** `docs/superpowers/specs/2026-11-02-subjects-and-notes-design.md` sections 6, 7.1 (last four rows), 7.2 (text fallback only), 8.2, 11. Builds on the slice A plan's rulings; this plan's rulings are numbered from 28 (slice A uses 1–27; renumbered 2026-11-02, they were 13–23).
+
+**Amended 2026-11-02 (exercise templates, domain-neutral):** spec section 15 and ADR 0005 change this plan before it starts. Practice items are showings of stored template instances; grading is `tutor.domain.templates.grade` with the showing's stored draw; `show_exercise` and the `class` session mode are added, and a `class` session counts toward attendance when at least one item is answered. The server ships no templates and knows no subject: **ear training is no longer a server feature.** The kind `ear` becomes the generic `drill`, and a drill item is a showing of a **pool instance** (spec 15.4.1): the server draws entries with a seed, stores the seed and the draw on the item, and derives the key by a closed rule. A music subject gets ear items from a Claude-written template whose pool holds note names; a language subject gets vocabulary drills from the same mechanism. Rulings 31, 32, 33, 34, 37, 38 and Tasks 1, 3 and 4 change as listed under "Effect on slice B" in slice A Task 4b; the text below keeps the original design for history where that list overrides it.
 
 **Execution:** subagent-driven, as slice A. **Branch:** `feat/subjects-v0`, after slice A Task 5 is merged or at least committed.
 
@@ -20,17 +22,17 @@
 
 ## Rulings against the spec
 
-13. **Weeks are calendar-free.** `start_date` is the plan creation date in the learner's timezone (from `users.timezone` through `UserRepo.timezone()`); week `w` covers days `[7w, 7w+7)` from `start_date`; "completed weeks" at `today` = `floor(days / 7)`. No alignment to Monday.
-14. **A plan version is created by `save_subject`** when the subject is created and whenever `minutes_per_session`, `sessions_per_week` or `target_date` change; the old version becomes `superseded`; `completed_sessions` counts closed sessions of the **current** version only, and `start_date` of the new version is the day it was created, so a change restarts the count (recorded in `rationale` as `{"reason": "inputs_changed", "previous_version": n}`). Simpler than carrying history across versions; revisit after the author has used it.
-15. **One open practice session per user**, independent of English lessons: `start_practice` marks the user's previous open practice session `incomplete` (partial unique index on `practice_sessions (user_id) WHERE status = 'open'`).
-16. **Items are drawn at `start_practice`** and stored; `next_exercise` only reads. The RNG is `random.Random(session_id.int)`; drawing order: quiz items by `(last_asked_at nulls first, id)`, exercises by `(last_practised_at nulls first, id)`, ear prompts uniformly from the banks with replacement. `last_asked_at`/`last_practised_at` are computed from `practice_items` (no denormalised columns).
-17. **Ear banks** in `tutor.domain.practice`: `NOTE_BANK` = natural notes A3–A5 with frequencies rounded to 0.01 Hz (A4 = 440), `INTERVAL_BANK` = `P1, m2, M2, m3, M3, P4, TT, P5, m6, M6, m7, M7, P8` ascending from C4 (261.63 Hz) with the second frequency computed by equal temperament. Prompts carry the frequencies so the view (slice C) does no music arithmetic. Options for `note_id` are the 7 natural names; for `interval_id` the 13 interval names.
-18. **Grading is exact-match on closed enums**: `note` in the 7 names, `interval` in the 13 names, `option_index` within the quiz item's options; anything else is `validation_failed` on the answer field. Exercise self-report: `rating` 1–4 required, `tempo_bpm` 20–300 and `minutes` 1–120 optional; `score = rating * 25`.
-19. **Text mode skips `ear`** and redistributes its share to the other kinds in the order quiz, exercise (spec 6.2); a subject whose only enabled kind is `ear` cannot start in text mode: `validation_failed` on `mode`.
-20. **Item count** = `clamp(round(minutes_per_session / 3), 4, 12)`; when the subject has fewer available quiz items or exercises than their share, the shortfall goes to the other kinds, and if the total still falls below 4 the session starts with what exists (minimum 1) and `summary.short` is `true`.
-21. **`end_practice` on a session with unanswered items** closes it as `closed` with `summary.unanswered` counted; `incomplete` is only for sessions superseded by a new `start_practice`.
-22. **New enum field names** (slice A ruling 1): `item_kind` (`note_id|interval_id|quiz|exercise`), `practice_status` (`open|closed|incomplete`), `answer.kind` is the discriminator inside the tagged union and is allowed because it is nested (the schema test keys top-level output enums only; verify, and if it keys nested ones too, name it `answer_kind`).
-23. **Migration 0007** is written once, like 0006; `practice_items.prompt` and `answer` are JSONB with the shape validated in the domain, plus `CHECK (jsonb_typeof(prompt) = 'object')`.
+28. **Weeks are calendar-free.** `start_date` is the plan creation date in the learner's timezone (from `users.timezone` through `UserRepo.timezone()`); week `w` covers days `[7w, 7w+7)` from `start_date`; "completed weeks" at `today` = `floor(days / 7)`. No alignment to Monday.
+29. **A plan version is created by `save_subject`** when the subject is created and whenever `minutes_per_session`, `sessions_per_week` or `target_date` change; the old version becomes `superseded`; `completed_sessions` counts closed sessions of the **current** version only, and `start_date` of the new version is the day it was created, so a change restarts the count (recorded in `rationale` as `{"reason": "inputs_changed", "previous_version": n}`). Simpler than carrying history across versions; revisit after the author has used it.
+30. **One open practice session per user**, independent of English lessons: `start_practice` marks the user's previous open practice session `incomplete` (partial unique index on `practice_sessions (user_id) WHERE status = 'open'`).
+31. (amended, see the note at the top) **Items are drawn at `start_practice`** and stored; `next_exercise` only reads. The RNG is `random.Random(session_id.int)`; drawing order: quiz items by `(last_asked_at nulls first, id)`, exercises by `(last_practised_at nulls first, id)`, ear prompts uniformly from the banks with replacement. `last_asked_at`/`last_practised_at` are computed from `practice_items` (no denormalised columns).
+32. (amended, see the note at the top) **Ear banks** in `tutor.domain.practice`: `NOTE_BANK` = natural notes A3–A5 with frequencies rounded to 0.01 Hz (A4 = 440), `INTERVAL_BANK` = `P1, m2, M2, m3, M3, P4, TT, P5, m6, M6, m7, M7, P8` ascending from C4 (261.63 Hz) with the second frequency computed by equal temperament. Prompts carry the frequencies so the view (slice C) does no music arithmetic. Options for `note_id` are the 7 natural names; for `interval_id` the 13 interval names.
+33. (amended, see the note at the top) **Grading is exact-match on closed enums**: `note` in the 7 names, `interval` in the 13 names, `option_index` within the quiz item's options; anything else is `validation_failed` on the answer field. Exercise self-report: `rating` 1–4 required, `tempo_bpm` 20–300 and `minutes` 1–120 optional; `score = rating * 25`.
+34. (amended, see the note at the top) **Text mode skips `ear`** and redistributes its share to the other kinds in the order quiz, exercise (spec 6.2); a subject whose only enabled kind is `ear` cannot start in text mode: `validation_failed` on `mode`.
+35. **Item count** = `clamp(round(minutes_per_session / 3), 4, 12)`; when the subject has fewer available quiz items or exercises than their share, the shortfall goes to the other kinds, and if the total still falls below 4 the session starts with what exists (minimum 1) and `summary.short` is `true`.
+36. **`end_practice` on a session with unanswered items** closes it as `closed` with `summary.unanswered` counted; `incomplete` is only for sessions superseded by a new `start_practice`.
+37. (amended, see the note at the top) **New enum field names** (slice A ruling 1): `item_kind` (`note_id|interval_id|quiz|exercise`), `practice_status` (`open|closed|incomplete`), `answer.kind` is the discriminator inside the tagged union and is allowed because it is nested (the schema test keys top-level output enums only; verify, and if it keys nested ones too, name it `answer_kind`).
+38. (amended, see the note at the top) **Migration 0007** is written once, like 0006; `practice_items.prompt` and `answer` are JSONB with the shape validated in the domain, plus `CHECK (jsonb_typeof(prompt) = 'object')`.
 
 ## Global Constraints
 
@@ -64,7 +66,7 @@ tests/unit/domain/test_practice_plan.py, test_practice.py       # T1
 tests/repo_contract.py, tests/unit/services/test_practice_service.py  # T2
 tests/integration/test_migration_0007.py, test_db_schema.py     # T3
 tests/unit/mcp/test_mcp_practice.py and the contract test files # T4
-docs: spec Amendments (A13–A23)                                 # T5
+docs: spec Amendments (A28–A38)                                 # T5
 ```
 
 ## Task index
@@ -84,8 +86,8 @@ docs: spec Amendments (A13–A23)                                 # T5
 **Files:** create `src/tutor/domain/practice_plan.py`, `src/tutor/domain/practice.py`; tests `tests/unit/domain/test_practice_plan.py`, `tests/unit/domain/test_practice.py`.
 
 **Interfaces (produces):**
-- `practice_plan`: frozen `PlanInputs(minutes_per_session, sessions_per_week, target_date)`; `total_sessions(inputs, start_date) -> int | None`; frozen `PlanStatus(version, start_date, sessions_per_week, minutes_per_session, target_date, total_sessions, completed, expected, missed, projected_end, delay_days, adherence)`; `plan_status(inputs, *, version, start_date, completed, today) -> PlanStatus` per spec 6.1 and ruling 13; `plan_inputs_changed(old: PlanInputs, new: PlanInputs) -> bool`.
-- `practice`: `ItemKind = Literal["note_id","interval_id","quiz","exercise"]`; `NOTE_BANK`, `INTERVAL_BANK` (ruling 17); `MIX: Mapping[Preference, Mapping[ExerciseKind, int]]` (percentages from spec 6.2); `item_count(minutes) -> int`; `plan_mix(preference, enabled: Collection[ExerciseKind], count, *, text_mode) -> dict[ExerciseKind, int]` (ruling 19, 20); frozen candidates `QuizCandidate(item_id, last_asked_at)`, `ExerciseCandidate(exercise_id, last_practised_at)`; `draw_items(seed: UUID, mix, quizzes, exercises) -> tuple[DrawnItem, ...]` where `DrawnItem(seq, kind, prompt: Mapping[str, object])` and prompts have fixed shapes (`{"note": "A4", "hz": 440.0, "options": [...]}`, `{"interval": "P5", "root_hz": 261.63, "hz": 392.0, "options": [...]}`, `{"quiz_item_id": "...", "question": ..., "options": [...]}`, `{"exercise_id": "...", "name": ..., "instructions": ..., "tempo_bpm": ..., "duration_min": ...}`); `Answer` tagged union of four frozen dataclasses and `parse_answer(kind: ItemKind, data: Mapping[str, object]) -> Answer` (ruling 18); `grade(item: DrawnItem, answer: Answer, *, quiz_answer_index: int | None) -> Graded(correct: bool | None, score: int)`.
+- `practice_plan`: frozen `PlanInputs(minutes_per_session, sessions_per_week, target_date)`; `total_sessions(inputs, start_date) -> int | None`; frozen `PlanStatus(version, start_date, sessions_per_week, minutes_per_session, target_date, total_sessions, completed, expected, missed, projected_end, delay_days, adherence)`; `plan_status(inputs, *, version, start_date, completed, today) -> PlanStatus` per spec 6.1 and ruling 28; `plan_inputs_changed(old: PlanInputs, new: PlanInputs) -> bool`.
+- `practice`: `ItemKind = Literal["note_id","interval_id","quiz","exercise"]`; `NOTE_BANK`, `INTERVAL_BANK` (ruling 32); `MIX: Mapping[Preference, Mapping[ExerciseKind, int]]` (percentages from spec 6.2); `item_count(minutes) -> int`; `plan_mix(preference, enabled: Collection[ExerciseKind], count, *, text_mode) -> dict[ExerciseKind, int]` (ruling 34, 35); frozen candidates `QuizCandidate(item_id, last_asked_at)`, `ExerciseCandidate(exercise_id, last_practised_at)`; `draw_items(seed: UUID, mix, quizzes, exercises) -> tuple[DrawnItem, ...]` where `DrawnItem(seq, kind, prompt: Mapping[str, object])` and prompts have fixed shapes (`{"note": "A4", "hz": 440.0, "options": [...]}`, `{"interval": "P5", "root_hz": 261.63, "hz": 392.0, "options": [...]}`, `{"quiz_item_id": "...", "question": ..., "options": [...]}`, `{"exercise_id": "...", "name": ..., "instructions": ..., "tempo_bpm": ..., "duration_min": ...}`); `Answer` tagged union of four frozen dataclasses and `parse_answer(kind: ItemKind, data: Mapping[str, object]) -> Answer` (ruling 33); `grade(item: DrawnItem, answer: Answer, *, quiz_answer_index: int | None) -> Graded(correct: bool | None, score: int)`.
 - Determinism: `draw_items` with the same seed and candidates returns the same tuple (property test).
 
 - [ ] **Step 1:** failing tests (`# Review Focus 1`, `# Review Focus 3` for the mix with no quizzes/exercises, `# Review Focus 4` for `parse_answer`, determinism, every grade path, banks' frequencies, `item_count` bounds).
@@ -99,7 +101,7 @@ docs: spec Amendments (A13–A23)                                 # T5
 **Interfaces:**
 - `PracticeRepo`: `active_plan(subject_id) -> PracticePlanRow | None`, `create_plan(subject_id, inputs, start_date, now, rationale) -> PracticePlanRow` (supersedes the previous), `completed_count(plan_id) -> int`, `open_session() -> PracticeSessionRow | None`, `create_session(subject_id, plan_id, mode, items: Sequence[DrawnItem], now) -> PracticeSessionRow` (raises `LookupError` for a foreign subject), `mark_incomplete(session_id, now)`, `session(session_id)`, `items(session_id) -> tuple[PracticeItemRow, ...]`, `record(session_id, item_id, answer, graded, now) -> PracticeItemRow | None` (None when already answered), `close(session_id, summary, self_rating, now)`, `quiz_candidates(subject_id)`, `exercise_candidates(subject_id)`, `quiz_answer_index(quiz_item_id) -> int`.
 - Services: `practice.start_practice(svc, user_id, subject_id, mode) -> PracticeStart(session_id, first: NextItem | None, item_count, short)`, `next_exercise(svc, user_id, session_id) -> NextItem` (`done: bool`, item fields without the answer), `record_result(svc, user_id, session_id, item_id, answer_data) -> Graded(outcome: new|existing, correct, score, explanation for quiz)`, `end_practice(svc, user_id, session_id, self_rating) -> PracticeSummary(items, answered, unanswered, accuracy_by_kind, minutes, plan_status)`.
-- `subjects.save_subject` creates the first plan and new versions (ruling 14); `get_subjects` fills `plan_status` from the active plan and the user's timezone.
+- `subjects.save_subject` creates the first plan and new versions (ruling 29); `get_subjects` fills `plan_status` from the active plan and the user's timezone.
 
 - [ ] **Step 1:** failing tests (`# Review Focus 2`, `# Review Focus 3`, `# Review Focus 5` in `RepoContract`, idempotent `record`, incomplete-on-restart, summary arithmetic).
 - [ ] **Step 2:** implement; checks green.
@@ -125,14 +127,14 @@ Migration: `practice_plans` (`version`, `status` active|superseded, `start_date`
 - Response rules (2–4 lines): `start_practice` and `next_exercise`: "Present the item exactly as given. Record the learner's answer with `record_result`; never grade it yourself. If the interactive view did not appear, present it in text."; `record_result`: "Say whether it was correct in one sentence and move to `next_exercise`."; `end_practice`: "Read the summary in two sentences. If `plan_status.missed` is above 0, say the new end date without blame."
 - `_meta.ui.resourceUri` is **not** set in this slice (slice C adds it with the resource).
 
-- [ ] **Step 1:** failing tests (`# Review Focus 4` through the in-process client, rules line counts, enum sets with the ruling 22 names, descriptions ≤ 120 words, instructions ≤ 400 words).
+- [ ] **Step 1:** failing tests (`# Review Focus 4` through the in-process client, rules line counts, enum sets with the ruling 37 names, descriptions ≤ 120 words, instructions ≤ 400 words).
 - [ ] **Step 2:** implement; checks green.
 - [ ] **Step 3:** commit `feat(mcp): practice tools in text mode`.
 - [ ] **Step 4 (controller):** `mcp-contract-reviewer`.
 
 ### Task 5: Docs, amendments, phase audit
 
-- [ ] Spec `## Amendments` A13–A23; `docs/v0/runbook.md` cascade comment; `uv run just check`; **(controller)** `phase-auditor`; commit `docs(subjects): slice B amendments`.
+- [ ] Spec `## Amendments` A28–A38; `docs/v0/runbook.md` cascade comment; `uv run just check`; **(controller)** `phase-auditor`; commit `docs(subjects): slice B amendments`.
 
 ## Notes for the controller
 

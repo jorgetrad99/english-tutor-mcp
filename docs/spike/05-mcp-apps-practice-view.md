@@ -12,7 +12,7 @@ Does a self-contained MCP App (`ui://tutor/practice/v1/app.html`, inline script,
 
 > The practice view renders and records a graded result in at least 4 of 5 attempts on claude.ai web and in at least 4 of 5 on Claude Desktop; the recorded `sub` equals the chat token's `sub` in every attempt; the ear tone plays after a tap in at least 3 of 5 attempts on one mobile surface (iOS or Android); in Claude Code the same tools return a usable text item and `record_result` works by text in 5 of 5 attempts.
 
-If it fails: the practice slice ships text-only (quiz and self-reported exercises), `ear` is removed from `exercise_kinds`, and the app resource stays unregistered until a later spike passes.
+If it fails: the practice slice ships text-only (quiz and self-reported exercises), `ear` is removed from `exercise_kinds`, and the app resource stays unregistered until a later spike passes. (Amended by ADR 0005: `ear` is now the generic `drill`; if the spike fails, drills stay in text mode and only items whose template has `needs_view: true` wait.)
 
 ## Setup
 
@@ -30,7 +30,8 @@ If it fails: the practice slice ships text-only (quiz and self-reported exercise
 4. `next_exercise` from inside the app renders the next item; two items in one thread show no clipping or stale height (Android).
 5. Dark and light theme both legible.
 6. Edit the HTML without changing the URI: does the client serve the stale file? Record whether a versioned path is required.
-7. Optional: can a stored `lesson_view` artifact be shown inside the same app by replacing the document (`document.open`/`write`)? Decides spec out-of-scope item "showing stored artifacts inside the app".
+7. Optional, information only: can the app replace its own document (`document.open`/`write`/`close`) and keep calling tools? Since ADR 0005 every template is written by an LLM and is never placed in the app's own document (it could call any tool), so this item no longer decides a path.
+8. Can the app show a composed template inside a nested `<iframe sandbox="allow-scripts" srcdoc="...">`, and can that frame `postMessage` an answer to the app, which then calls `record_result`? Record any CSP violation in the host console. Decides the "app, nested frame" path, the only way a template's own HTML is shown inside the app; if it fails, the app draws a plain view from the grading kind and `needs_view` items wait (spec section 15.7, ADR 0005). Since ADR 0005 the app plays no sound itself, so run this item with the guide's `example_music_ear` template: record whether its tone plays after a tap inside the nested frame (this replaces check 2 for the template path).
 
 ## Raw results
 
