@@ -246,12 +246,16 @@ class PgInstanceRepo:
     def _require(self, subject_id: UUID, note_id: UUID | None, template_id: UUID) -> None:
         require_subject(self._conn, self._user_id, subject_id)
         if note_id is not None:
+            # FOR UPDATE: seq is max(seq) + 1 per note, so two inserts on one note take turns
+            # here instead of racing to the same seq (security review P3).
             found = self._conn.execute(
-                select(notes.c.id).where(
+                select(notes.c.id)
+                .where(
                     notes.c.id == note_id,
                     notes.c.user_id == self._user_id,
                     notes.c.subject_id == subject_id,
                 )
+                .with_for_update()
             ).scalar_one_or_none()
             if found is None:
                 raise LookupError("note not found")
