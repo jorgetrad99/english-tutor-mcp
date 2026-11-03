@@ -1,8 +1,9 @@
 """The root compose `dev` profile (dev-environment design D6, D7, D10).
 
-`db` and `db-test` stay as they are; the dev services carry the profile, bind to loopback, run the
-`dev` Dockerfile target from the bind-mounted ./src, and are the only place TUTOR_DEV_AUTH is set.
-No production file (compose or env example) carries the flag or the dev target.
+`db` and `db-test` keep no profile and publish on loopback only (superuser tutor:tutor); the dev
+services carry the profile, bind to loopback, run the `dev` Dockerfile target from the bind-mounted
+./src, and are the only place TUTOR_DEV_AUTH is set. No production file (compose or env example)
+carries the flag or the dev target.
 """
 
 import re
@@ -56,12 +57,13 @@ def _dockerfile_stage(name: str) -> str:
     return stage
 
 
-def test_databases_keep_no_profile_and_their_ports() -> None:
+def test_databases_keep_no_profile_and_publish_their_ports_on_loopback() -> None:
+    # Superuser tutor:tutor: never reachable from the LAN (host-side URLs use localhost).
     services = _services()
     for name in ("db", "db-test"):
         assert "profiles" not in services[name], name
-    assert services["db"]["ports"] == ["5432:5432"]
-    assert services["db-test"]["ports"] == ["5433:5432"]
+    assert services["db"]["ports"] == ["127.0.0.1:5432:5432"]
+    assert services["db-test"]["ports"] == ["127.0.0.1:5433:5432"]
     assert services["db"]["volumes"] == ["pgdata:/var/lib/postgresql/data"]
     assert _root_compose()["volumes"] == {"pgdata": None}
 
@@ -88,8 +90,6 @@ def test_published_ports_bind_to_loopback_only() -> None:
     assert services["app-dev"]["ports"] == ["127.0.0.1:8000:8000"]
     assert "ports" not in services["migrate-dev"]
     for name, svc in services.items():
-        if name in ("db", "db-test"):
-            continue  # the databases predate the profile and keep their published ports
         ports = svc.get("ports", [])
         assert isinstance(ports, list)
         for port in ports:

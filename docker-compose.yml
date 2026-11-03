@@ -4,7 +4,8 @@
 #   docker compose up -d --wait db-test    unchanged (uv run just test-int)
 # The dev services set TUTOR_DEV_AUTH=1 (the server refuses it outside loopback dev) and read their
 # secrets from the generated, git-ignored deploy/dev.env (scripts/dev_env.py). Nothing here exists
-# in the production compose files under deploy/ (tests/unit/deploy/test_dev_compose.py).
+# in the production compose files under deploy/ (tests/unit/deploy/test_dev_compose.py). Every
+# published port binds to 127.0.0.1: the databases' superuser is tutor:tutor.
 services:
   db:
     image: postgres:16
@@ -13,7 +14,7 @@ services:
       POSTGRES_PASSWORD: tutor
       POSTGRES_DB: tutor
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -29,7 +30,7 @@ services:
       POSTGRES_PASSWORD: tutor
       POSTGRES_DB: tutor_test
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     tmpfs:
       - /var/lib/postgresql/data
     healthcheck:
