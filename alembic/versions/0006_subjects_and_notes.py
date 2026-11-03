@@ -66,6 +66,8 @@ NOTES_UPDATE_COLUMNS = (
 
 # Composite foreign keys whose ON DELETE clause names the column to null (PostgreSQL 15+);
 # SQLAlchemy's ForeignKeyConstraint accepts only the bare phrases, so these are raw DDL.
+# Same user, not same subject, as for _child_fk: the app enforces the subject (plan ruling 16).
+# Nulling only the column keeps user_id intact (plan ruling 18).
 SET_NULL_REFERENCES = (
     ("notes", "source_id", "sources"),
     ("notes", "supersedes_note_id", "notes"),
@@ -140,6 +142,11 @@ def _pair_key(table: str) -> sa.UniqueConstraint:
     return sa.UniqueConstraint("id", "user_id", name=f"{table}_id_user_id_key")
 
 
+# Composite (col, user_id) keys tie a child to a parent of the same user, not of the same
+# subject. The app keeps references inside one subject: NoteRepo.insert checks the source's
+# subject and resolves concepts (note_concepts, concept_links, quiz_items.concept_id) in the
+# note's subject, and services.notes takes supersedes_note_id from the same subject
+# (plan ruling 16).
 def _child_fk(child: str, column: str, parent: str) -> sa.ForeignKeyConstraint:
     return sa.ForeignKeyConstraint(
         [column, "user_id"],
@@ -439,8 +446,10 @@ def _create_indexes() -> None:
         postgresql_using="gin",
         postgresql_ops={"title_norm": "gin_trgm_ops"},
     )
-    # Under row-level security the policy's user_id test is the only index-able qual (the text
-    # search operator is not leakproof); the GIN index serves the owner and report paths.
+    # FORCE RLS applies to the table owner too, and tutor_report has no grant here. For
+    # tutor_app the policy's user_id test is the only index-able qual (`@@` is not leakproof),
+    # so search plans via ix_note_passages_user today; the GIN index is kept for a future
+    # owner-side or leakproof path (plan ruling 17).
     op.create_index("ix_note_passages_user", "note_passages", ["user_id"])
     op.create_index("ix_note_passages_tsv", "note_passages", ["tsv"], postgresql_using="gin")
     op.create_index("ix_note_artifacts_note", "note_artifacts", ["note_id"])
