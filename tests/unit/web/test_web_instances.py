@@ -3,7 +3,7 @@ binding (b) to (d); ADR 0005 decision 8; slice D Task 3 as amended by the contro
 
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -321,7 +321,53 @@ def test_the_template_host_answers_nothing_but_the_raw_route(tmp_path: Path) -> 
         response = templates.get(path)
         assert (response.status_code, response.text) == (404, "Not found"), path
     assert templates.post("/mcp", json={}).status_code == 404
-    assert templates.post("/token", content=b"x" * 70_000).status_code == 413
+    big = templates.post("/token", content=b"x" * 70_000)
+    assert big.status_code == 413
+    _assert_template_headers(big.headers)
+
+
+def _assert_template_headers(headers: Mapping[str, str]) -> None:
+    for name, value in RAW_HEADERS.items():
+        if name != "content-type":
+            assert headers[name] == value, name
+    for name in DASHBOARD_ONLY:
+        assert name not in headers
+
+
+def test_a_trailing_dot_host_is_still_the_template_host(tmp_path: Path) -> None:
+    # `templates.example.com.` names the same host in DNS: it must not fall through to /mcp.
+    dotted = TestClient(_framed_app(tmp_path), base_url=ORIGIN + ".", follow_redirects=False)
+    for path in ("/mcp", "/authorize", "/.well-known/oauth-authorization-server", "/login"):
+        response = dotted.get(path)
+        assert (response.status_code, response.text) == (404, "Not found"), path
+        _assert_template_headers(response.headers)
+
+
+def test_proxy_headers_on_the_template_host_get_the_template_headers(tmp_path: Path) -> None:
+    dev_base, dev_origin = "http://localhost:8000", "http://templates.localhost:8000"
+    settings = _settings(
+        tmp_path,
+        TUTOR_BASE_URL=dev_base,
+        TUTOR_DEV_AUTH="1",
+        TUTOR_TEMPLATE_ORIGIN=dev_origin,
+        TUTOR_FRAME_TOKEN_KEY=KEY,
+    )
+    config = WebConfig(
+        env="dev",
+        base_url=dev_base,
+        mcp_url=f"{dev_base}/mcp",
+        support_email="soporte@example.test",
+        dev_auth=True,
+        template_origin=dev_origin,
+    )
+    app = build_app(settings, engine=sqlalchemy.create_engine("sqlite://"), web_config=config)
+    templates = TestClient(app, base_url=dev_origin, follow_redirects=False)
+    proxied = templates.get("/app/", headers={"x-forwarded-for": "203.0.113.9"})
+    assert proxied.status_code == 400
+    assert proxied.headers["content-security-policy"] == template_frame_csp(dev_base)
+    assert proxied.headers["referrer-policy"] == "no-referrer"
+    assert proxied.headers["cache-control"] == "private, no-store"
+    assert "set-cookie" not in proxied.headers
 
 
 def test_the_dashboard_csp_frames_exactly_the_template_origin(tmp_path: Path) -> None:
@@ -355,6 +401,8 @@ def test_build_app_refuses_a_website_config_with_another_template_origin(tmp_pat
         (b"templates.example.com", "templates.example.com"),
         (b"Templates.Example.com:443", "templates.example.com"),
         (b"[::1]:8000", "[::1]"),
+        (b"templates.example.com.", "templates.example.com"),
+        (b"Templates.Example.com.:443", "templates.example.com"),
     ],
 )
 def test_request_host_drops_the_port_and_case(host: bytes, name: str) -> None:
