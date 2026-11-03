@@ -50,7 +50,7 @@ def example(name: str) -> dict[str, Any]:
     return {"html": found.html, **json.loads(json.dumps(dict(found.wire)))}
 
 
-def template_args(subject_id: str, source: str = "math_numeric", **changes: Any) -> dict[str, Any]:
+def template_args(subject_id: str, source: str = "numeric", **changes: Any) -> dict[str, Any]:
     data = example(source)
     return {
         "subject_id": subject_id,
@@ -90,15 +90,13 @@ async def test_subjects_tools_on_postgres_with_the_login_role(login_engine: Engi
             listed = await call(client, "list_templates", {"subject_id": subject_id})
             assert listed["templates"] == [] and listed["guide_text"]
             numeric = await call(client, "save_template", template_args(subject_id))
-            flash = await call(
-                client, "save_template", template_args(subject_id, "language_flashcard")
-            )
+            flash = await call(client, "save_template", template_args(subject_id, "pool_recall"))
             source = {"source_kind": "course", "title": "Curso de guitarra"}
             lesson = {
                 **NOTE,
                 "instances": [
-                    instance_args("math_numeric", numeric["template_id"]),
-                    instance_args("language_flashcard", flash["template_id"]),
+                    instance_args("numeric", numeric["template_id"]),
+                    instance_args("pool_recall", flash["template_id"]),
                 ],
             }
             args = {"subject_id": subject_id, "source": source, "notes": [lesson]}
@@ -125,7 +123,7 @@ async def test_subjects_tools_on_postgres_with_the_login_role(login_engine: Engi
             made = await call(
                 client,
                 "create_instance",
-                {"subject_id": subject_id, **instance_args("math_numeric", numeric["template_id"])},
+                {"subject_id": subject_id, **instance_args("numeric", numeric["template_id"])},
             )
             assert made["instance_outcome"] == "new"
             replaced = await call(
@@ -200,7 +198,7 @@ async def test_instance_concepts_on_postgres(login_engine: Engine, engine: Engin
             numeric = (await call(client, "save_template", template_args(subject_id)))[
                 "template_id"
             ]
-            args = instance_args("math_numeric", numeric)
+            args = instance_args("numeric", numeric)
             unknown = await failure(
                 client, "create_instance", {"subject_id": subject_id, **args, "concept": "Nada"}
             )

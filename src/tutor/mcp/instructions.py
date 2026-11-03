@@ -122,8 +122,8 @@ GET_TEMPLATE_GUIDE_DESCRIPTION = (
     "Returns one section of the server's versioned guide: choosing_exercises (how to analyse "
     "a subject's material and goal and pick exercise kinds, a starter set, reuse or a new "
     "template, parameters from a note), contract (the default), display_templates, "
-    "accessibility_and_themes, or a worked example: example_language_flashcard, "
-    "example_math_numeric, example_history_timeline, example_music_ear. Read only."
+    "accessibility_and_themes, or a worked example: example_pool_recall, "
+    "example_numeric, example_ordering, example_pool_choice_media. Read only."
 )
 LIST_TEMPLATES_DESCRIPTION = (
     "Call before adding exercises or lesson displays to a subject's notes. Returns the "

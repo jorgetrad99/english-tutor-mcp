@@ -46,10 +46,10 @@ GuideSection = Literal[
     "contract",
     "display_templates",
     "accessibility_and_themes",
-    "example_language_flashcard",
-    "example_math_numeric",
-    "example_history_timeline",
-    "example_music_ear",
+    "example_pool_recall",
+    "example_numeric",
+    "example_ordering",
+    "example_pool_choice_media",
 ]
 Origin = Literal["ingest", "class"]
 Channel = Literal["artifact", "web", "app_frame"]
@@ -87,10 +87,10 @@ GUIDE_SECTIONS: tuple[GuideSection, ...] = (
     "contract",
     "display_templates",
     "accessibility_and_themes",
-    "example_language_flashcard",
-    "example_math_numeric",
-    "example_history_timeline",
-    "example_music_ear",
+    "example_pool_recall",
+    "example_numeric",
+    "example_ordering",
+    "example_pool_choice_media",
 )
 ORIGINS: tuple[Origin, ...] = ("ingest", "class")
 CHANNELS: tuple[Channel, ...] = ("artifact", "web", "app_frame")
@@ -110,7 +110,7 @@ ANSWER_KINDS: tuple[AnswerKind, ...] = (
 # recomputes it (tutor.services.template_files.guide_sha256); change both together (plan
 # rulings 21 and 31).
 TEMPLATE_GUIDE_VERSION = 2
-TEMPLATE_CONTRACT_SHA256 = "758e332cacf508afe6720051b561b93b34801ea0d58c77dc5e42057ed0a32c59"
+TEMPLATE_CONTRACT_SHA256 = "10db2ce46add5828ebe1056f46188f4e3d88faeeda0222c95df9e6d24b8efc7d"
 
 # Caps (plan ruling 24; spec 15.3, 15.4). The MCP schemas and migration 0006 restate them.
 NAME_MAX = 80

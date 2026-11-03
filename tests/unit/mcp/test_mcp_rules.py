@@ -246,7 +246,13 @@ def test_the_subjects_texts_assume_no_field_of_study() -> None:
     paragraph = next(p for p in INSTRUCTIONS.split("\n") if "get_subjects" in p)
     texts = [paragraph] + [
         TOOL_DESCRIPTIONS[name]
-        for name in ("get_subjects", "save_notes", "list_templates", "save_template")
+        for name in (
+            "get_subjects",
+            "save_notes",
+            "get_template_guide",
+            "list_templates",
+            "save_template",
+        )
     ]
     for text in texts:
         found = {w.strip(".,;:()'`").lower() for w in text.split()}

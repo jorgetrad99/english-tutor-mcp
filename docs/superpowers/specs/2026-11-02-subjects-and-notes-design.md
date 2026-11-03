@@ -458,10 +458,10 @@ The guide is **subject-agnostic**: it teaches Claude how to decide what to build
 | `contract` (default) | template structure and the marker; reading the JSON tag; parameter types, roles and caps; grading kinds, `text_match`, `numeric_tolerance` and answer shapes; pools, draw rules and `drawn`; `needs_view`; `tutorSubmit` and what each channel does with it; the 40,000-byte cap; sandbox limits (no network, no external assets, no `src`/`href` URLs, no forms, inline script and style only) |
 | `display_templates` | lesson content as displays: tables and timelines (`text_table`), diagrams drawn as inline SVG with DOM methods from parameters, code (`text` in `<pre>`, never executed), tablature and chord charts (`text` in monospace, or `integer_list` frets); everything visible comes from parameters so the text rendering works; one short worked display example |
 | `accessibility_and_themes` | real buttons, labels, keyboard use, visible focus, text beside every colour or sound cue; `prefers-color-scheme` plus the host's theme variables when present |
-| `example_language_flashcard` | a vocabulary flashcard: `exact_text`, `pool_draw: one`, `text_match: keep_accents`; pool entries `{cue: "the bill", answer: "la cuenta", accept: ["cuenta"]}` |
-| `example_math_numeric` | a numeric answer: authored instances, `numeric`, `numeric_tolerance: 0.01`; prompt `problem` (`text`), key `answer` (`number`), reveal `worked_solution` (`text`) |
-| `example_history_timeline` | timeline ordering: `exact_sequence`, `pool_draw: ordered`, `pool_count: 4`; entries `{cue: "Independencia de México", answer: "1810", order: 1810, explain: "Grito de Dolores"}` |
-| `example_music_ear` | an ear item from a pool: `choice_index`, `pool_draw: one_of_choices`, `pool_count: 4`, `needs_view: true`; the template converts the cue (`A4`) to a frequency and plays it with Web Audio inside the tap handler |
+| `example_pool_recall` | a vocabulary flashcard: `exact_text`, `pool_draw: one`, `text_match: keep_accents`; pool entries `{cue: "the bill", answer: "la cuenta", accept: ["cuenta"]}` |
+| `example_numeric` | a numeric answer: authored instances, `numeric`, `numeric_tolerance: 0.01`; prompt `problem` (`text`), key `answer` (`number`), reveal `worked_solution` (`text`) |
+| `example_ordering` | timeline ordering: `exact_sequence`, `pool_draw: ordered`, `pool_count: 4`; entries `{cue: "Independencia de México", answer: "1810", order: 1810, explain: "Grito de Dolores"}` |
+| `example_pool_choice_media` | an ear item from a pool: `choice_index`, `pool_draw: one_of_choices`, `pool_count: 4`, `needs_view: true`; the template converts the cue (`A4`) to a frequency and plays it with Web Audio inside the tap handler |
 
 Each example is a complete template with its parameter specs and a sample instance, and says which part is the template's own business (the music example's frequency arithmetic) and which is the server's (the draw and the grade).
 

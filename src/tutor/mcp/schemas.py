@@ -1666,7 +1666,8 @@ NeedsView = Annotated[
     bool,
     Field(
         title="Needs view",
-        description="True when an item cannot be done from text, such as one that plays a sound.",
+        description="True when an item cannot be done from text, such as one that needs a sound, "
+        "drawing or other interaction.",
     ),
 ]
 ParamSpecsField = Annotated[

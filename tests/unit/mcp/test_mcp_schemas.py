@@ -32,6 +32,7 @@ from tutor.mcp.schemas import (
     EndSessionInput,
     GlossaryItemInput,
     SaveProfileInput,
+    SaveTemplateInput,
     StartLessonInput,
 )
 from tutor.services.errors import ServiceError
@@ -491,6 +492,11 @@ def test_save_profile_input_converts_without_timezone() -> None:
     assert raw.target_date == date(2027, 3, 1)
     assert raw.goal_text is None
     assert raw.timezone is None
+
+
+def test_needs_view_description_names_no_field_of_study() -> None:
+    description = SaveTemplateInput.model_fields["needs_view"].description or ""
+    assert "such as one that needs a sound, drawing or other interaction" in description
 
 
 def test_start_lesson_prep_needs_its_use_case() -> None:

@@ -75,7 +75,7 @@ def example(name: str) -> dict[str, Any]:
     return {"html": found.html, **copy.deepcopy(dict(found.wire))}
 
 
-def template_args(subject_id: str, name: str = "math_numeric") -> dict[str, Any]:
+def template_args(subject_id: str, name: str = "numeric") -> dict[str, Any]:
     data = example(name)
     return {
         "subject_id": subject_id,
@@ -86,7 +86,7 @@ def template_args(subject_id: str, name: str = "math_numeric") -> dict[str, Any]
     }
 
 
-async def save(client: Client, subject_id: str, name: str = "math_numeric") -> str:
+async def save(client: Client, subject_id: str, name: str = "numeric") -> str:
     saved = await call(client, "save_template", template_args(subject_id, name))
     return str(saved["template_id"])
 
@@ -168,10 +168,10 @@ async def test_review_focus_7_no_answer_key_or_pool_entry_reaches_the_client() -
     world = World()
     async with Client(world.mcp) as client:
         subject_id = await new_subject(client)
-        flash = await save(client, subject_id, "language_flashcard")
-        numeric = await save(client, subject_id, "math_numeric")
-        flash_args = instance_args("language_flashcard", flash)
-        numeric_args = instance_args("math_numeric", numeric)
+        flash = await save(client, subject_id, "pool_recall")
+        numeric = await save(client, subject_id, "numeric")
+        flash_args = instance_args("pool_recall", flash)
+        numeric_args = instance_args("numeric", numeric)
         saved = await call(
             client,
             "save_notes",
@@ -217,15 +217,15 @@ async def test_review_focus_8_parameters_stay_json_inside_the_marker() -> None:
     hostile = "</script><img src=x onerror=alert(1)>"
     async with Client(World().mcp) as client:
         subject_id = await new_subject(client)
-        numeric = await save(client, subject_id, "math_numeric")
-        args = instance_args("math_numeric", numeric)
+        numeric = await save(client, subject_id, "numeric")
+        args = instance_args("numeric", numeric)
         for p in args["params"]:
             if p["name"] == "problem":
                 p["text"] = hostile
         made = await call(client, "create_instance", {"subject_id": subject_id, **args})
     document = made["document"]
     assert hostile not in document
-    assert document.count("<script") == example("math_numeric")["html"].count("<script") + 1
+    assert document.count("<script") == example("numeric")["html"].count("<script") + 1
 
 
 @pytest.mark.asyncio
@@ -234,8 +234,8 @@ async def test_an_unknown_concept_is_not_found() -> None:
     world = World()
     async with Client(world.mcp) as client:
         subject_id = await new_subject(client)
-        numeric = await save(client, subject_id, "math_numeric")
-        args = {**instance_args("math_numeric", numeric), "concept": "Nada"}
+        numeric = await save(client, subject_id, "numeric")
+        args = {**instance_args("numeric", numeric), "concept": "Nada"}
         made = await error_of(client, "create_instance", {"subject_id": subject_id, **args})
         noted = await error_of(
             client,
@@ -328,7 +328,7 @@ async def test_a_parameter_needs_exactly_one_value_field(pair: dict[str, Any], p
     async with Client(World().mcp) as client:
         subject_id = await new_subject(client)
         numeric = await save(client, subject_id)
-        args = instance_args("math_numeric", numeric)
+        args = instance_args("numeric", numeric)
         args["params"] = [pair, *args["params"][1:]]
         body = await error_of(client, "create_instance", {"subject_id": subject_id, **args})
     assert (body["code"], body["fields"]) == ("validation_failed", [path])
@@ -355,7 +355,7 @@ async def test_unknown_keys_are_rejected_at_every_level(
         if tool == "save_template":
             args = template_args(subject_id)
         else:
-            name = "language_flashcard" if tool == "create_instance_pool" else "math_numeric"
+            name = "pool_recall" if tool == "create_instance_pool" else "numeric"
             template_id = await save(client, subject_id, name)
             instance = instance_args(name, template_id)
             args = {"subject_id": subject_id, **instance}
@@ -382,7 +382,7 @@ async def test_review_focus_5_another_learners_templates_and_instances_are_not_f
         made = await call(
             client,
             "create_instance",
-            {"subject_id": subject_id, **instance_args("math_numeric", template_id)},
+            {"subject_id": subject_id, **instance_args("numeric", template_id)},
         )
         world.user_id = world.beto
         mine = await new_subject(client)
@@ -397,7 +397,7 @@ async def test_review_focus_5_another_learners_templates_and_instances_are_not_f
             ),
             (
                 "create_instance",
-                {"subject_id": mine, **instance_args("math_numeric", template_id)},
+                {"subject_id": mine, **instance_args("numeric", template_id)},
                 "template_id",
             ),
             ("get_instance_view", {"instance_id": made["instance_id"]}, "instance_id"),

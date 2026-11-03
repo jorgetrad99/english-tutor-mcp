@@ -30,10 +30,10 @@ from tutor.domain.templates import (
 
 PACKAGE = "tutor.templates"
 EXAMPLES: tuple[tuple[str, GuideSection], ...] = (
-    ("language_flashcard", "example_language_flashcard"),
-    ("math_numeric", "example_math_numeric"),
-    ("history_timeline", "example_history_timeline"),
-    ("music_ear", "example_music_ear"),
+    ("pool_recall", "example_pool_recall"),
+    ("numeric", "example_numeric"),
+    ("ordering", "example_ordering"),
+    ("pool_choice_media", "example_pool_choice_media"),
     ("display_table", "display_templates"),
 )
 BRIDGES: Mapping[str, str] = {"artifact": "bridge_artifact.js", "web": "bridge_web.js"}

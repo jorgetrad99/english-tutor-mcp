@@ -44,10 +44,10 @@ pytestmark = pytest.mark.unit
 INSTANCE = UUID("00000000-0000-0000-0000-0000000000ab")
 FIELD_WORDS = re.compile(r"\b(pitch|hz|octave|interval)s?\b", re.IGNORECASE)
 EXAMPLE_KINDS = {
-    "example_language_flashcard": "exact_text",
-    "example_math_numeric": "numeric",
-    "example_history_timeline": "exact_sequence",
-    "example_music_ear": "choice_index",
+    "example_pool_recall": "exact_text",
+    "example_numeric": "numeric",
+    "example_ordering": "exact_sequence",
+    "example_pool_choice_media": "choice_index",
 }
 
 
@@ -86,6 +86,13 @@ def test_every_section_loads() -> None:
         assert "{{" not in text and "}}" not in text  # every placeholder rendered
 
 
+def test_section_names_name_no_field_of_study() -> None:
+    # Contract review: the enum Claude sees is generic; the fields live in the example text.
+    for section in GUIDE_SECTIONS:
+        for word in ("language", "math", "history", "music", "flashcard", "timeline", "ear"):
+            assert word not in section.split("_"), section
+
+
 def test_unknown_section_is_refused() -> None:
     with pytest.raises(LookupError):
         guide_section("nope")  # type: ignore[arg-type]
@@ -121,12 +128,12 @@ def test_only_the_music_example_talks_about_field_specific_sound() -> None:
     # The generic-contract guard (spec 15.12).
     for section in GUIDE_SECTIONS:
         found = FIELD_WORDS.search(guide_section(section))
-        if section == "example_music_ear":
+        if section == "example_pool_choice_media":
             assert found is not None
         else:
             assert found is None, (section, found)
     for example in guide_examples():
-        if example.name != "music_ear":
+        if example.name != "pool_choice_media":
             assert FIELD_WORDS.search(example.html) is None, example.name
 
 
