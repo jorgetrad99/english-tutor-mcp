@@ -1,0 +1,19 @@
+# Choosing exercises (guide version {{GUIDE_VERSION}})
+
+Works for any subject. The server grades; you write templates, only after the learner's yes.
+
+1. **Analyse the subject and the material.** Read the subject's goal_text, context_text, preference and exercise_kinds, and the note. List what the learner must be able to do, in their goal's terms.
+2. **Name the kind of practice each ability needs:** recall (produce a fact or term from a cue), recognition (pick the right one among options), production (write something short and checkable), application (use a rule or method on a new case), sequencing (put steps or events in order), self-reported practice (a physical or creative task only the learner can judge), display (lesson content to look at).
+3. **Map each kind to a grading kind:** recognition → `choice_index`; recall and production → `exact_text` (`keep_accents` when accents change meaning, `exact_case` for code, symbols and formulas); several required parts → `exact_set`; application with a number → `numeric` with a tolerance that fits the rounding asked; sequencing → `exact_sequence`; self-reported practice → `self_report`; display → `none`. An answer these rules cannot check (an essay, a proof) is `self_report` or a display plus conversation.
+4. **Authored or pool:** many small items of one shape → a pool; items that are each unique → one authored instance per item. Set `needs_view` when the item cannot be done from text.
+5. **Propose a small starter set** on a subject's first ingest: 2 to 4 templates, at most 5, covering the kinds found in steps 2-3, the learner's exercise_kinds and preference (more self-reported practice for practice_first, more recall and recognition for theory_first). Add a display only if the lessons show tables, diagrams, code or similar. Show the whole list in one message (name, the task in one sentence, one example item from the material) and wait for one yes; anything not shown needs its own yes.
+6. **Reuse before proposing.** Reuse a template when its grading kind and parameters fit, even for another topic; new content is never a reason for a new template. A change the learner wants is a replacement (replaces_template_id) with its own yes.
+7. **Take parameters from the note.** Answers come from the note's text; never invent an answer key. prompt_text states the task in the learner's language. Accepted variants go in `accept` or a text_list key; distractors from the same lesson; one instance per idea. Keep one pool per lesson or topic (6-40 entries). Never place the answer in a prompt parameter.
+
+Grading kinds and pools:
+
+{{GRADING_MAP}}
+
+Practice kind (derived by the server): {{PRACTICE_KINDS}}.
+
+Across subjects (illustrative): languages - flashcard pool, multiple choice on usage, conjugation table display; math - numeric answers, ordering the steps of a method, formula display; history - timeline ordering, multiple choice on causes, timeline table; programming - `exact_case` output prediction, code display, self-reported coding exercise; cooking - ordering recipe steps, numeric scaling, self-reported cooking; music - a listening pool, theory multiple choice, notation display, self-reported practice at a tempo.

@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nota de oído</title>
+<style>
+:root{--bg:var(--color-background,#ffffff);--fg:var(--color-text,#1a1a1a);--muted:#555555;--accent:#1f5fbf;--line:#cccccc}
+@media (prefers-color-scheme: dark){:root{--bg:var(--color-background,#16181c);--fg:var(--color-text,#f0f0f0);--muted:#b8b8b8;--accent:#7fb0ff;--line:#444444}}
+body{margin:0;padding:16px;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,sans-serif}
+button{font:inherit;padding:8px 14px;border:2px solid var(--accent);border-radius:8px;background:transparent;color:var(--fg);cursor:pointer;margin:4px 4px 4px 0}
+button:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+button:disabled{opacity:.5;cursor:default}
+input{font:inherit;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);width:100%;box-sizing:border-box}
+.cue{font-size:1.5rem;font-weight:600;margin:8px 0 16px}
+.hint{color:var(--muted)}
+</style>
+</head>
+<body>
+<main>
+<p class="hint" id="task"></p>
+<p><button type="button" id="play"></button></p>
+<div role="group" aria-labelledby="task" id="options"></div>
+<p role="status" id="result"></p>
+</main>
+<script type="application/json" id="tutor-params"></script>
+<script>
+(function () {
+  // choice_index with pool_draw "one_of_choices": the server sends drawn.cue and drawn.options
+  // and grades the chosen index. Turning the cue into a sound is this template's business.
+  var TEXT = {
+    es: { task: "Escucha la nota y elige su nombre.", play: "Escuchar (suena una nota)", playing: "Sonando", right: "Correcto", wrong: "No es esa" },
+    en: { task: "Listen to the note and pick its name.", play: "Listen (a note plays)", playing: "Playing", right: "Right", wrong: "Not that one" }
+  };
+  var STEPS = { C: -9, D: -7, E: -5, F: -4, G: -2, A: 0, B: 2 };
+  var payload = JSON.parse(document.getElementById("tutor-params").textContent);
+  var t = TEXT[payload.ui_lang] || TEXT.es;
+  var drawn = payload.drawn || { cue: "A4", options: [] };
+  var status = document.getElementById("result");
+  document.getElementById("task").textContent = t.task;
+  // A pitch name with its octave ("A4", "C#5") to a frequency: twelve equal semitones per
+  // octave, A4 = 440 Hz.
+  function frequency(cue) {
+    var match = /^([A-G])([#b]?)(-?[0-9])$/.exec(cue);
+    if (!match) { return 440; }
+    var semitones = STEPS[match[1]] + (match[2] === "#" ? 1 : match[2] === "b" ? -1 : 0);
+    semitones += (parseInt(match[3], 10) - 4) * 12;
+    return 440 * Math.pow(2, semitones / 12);
+  }
+  var context = null;
+  var play = document.getElementById("play");
+  play.textContent = t.play;
+  play.addEventListener("click", function () {
+    // Created inside the tap handler: browsers allow sound only after a user gesture.
+    if (!context) { context = new (window.AudioContext || window.webkitAudioContext)(); }
+    var oscillator = context.createOscillator();
+    var gain = context.createGain();
+    oscillator.frequency.value = frequency(drawn.cue);
+    gain.gain.setValueAtTime(0.2, context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + 1.2);
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start();
+    oscillator.stop(context.currentTime + 1.2);
+    status.textContent = t.playing;
+  });
+  var box = document.getElementById("options");
+  var sent = false;
+  drawn.options.forEach(function (option, index) {
+    var choice = document.createElement("button");
+    choice.type = "button";
+    choice.textContent = option;
+    choice.addEventListener("click", function () {
+      if (sent) { return; }
+      sent = true;
+      choice.setAttribute("aria-pressed", "true");
+      window.tutorSubmit({ answer_kind: "choice_index", option_index: index });
+    });
+    box.appendChild(choice);
+  });
+  window.tutorOnResult = function (result) {
+    status.textContent = result.correct ? t.right : t.wrong;
+  };
+})();
+</script>
+</body>
+</html>

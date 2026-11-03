@@ -1,0 +1,31 @@
+{
+  "spec": {
+    "name": "Nota de oído",
+    "description": "Suena una nota y el alumno elige su nombre entre cuatro.",
+    "template_purpose": "exercise",
+    "grading_kind": "choice_index",
+    "pool_draw": "one_of_choices",
+    "pool_count": 4,
+    "needs_view": true,
+    "params": [
+      {"name": "notes", "param_type": "pool", "param_role": "pool", "label": "Notas"}
+    ]
+  },
+  "instance": {
+    "prompt_text": "Escucha la nota y elige su nombre.",
+    "params": [
+      {
+        "name": "notes",
+        "pool": [
+          {"cue": "C4", "answer": "Do", "accept": ["C"]},
+          {"cue": "D4", "answer": "Re", "accept": ["D"]},
+          {"cue": "E4", "answer": "Mi", "accept": ["E"]},
+          {"cue": "F4", "answer": "Fa", "accept": ["F"]},
+          {"cue": "G4", "answer": "Sol", "accept": ["G"]},
+          {"cue": "A4", "answer": "La", "accept": ["A"]},
+          {"cue": "B4", "answer": "Si", "accept": ["B"]}
+        ]
+      }
+    ]
+  }
+}

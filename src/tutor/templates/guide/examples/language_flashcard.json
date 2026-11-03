@@ -1,0 +1,29 @@
+{
+  "spec": {
+    "name": "Tarjeta de vocabulario",
+    "description": "Una palabra o frase en inglés; el alumno escribe la traducción. Una lista por lección.",
+    "template_purpose": "exercise",
+    "grading_kind": "exact_text",
+    "text_match": "keep_accents",
+    "pool_draw": "one",
+    "params": [
+      {"name": "cards", "param_type": "pool", "param_role": "pool", "label": "Tarjetas"}
+    ]
+  },
+  "instance": {
+    "prompt_text": "Traduce al español.",
+    "params": [
+      {
+        "name": "cards",
+        "pool": [
+          {"cue": "the bill", "answer": "la cuenta", "accept": ["cuenta"]},
+          {"cue": "the menu", "answer": "el menú", "accept": ["menú", "la carta"]},
+          {"cue": "the waiter", "answer": "el mesero", "accept": ["mesero", "el camarero"]},
+          {"cue": "a table for two", "answer": "una mesa para dos"},
+          {"cue": "the tip", "answer": "la propina", "accept": ["propina"], "explain": "En México se deja entre 10 y 15 por ciento."},
+          {"cue": "still water", "answer": "agua sin gas"}
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "spec": {
+    "name": "Ordenar en la línea del tiempo",
+    "description": "Cuatro sucesos de la lección para ordenar del más antiguo al más reciente.",
+    "template_purpose": "exercise",
+    "grading_kind": "exact_sequence",
+    "pool_draw": "ordered",
+    "pool_count": 4,
+    "params": [
+      {"name": "events", "param_type": "pool", "param_role": "pool", "label": "Sucesos"}
+    ]
+  },
+  "instance": {
+    "prompt_text": "Ordena los sucesos del más antiguo al más reciente.",
+    "params": [
+      {
+        "name": "events",
+        "pool": [
+          {"cue": "Independencia de México", "answer": "1810", "order": 1810, "explain": "Grito de Dolores"},
+          {"cue": "Consumación de la Independencia", "answer": "1821", "order": 1821, "explain": "Entrada del Ejército Trigarante"},
+          {"cue": "Constitución de 1857", "answer": "1857", "order": 1857},
+          {"cue": "Inicio de la Revolución Mexicana", "answer": "1910", "order": 1910, "explain": "Plan de San Luis"},
+          {"cue": "Constitución de 1917", "answer": "1917", "order": 1917},
+          {"cue": "Expropiación petrolera", "answer": "1938", "order": 1938}
+        ]
+      }
+    ]
+  }
+}

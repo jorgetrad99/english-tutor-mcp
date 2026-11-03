@@ -1,0 +1,19 @@
+{
+  "spec": {
+    "name": "Tabla de la lección",
+    "description": "Cualquier tabla de la lección: la primera fila son los encabezados.",
+    "template_purpose": "display",
+    "grading_kind": "none",
+    "params": [
+      {"name": "table", "param_type": "text_table", "param_role": "prompt", "label": "Tabla"},
+      {"name": "caption", "param_type": "text", "param_role": "prompt", "label": "Título", "required": false, "max_length": 200}
+    ]
+  },
+  "instance": {
+    "prompt_text": "Conjugación del verbo tener en presente.",
+    "params": [
+      {"name": "table", "text_table": [["Persona", "Tener"], ["yo", "tengo"], ["tú", "tienes"], ["él, ella, usted", "tiene"], ["nosotros", "tenemos"], ["ellos, ustedes", "tienen"]]},
+      {"name": "caption", "text": "Tener, presente"}
+    ]
+  }
+}

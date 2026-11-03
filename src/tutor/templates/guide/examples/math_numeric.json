@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "name": "Problema con resultado numérico",
+    "description": "Un problema de la lección con un número como respuesta, redondeado a dos decimales.",
+    "template_purpose": "exercise",
+    "grading_kind": "numeric",
+    "numeric_tolerance": 0.01,
+    "params": [
+      {"name": "problem", "param_type": "text", "param_role": "prompt", "label": "Problema", "max_length": 1000},
+      {"name": "answer", "param_type": "number", "param_role": "answer_key", "label": "Resultado"},
+      {"name": "worked_solution", "param_type": "text", "param_role": "reveal", "label": "Solución", "required": false, "max_length": 1500}
+    ]
+  },
+  "instance": {
+    "prompt_text": "Resuelve el problema y escribe el resultado con dos decimales.",
+    "params": [
+      {"name": "problem", "text": "Un círculo tiene radio 3 cm. ¿Cuál es su área en cm²? Usa pi = 3.1416."},
+      {"name": "answer", "number": 28.27},
+      {"name": "worked_solution", "text": "Área = pi × r² = 3.1416 × 9 = 28.2744, que redondeado es 28.27 cm²."}
+    ]
+  }
+}

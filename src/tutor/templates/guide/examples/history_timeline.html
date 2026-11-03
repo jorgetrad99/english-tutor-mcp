@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Línea del tiempo</title>
+<style>
+:root{--bg:var(--color-background,#ffffff);--fg:var(--color-text,#1a1a1a);--muted:#555555;--accent:#1f5fbf;--line:#cccccc}
+@media (prefers-color-scheme: dark){:root{--bg:var(--color-background,#16181c);--fg:var(--color-text,#f0f0f0);--muted:#b8b8b8;--accent:#7fb0ff;--line:#444444}}
+body{margin:0;padding:16px;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,sans-serif}
+button{font:inherit;padding:8px 14px;border:2px solid var(--accent);border-radius:8px;background:transparent;color:var(--fg);cursor:pointer;margin:4px 4px 4px 0}
+button:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+button:disabled{opacity:.5;cursor:default}
+input{font:inherit;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);width:100%;box-sizing:border-box}
+.cue{font-size:1.5rem;font-weight:600;margin:8px 0 16px}
+.hint{color:var(--muted)}
+</style>
+<style>
+ol{padding-left:24px}
+li{display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding:6px 0}
+li span{flex:1 1 160px}
+</style>
+</head>
+<body>
+<main>
+<p class="hint" id="task"></p>
+<ol id="list"></ol>
+<p><button type="button" id="check"></button></p>
+<p role="status" id="result"></p>
+</main>
+<script type="application/json" id="tutor-params"></script>
+<script>
+(function () {
+  // exact_sequence with pool_draw "ordered": the server shuffles the cues and grades the order.
+  var TEXT = {
+    es: { task: "Ordena del más antiguo al más reciente.", up: "Subir", down: "Bajar", check: "Comprobar", moved: "Movido a la posición ", right: "Correcto", wrong: "Orden con errores" },
+    en: { task: "Order from earliest to latest.", up: "Up", down: "Down", check: "Check", moved: "Moved to position ", right: "Right", wrong: "Some are out of order" }
+  };
+  var payload = JSON.parse(document.getElementById("tutor-params").textContent);
+  var t = TEXT[payload.ui_lang] || TEXT.es;
+  var items = payload.drawn ? payload.drawn.cues.slice() : [];
+  var list = document.getElementById("list");
+  var status = document.getElementById("result");
+  document.getElementById("task").textContent = t.task;
+  document.getElementById("check").textContent = t.check;
+  function move(index, step) {
+    var target = index + step;
+    if (target < 0 || target >= items.length) { return; }
+    var item = items[index];
+    items[index] = items[target];
+    items[target] = item;
+    draw();
+    status.textContent = t.moved + (target + 1);
+    var buttons = list.children[target].querySelectorAll("button");
+    var next = step < 0 ? buttons[0] : buttons[1];
+    (next.disabled ? (step < 0 ? buttons[1] : buttons[0]) : next).focus();
+  }
+  function button(text, cue, disabled, onClick) {
+    var element = document.createElement("button");
+    element.type = "button";
+    element.textContent = text;
+    element.setAttribute("aria-label", text + ": " + cue);
+    element.disabled = disabled;
+    element.addEventListener("click", onClick);
+    return element;
+  }
+  function draw() {
+    list.textContent = "";
+    items.forEach(function (cue, index) {
+      var row = document.createElement("li");
+      var label = document.createElement("span");
+      label.textContent = cue;
+      row.appendChild(label);
+      row.appendChild(button(t.up, cue, index === 0, function () { move(index, -1); }));
+      row.appendChild(button(t.down, cue, index === items.length - 1, function () { move(index, 1); }));
+      list.appendChild(row);
+    });
+  }
+  var sent = false;
+  document.getElementById("check").addEventListener("click", function () {
+    if (sent) { return; }
+    sent = true;
+    window.tutorSubmit({ answer_kind: "sequence", values: items.slice() });
+  });
+  window.tutorOnResult = function (result) {
+    status.textContent = result.correct ? t.right : t.wrong;
+  };
+  draw();
+})();
+</script>
+</body>
+</html>
