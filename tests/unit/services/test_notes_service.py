@@ -17,6 +17,7 @@ from tutor.domain.notes import (
     MAX_CALL_CHARS,
     MAX_CONCEPTS,
     MAX_NOTES_PER_CALL,
+    MAX_WEB_NOTE_CHARS,
     ConceptLinkInput,
     InstanceInput,
     NoteInput,
@@ -30,6 +31,7 @@ from tutor.services.notes import (
     MAX_NOTE_TEXT_CHARS,
     get_note,
     save_notes,
+    save_web_note,
     search_notes,
 )
 from tutor.services.subject_views import (
@@ -390,3 +392,133 @@ def test_search_notes_validates_query_and_limit(svc: Services, user_id: UUID) ->
             search_notes(svc, user_id, **kwargs)
         assert (info.value.code, info.value.fields) == ("validation_failed", (field,))
     assert search_notes(svc, user_id, " nada ", limit=10).hits == ()
+
+
+# --- save_web_note (slice D ruling 57) --------------------------------------------------------
+
+PDF_SOURCE = SourceInput("pdf", "Apuntes de armonía")
+TEXT_SOURCE = SourceInput("text", "Notas pegadas")
+
+
+def test_save_web_note_stores_one_web_note_with_its_source_and_passages(
+    svc: Services, store: MemoryStore, user_id: UUID
+) -> None:
+    subject_id = create_subject(svc, user_id)
+    text = long_paragraph("Uno.") + "\n\n" + long_paragraph("Dos.")
+    saved = save_web_note(svc, user_id, subject_id, PDF_SOURCE, "Armonía 1", None, text)
+    assert (saved.outcome, saved.instance_ids) == ("new", ())
+    view = get_note(svc, user_id, saved.note_id)
+    assert (view.origin, view.title, view.lesson_ref, view.position, view.source_title) == (
+        "web",
+        "Armonía 1",
+        None,
+        None,
+        "Apuntes de armonía",
+    )
+    assert (view.concepts, view.instances, view.passage_count) == ((), (), 2)
+    [source] = store.tables.sources.values()
+    assert (source.kind, source.title, source.url) == ("pdf", "Apuntes de armonía", None)
+    assert events(store, user_id, "notes_saved") == [
+        {
+            "subject_id": str(subject_id),
+            "source_id": str(view.source_id),
+            "origin": "web",
+            "new": 1,
+            "existing": 0,
+            "superseded": 0,
+            "instances": 0,
+        }
+    ]
+
+
+def test_save_web_note_repeat_is_existing_and_another_text_supersedes(
+    svc: Services, store: MemoryStore, user_id: UUID, clock: FixedClock
+) -> None:
+    subject_id = create_subject(svc, user_id)
+    first = save_web_note(svc, user_id, subject_id, TEXT_SOURCE, "Clase 1", "C1", "uno")
+    clock.advance(timedelta(minutes=1))
+    again = save_web_note(svc, user_id, subject_id, TEXT_SOURCE, "Clase 1", "C1", "uno")
+    clock.advance(timedelta(minutes=1))
+    fixed = save_web_note(svc, user_id, subject_id, TEXT_SOURCE, "Clase 1", "C1", "uno bis")
+    assert again == NoteOutcome(first.note_id, "existing")
+    assert fixed.outcome == "superseded"
+    assert get_note(svc, user_id, fixed.note_id).supersedes_note_id == first.note_id
+    # The same PDF uploaded twice (no lesson ref) is `existing` too.
+    pdf = save_web_note(svc, user_id, subject_id, PDF_SOURCE, "PDF", None, "texto del pdf")
+    assert save_web_note(svc, user_id, subject_id, PDF_SOURCE, "PDF", None, "texto del pdf") == (
+        NoteOutcome(pdf.note_id, "existing")
+    )
+    assert len(store.tables.sources) == 2
+    saved = events(store, user_id, "notes_saved")
+    assert [(m["origin"], m["new"], m["existing"], m["superseded"]) for m in saved] == [
+        ("web", 1, 0, 0),
+        ("web", 0, 1, 0),
+        ("web", 0, 0, 1),
+        ("web", 1, 0, 0),
+        ("web", 0, 1, 0),
+    ]
+    for meta in saved:  # ids, enums and counts only: never a title or the text
+        assert set(meta) == {
+            "subject_id",
+            "source_id",
+            "origin",
+            "new",
+            "existing",
+            "superseded",
+            "instances",
+        }
+
+
+def test_save_web_note_takes_up_to_400000_characters(
+    svc: Services, store: MemoryStore, user_id: UUID
+) -> None:
+    subject_id = create_subject(svc, user_id)
+    words = ("palabra " * (MAX_WEB_NOTE_CHARS // 8))[:MAX_WEB_NOTE_CHARS]
+    saved = save_web_note(svc, user_id, subject_id, TEXT_SOURCE, "Largo", None, words)
+    assert saved.outcome == "new"
+    with pytest.raises(ServiceError) as info:
+        save_web_note(svc, user_id, subject_id, TEXT_SOURCE, "Más largo", None, words + "x")
+    assert (info.value.code, info.value.fields) == ("validation_failed", ("raw_text",))
+    assert len(store.tables.notes) == 1
+
+
+@pytest.mark.parametrize(
+    ("source", "title", "lesson_ref", "text", "fields"),
+    [
+        (TEXT_SOURCE, "Título", None, "   ", ("raw_text",)),
+        (TEXT_SOURCE, "", None, "texto", ("title",)),
+        (TEXT_SOURCE, "t" * 201, "r" * 121, "texto", ("title", "lesson_ref")),
+        (SourceInput("text", ""), "Título", None, "texto", ("source.title",)),
+        (SourceInput("course", "Curso"), "Título", None, "texto", ("source.kind",)),
+        (SourceInput("url", "Web"), "Título", None, "texto", ("source.kind",)),
+    ],
+)
+def test_save_web_note_names_the_form_fields_and_stores_nothing(
+    svc: Services,
+    store: MemoryStore,
+    user_id: UUID,
+    source: SourceInput,
+    title: str,
+    lesson_ref: str | None,
+    text: str,
+    fields: tuple[str, ...],
+) -> None:
+    subject_id = create_subject(svc, user_id)
+    with pytest.raises(ServiceError) as info:
+        save_web_note(svc, user_id, subject_id, source, title, lesson_ref, text)
+    assert (info.value.code, info.value.fields) == ("validation_failed", fields)
+    assert (store.tables.notes, store.tables.sources) == ({}, {})
+    assert events(store, user_id, "notes_saved") == []
+
+
+def test_save_web_note_on_a_foreign_subject_is_not_found(
+    svc: Services, store: MemoryStore, user_id: UUID, other_user_id: UUID
+) -> None:
+    theirs = create_subject(svc, other_user_id)
+    with pytest.raises(ServiceError) as info:
+        save_web_note(svc, user_id, theirs, TEXT_SOURCE, "Título", None, "texto")
+    assert (info.value.code, info.value.fields) == ("not_found", ("subject_id",))
+    with pytest.raises(ServiceError) as missing:
+        save_web_note(svc, user_id, uuid4(), TEXT_SOURCE, "Título", None, "texto")
+    assert missing.value.code == "not_found"
+    assert store.tables.notes == {}
