@@ -16,7 +16,7 @@ from tutor.ops.report_role import REPORT_ROLE
 pytestmark = pytest.mark.integration
 
 LOGIN = "tutor_provision_test"
-DEFAULT_URL = "postgresql://tutor:tutor@localhost:5433/tutor_test"
+DEFAULT_URL = "postgresql://tutor:tutor@127.0.0.1:5433/tutor_test"
 
 
 @pytest.fixture

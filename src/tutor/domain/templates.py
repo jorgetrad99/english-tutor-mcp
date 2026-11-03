@@ -19,7 +19,7 @@ from typing import Any, Literal, TypeGuard
 from uuid import UUID
 
 from tutor.domain.errors import FieldError, FieldErrorCode
-from tutor.domain.html_guard import MAX_TEMPLATE_BYTES, TEMPLATE_MARKER
+from tutor.domain.html_guard import MAX_TEMPLATE_BYTES, TEMPLATE_MARKER, marker_comes_first
 from tutor.domain.subjects import collapse_name
 
 TemplatePurpose = Literal["exercise", "display"]
@@ -109,8 +109,8 @@ ANSWER_KINDS: tuple[AnswerKind, ...] = (
 # contract constants, every rendered guide section and every worked-example file. A test
 # recomputes it (tutor.services.template_files.guide_sha256); change both together (plan
 # rulings 21 and 31).
-TEMPLATE_GUIDE_VERSION = 3
-TEMPLATE_CONTRACT_SHA256 = "85ed20e51123370814a393808d4bef126ed9e0a82278c153723b7d2f728ef508"
+TEMPLATE_GUIDE_VERSION = 5
+TEMPLATE_CONTRACT_SHA256 = "df07ba4b17f6997f582d86cfdfcdc67a0b81298c7334a353af4b0c1cc366291e"
 
 # Caps (plan ruling 24; spec 15.3, 15.4). The MCP schemas and migration 0006 restate them.
 NAME_MAX = 80
@@ -1420,10 +1420,11 @@ def encode_payload(payload: Mapping[str, object]) -> str:
 
 def compose_document(template_html: str, payload_json: str, bridge_js: str) -> str:
     """Put the payload inside the marker and the bridge right after it: the only two changes
-    to the template's text. ValueError unless the marker is there exactly once, or when the
-    payload or the bridge could end their element (callers pass validated HTML only)."""
-    if template_html.count(TEMPLATE_MARKER) != 1:
-        raise ValueError("the template must contain the parameter marker exactly once")
+    to the template's text. ValueError unless the marker is there exactly once and comes first
+    (the prefix check of check_template_html, amendments A51 and A52), or when the payload or
+    the bridge could end their element (callers pass validated HTML only)."""
+    if template_html.count(TEMPLATE_MARKER) != 1 or not marker_comes_first(template_html):
+        raise ValueError("the template must contain the parameter marker once, first in <head>")
     if "<" in payload_json or "</script" in bridge_js.lower():
         raise ValueError("payload or bridge would end its script element")
     filled = (

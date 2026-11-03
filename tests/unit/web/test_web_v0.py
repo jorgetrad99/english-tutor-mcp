@@ -124,6 +124,19 @@ def test_pg_web_deps_refuses_the_test_login() -> None:
         pg_web_deps(sqlalchemy.create_engine("sqlite://"), pg_settings(), config)
 
 
+def test_pg_web_deps_accepts_dev_auth() -> None:
+    # Dev login signs in through the real users port (PgWebBackend.sign_in), so Postgres is fine.
+    config = WebConfig(
+        env="dev",
+        base_url="http://localhost:8000",
+        mcp_url="http://localhost:8000/mcp",
+        support_email="soporte@example.test",
+        dev_auth=True,
+    )
+    deps = pg_web_deps(sqlalchemy.create_engine("sqlite://"), pg_settings(), config)
+    assert isinstance(deps.users, PgWebBackend)
+
+
 def test_missing_web_setting_exits_naming_the_key() -> None:
     env = {
         "TUTOR_ENV": "test",

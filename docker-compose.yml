@@ -1,4 +1,11 @@
-# Local development databases only; no app service until after the spike.
+# Local development: the two databases (no profile) and the `dev` profile, which runs the real app
+# from this checkout with hot reload and dev-only bearer tokens (docs/v0/local.md, "Dev profile").
+#   uv run just dev                      = docker compose --profile dev up -d --build --wait app-dev
+#   docker compose up -d --wait db-test    unchanged (uv run just test-int)
+# The dev services set TUTOR_DEV_AUTH=1 (the server refuses it outside loopback dev) and read their
+# secrets from the generated, git-ignored deploy/dev.env (scripts/dev_env.py). Nothing here exists
+# in the production compose files under deploy/ (tests/unit/deploy/test_dev_compose.py). Every
+# published port binds to 127.0.0.1: the databases' superuser is tutor:tutor.
 services:
   db:
     image: postgres:16
@@ -7,7 +14,7 @@ services:
       POSTGRES_PASSWORD: tutor
       POSTGRES_DB: tutor
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -23,7 +30,7 @@ services:
       POSTGRES_PASSWORD: tutor
       POSTGRES_DB: tutor_test
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     tmpfs:
       - /var/lib/postgresql/data
     healthcheck:
@@ -31,6 +38,56 @@ services:
       interval: 2s
       timeout: 3s
       retries: 15
+
+  # One shot, as the owner of `db`: migrations, then the app login role (tutor_login) and the
+  # report role, then the two dev identities (dev-ana onboarded, dev-nuevo not).
+  migrate-dev:
+    profiles: [dev]
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+      target: dev
+    image: tutor:dev
+    pull_policy: build
+    entrypoint:
+      - sh
+      - -c
+      - alembic upgrade head && python -m tutor.ops.provision_roles && python -m tutor.ops.dev_seed
+    restart: "no"
+    env_file: deploy/dev.env
+    environment:
+      TUTOR_DEV_AUTH: "1" # dev_seed refuses without it
+    volumes:
+      - ./src:/src/src
+      - ./alembic:/src/alembic # a new revision applies without a rebuild
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # The app from the bind-mounted ./src (uvicorn --reload, the image's CMD), as the login role.
+  # MCP at http://localhost:8000/mcp with a bearer token (uv run just dev-token); website at
+  # http://localhost:8000/auth/dev-login?as=dev-ana.
+  app-dev:
+    profiles: [dev]
+    image: tutor:dev
+    pull_policy: never # built by migrate-dev
+    env_file: deploy/dev.env
+    environment:
+      TUTOR_DEV_AUTH: "1"
+      # migrate-dev's credentials (same file): blank here, so the running app never holds them.
+      MIGRATION_DATABASE_URL: ""
+      REPORT_DB_PASSWORD: ""
+    volumes:
+      - ./src:/src/src
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      migrate-dev:
+        condition: service_completed_successfully
+
+  # MCP Inspector: not a service. Its v2 refuses to bind a non-loopback host inside a container
+  # without an override flag, so it runs on host Node (uv run just inspector-dev) against
+  # http://localhost:8000/mcp with the bearer token from `just dev-token`.
 
 volumes:
   pgdata:

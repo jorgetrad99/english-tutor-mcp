@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Literal, cast
 from urllib.parse import urlsplit
 
-from tutor.settings import is_loopback, parse_base_url
+from tutor.settings import dev_auth_allowed, dev_auth_flag, is_loopback, parse_base_url
 
 _ENVS = ("dev", "test", "prod")
 MCP_PATH = "/mcp"
@@ -22,6 +22,9 @@ class WebConfig:
     test_login: bool = False
     session_idle_days: int = 14
     session_max_days: int = 30
+    # GET /auth/dev-login for the seeded dev identities (dev-environment design D5); the route is
+    # not registered at all when this is off. Same guard as Settings.dev_auth.
+    dev_auth: bool = False
 
     def __post_init__(self) -> None:
         if self.env not in _ENVS:
@@ -30,6 +33,11 @@ class WebConfig:
             raise ValueError("test login is only allowed with TUTOR_ENV=test")
         if self.test_login and not is_loopback(urlsplit(self.base_url).hostname or ""):
             raise ValueError("test login is only allowed on a loopback TUTOR_BASE_URL")
+        if self.dev_auth and not dev_auth_allowed(self.env, self.base_url):
+            raise ValueError(
+                "TUTOR_DEV_AUTH is only allowed with TUTOR_ENV=dev|test on a loopback "
+                "TUTOR_BASE_URL"
+            )
         if self.mcp_url != self.base_url + MCP_PATH:
             raise ValueError(f"TUTOR_MCP_URL must equal TUTOR_BASE_URL followed by {MCP_PATH}")
 
@@ -51,4 +59,5 @@ class WebConfig:
             mcp_url=environ.get("TUTOR_MCP_URL", "").strip() or base_url + MCP_PATH,
             support_email=support_email,
             test_login=environ.get("TUTOR_TEST_LOGIN") == "1",
+            dev_auth=dev_auth_flag(environ),
         )

@@ -200,7 +200,11 @@ def test_app_and_migrate_build_from_the_checkout() -> None:
     # No shared `image:` name: each builds from the same Dockerfile (cached), nothing is pulled.
     for name in ("migrate", "app"):
         svc = _services()[name]
-        assert svc["build"] == {"context": "..", "dockerfile": "deploy/Dockerfile"}
+        assert svc["build"] == {
+            "context": "..",
+            "dockerfile": "deploy/Dockerfile",
+            "target": "runtime",  # never the dev stage, whatever the Dockerfile's stage order
+        }
         assert "image" not in svc
         assert "pull_policy" not in svc
 

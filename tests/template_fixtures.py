@@ -31,9 +31,9 @@ HIDDEN_REVEAL = "ZQ-HIDDEN-REVEAL"
 LEAKS = (KEY_NAME, REVEAL_NAME, POOL_NAME, HIDDEN_ANSWER, HIDDEN_EXPLAIN, HIDDEN_REVEAL)
 
 HTML = (
-    "<!doctype html><html lang='es'><head><meta charset='utf-8'><title>Plantilla</title>"
-    "<style>button { padding: 4px }</style></head><body><main><p id='q'></p>"
-    f"<button type='button' id='go'>Responder</button>{TEMPLATE_MARKER}"
+    f"<!doctype html><html lang='es'><head><meta charset='utf-8'>{TEMPLATE_MARKER}"
+    "<title>Plantilla</title><style>button { padding: 4px }</style></head><body><main>"
+    "<p id='q'></p><button type='button' id='go'>Responder</button>"
     "<script>var p = JSON.parse(document.getElementById('tutor-params').textContent);"
     "document.getElementById('q').textContent = JSON.stringify(p.params);</script>"
     "</main></body></html>"

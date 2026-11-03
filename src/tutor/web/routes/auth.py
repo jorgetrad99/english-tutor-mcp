@@ -1,4 +1,4 @@
-"""Login with Google, logout, language switch and the test-only login.
+"""Login with Google, logout, language switch, the test-only login and the dev-only login.
 
 Routes that call a data port are plain `def` (FastAPI runs them in a worker thread) or wrap the
 call in `run_in_threadpool`: the Postgres adapters block.
@@ -10,10 +10,11 @@ from dataclasses import replace
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from starlette.concurrency import run_in_threadpool
 
+from tutor.auth.dev_auth import DEV_IDENTITIES, DevSub
 from tutor.domain.dashboard.types import Lang, User
 from tutor.web.config import WebConfig
 from tutor.web.deps import (
@@ -23,7 +24,7 @@ from tutor.web.deps import (
     get_deps,
     require_csrf_if_session,
 )
-from tutor.web.ports import LoginFailed
+from tutor.web.ports import GoogleIdentity, LoginFailed
 from tutor.web.profile import PROFILE_PATH, optional_profiles
 from tutor.web.security import safe_next
 from tutor.web.views import render
@@ -49,12 +50,18 @@ async def google_callback(request: Request) -> Response:
     except LoginFailed:
         ctx = {"next": "", "error": True}
         return await run_in_threadpool(render, request, "pages/login.html", ctx, status_code=400)
+    return await _sign_in(request, identity, stored if isinstance(stored, str) else None)
+
+
+async def _sign_in(request: Request, identity: GoogleIdentity, next_path: str | None) -> Response:
+    """Find or create the user by sub and open the web session; shared by Google and dev login."""
+    deps = get_deps(request)
     # Ports block (Postgres): never call them on the event loop.
     user = await run_in_threadpool(deps.users.sign_in, identity, deps.clock())
     if user.deletion_requested_at is not None:
         request.state.web.logout()  # drop the anonymous login session and its cookie
         return await run_in_threadpool(render, request, "pages/deletion_pending.html")
-    target = safe_next(stored if isinstance(stored, str) else None)
+    target = safe_next(next_path)
     profiles = optional_profiles(request)
     if profiles is not None:
         view = await run_in_threadpool(profiles.view, user.id)
@@ -107,6 +114,24 @@ def test_login(request: Request, user_id: Annotated[UUID, Form()]) -> Response:
     return RedirectResponse("/app/", status_code=303)
 
 
+dev_router = APIRouter()
+
+
+# Dev-environment design D5: one click signs the browser in as a seeded dev identity, through the
+# same `sign_in` as Google. `as` is a closed enum (422 otherwise); GET only, so no CSRF exemption.
+@dev_router.get("/auth/dev-login")
+async def dev_login(request: Request, as_: Annotated[DevSub, Query(alias="as")]) -> Response:
+    who = DEV_IDENTITIES[as_]
+    identity = GoogleIdentity(sub=who.sub, email=who.email, name=who.name, email_verified=True)
+    return await _sign_in(request, identity, None)
+
+
 def routers(config: WebConfig) -> list[APIRouter]:
-    """The test login exists only when the config allows it (TUTOR_ENV=test)."""
-    return [router, app_router, *([test_router] if config.test_login else [])]
+    """The test login exists only with TUTOR_ENV=test; the dev login only with TUTOR_DEV_AUTH.
+    Neither is registered otherwise, so the CSRF walker and the route sweep never see them."""
+    return [
+        router,
+        app_router,
+        *([test_router] if config.test_login else []),
+        *([dev_router] if config.dev_auth else []),
+    ]

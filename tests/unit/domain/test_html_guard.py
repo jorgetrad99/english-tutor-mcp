@@ -338,9 +338,13 @@ def test_problem_is_frozen() -> None:
         problem.detail = "x"  # type: ignore[misc]
 
 
-# --- the template marker (spec 15.5) ------------------------------------------------------------
+# --- the template marker (spec 15.5, amendment A51) --------------------------------------------
 
-MARKED = f"<!doctype html><html><body><p>x</p>{TEMPLATE_MARKER}<script>go()</script></body></html>"
+# The marker is the first content of <head>; the rest of the document comes after it.
+REST = "</head><body><p>x</p><script>go()</script></body></html>"
+META = "<meta charset='utf-8'>"  # required right before the marker (amendment A52)
+MARKED = f"<!doctype html><html><head>{META}{TEMPLATE_MARKER}{REST}"
+MISSING = HtmlProblem("marker_missing", "tutor-params")
 
 
 def test_template_with_one_marker_passes() -> None:
@@ -364,7 +368,7 @@ def test_template_with_one_marker_passes() -> None:
     ],
 )
 def test_marker_rule(html: str) -> None:
-    assert check_template_html(html)[-1] == HtmlProblem("marker_missing", "tutor-params")
+    assert check_template_html(html)[-1] == MISSING
 
 
 # The exact start tag but a different order of attributes, as a real element.
@@ -375,7 +379,7 @@ EXACT_START = '<script type="application/json" id="tutor-params">'
 @pytest.mark.parametrize(
     "html",
     [
-        # The marker text where the parser sees no element, plus a real reordered element.
+        # The marker text where a browser sees no element, plus a real reordered element.
         MARKED.replace(
             TEMPLATE_MARKER, f"<script>var m = '{TEMPLATE_MARKER}';</script>{REORDERED}"
         ),
@@ -401,23 +405,20 @@ EXACT_START = '<script type="application/json" id="tutor-params">'
 )
 def test_marker_must_be_the_real_params_element(html: str) -> None:
     # Security review P3: compose_document fills the first marker text, so that text must be
-    # the one tutor-params element the parser sees, with exactly the marker's start tag.
-    assert check_template_html(html)[-1] == HtmlProblem("marker_missing", "tutor-params")
+    # the one tutor-params element a browser sees, with exactly the marker's start tag.
+    assert check_template_html(html)[-1] == MISSING
 
 
 def test_marker_position_survives_a_bom_and_crlf_lines() -> None:
     crlf = "\r\n"
-    lines = ["<!doctype html>", "<html>", "<body>", "<p>x</p>", f"  {TEMPLATE_MARKER}", "</html>"]
+    lines = ["<!doctype html>", "<html>", "<head>", META, f"  {TEMPLATE_MARKER}", "</head>"]
     html = chr(0xFEFF) + crlf.join(lines)
     assert check_template_html(html) == ()
 
 
 def test_marker_problem_comes_after_the_html_problems() -> None:
     html = MARKED.replace("<p>x</p>", "<iframe></iframe>").replace(TEMPLATE_MARKER, "")
-    assert check_template_html(html) == (
-        HtmlProblem("tag_forbidden", "iframe"),
-        HtmlProblem("marker_missing", "tutor-params"),
-    )
+    assert check_template_html(html) == (HtmlProblem("tag_forbidden", "iframe"), MISSING)
 
 
 def test_oversized_template_reports_too_large_alone() -> None:
@@ -430,71 +431,266 @@ def test_oversized_template_reports_too_large_alone() -> None:
     assert check_template_html(fits) == ()
 
 
-# --- the marker under an inert element (security re-review P3, plan ruling 43) -----------------
-
-INERT = (
-    "template",
-    "noscript",
-    "plaintext",
-    "textarea",
-    "title",
-    "xmp",
-    "noembed",
-    "iframe",
-    "noframes",
-    "style",
-)
+# --- the marker must open <head> (security pass, amendment A51) --------------------------------
+#
+# html.parser does not match a browser, so no parser decides where the marker is: only a
+# doctype, <html> and <head>, then the required <meta charset>, may precede it, in that order,
+# with ASCII whitespace between. Everything below breaks that prefix and is refused.
 
 
-@pytest.mark.parametrize("tag", INERT)
-def test_marker_inside_an_inert_element_is_refused(tag: str) -> None:
-    # A browser never runs (or never even parses as a script) what sits inside these, so the
-    # marker there would not be the params element the bridge reads.
-    html = MARKED.replace(TEMPLATE_MARKER, f"<{tag}>{TEMPLATE_MARKER}</{tag}>")
-    assert check_template_html(html)[-1] == HtmlProblem("marker_missing", "tutor-params")
+def before_marker(prefix: str, start: str = f"<!doctype html><html><head>{META}") -> str:
+    return f"{start}{prefix}{TEMPLATE_MARKER}{REST}"
 
 
 @pytest.mark.parametrize(
-    "wrapped",
+    "prefix",
     [
-        f"<template><div><p>{TEMPLATE_MARKER}</p></div></template>",  # a deeper ancestor
-        f"<TEMPLATE>{TEMPLATE_MARKER}</TEMPLATE>",  # tag names are case-insensitive
-        f"<plaintext>{TEMPLATE_MARKER}",  # plaintext never closes
-        f"<noscript><div></noscript-x>{TEMPLATE_MARKER}</div></noscript>",  # unknown end tag
-        f"<textarea/>{TEMPLATE_MARKER}",  # a browser ignores the slash on a non-void element
-        f"<style/>{TEMPLATE_MARKER}",
-        f"<script/>{TEMPLATE_MARKER}",  # the marker would be the open script's text
+        # End tags that html.parser lets pop the stack past an inert element.
+        "<div><textarea></div>",
+        "<div><template></div>",
+        "<plaintext></plaintext>",
+        "<p><noscript></p>",
+        # Markup html.parser reads differently from a browser.
+        "<template></ template>",
+        "<!-->",
+        "<!--->",
+        "<!-- a -- >",
+        "<!-- a --!>",
+        "<![CDATA[x]]>",
+        "<![CDATA[",
     ],
     ids=[
-        "nested",
-        "uppercase",
-        "plaintext-open",
-        "unknown-end",
-        "self-closing",
-        "style-self-closing",
-        "script-self-closing",
+        "textarea-popped",
+        "template-popped",
+        "plaintext-closed",
+        "noscript-popped",
+        "spaced-end-tag",
+        "comment-abrupt",
+        "comment-abrupt-dash",
+        "comment-spaced-close",
+        "comment-bang-close",
+        "cdata",
+        "cdata-open",
     ],
 )
-def test_marker_under_an_open_inert_ancestor_is_refused(wrapped: str) -> None:
-    html = MARKED.replace(TEMPLATE_MARKER, wrapped)
-    assert check_template_html(html)[-1] == HtmlProblem("marker_missing", "tutor-params")
+def test_parser_differential_exploits_before_the_marker_are_refused(prefix: str) -> None:
+    assert check_template_html(before_marker(prefix))[-1] == MISSING
 
 
 @pytest.mark.parametrize(
-    "before",
+    "prefix",
     [
+        "<svg></svg>",
+        "<svg><style></style></svg>",
+        "<svg><title>t</title></svg>",
+        "<svg><![CDATA[x]]></svg>",
+        "<math><mi>x</mi></math>",
+        "<math><mtext><textarea></textarea></mtext></math>",
+        "<!-- note -->",
+        "<!---->",
+        "<!-- <script> -->",
+        "<!>",
+        "<?xml version='1.0'?>",
+    ],
+)
+def test_svg_math_and_comments_before_the_marker_are_refused(prefix: str) -> None:
+    assert check_template_html(before_marker(prefix))[-1] == MISSING
+
+
+@pytest.mark.parametrize(
+    "html",
+    [
+        before_marker("x"),  # text
+        before_marker("", start="<!doctype html><html><head>"),  # no meta charset (A52)
+        before_marker("", start="<!doctype html><html><head>\n"),
+        before_marker("", start=""),
+        before_marker("<head>", start="<!doctype html><html>"),
+        before_marker("<title>t</title>"),
+        before_marker('<meta name="viewport" content="width=device-width">'),
+        before_marker("<style></style>"),
+        before_marker("<script></script>"),
+        before_marker("<template></template>"),
+        before_marker("<noscript></noscript>"),
+        before_marker("<textarea></textarea>"),
+        before_marker("<br>"),
+        before_marker("<meta charset='utf-8'><meta charset='utf-8'>"),  # twice
+        before_marker("", start="<!doctype html><head><html>"),  # out of order
+        before_marker("", start="<!doctype html><!doctype html>"),
+        before_marker("", start="<!doctype html public '-//W3C//DTD HTML 4.01//EN'>"),
+        before_marker("", start="<!doctype html><head lang='es'>"),  # head takes no attributes
+        before_marker("", start="<!doctype html><html lang='a>b'>"),
+        before_marker("", start='<!doctype html><html lang="<script>">'),
+        before_marker("", start="<!doctype html><html/>"),
+        before_marker("", start="<!doctype html><html><body>"),
+        before_marker("", start="<!doctype html>" + chr(0xA0) + "<html>"),  # not ASCII space
+        before_marker("", start="<!doctype html><html>" + chr(0x2003)),
+        before_marker("", start="<!doctype html><meta charset='utf-8' http-equiv='x'>"),
+        before_marker("", start="<!doctype html><meta char" + chr(0x17F) + "et='utf-8'>"),
+        before_marker("", start="<!doctype html><meta charset=''>"),
+        before_marker("", start="<!doctype html><meta charset='windows-1252'>"),  # only utf-8
+        # A browser reads an unquoted value up to whitespace or `>`: this charset is `utf-8/`.
+        before_marker("", start="<!doctype html><meta charset=utf-8/>"),
+        before_marker("", start="<!doctype html><meta charset=utf-8//>"),
+        before_marker("", start=chr(0xFEFF) + chr(0xFEFF) + "<!doctype html>"),
+        f"<!doctype html><html><body><p>x</p>{TEMPLATE_MARKER}</body></html>",  # in the body
+    ],
+)
+def test_anything_else_before_the_marker_is_refused(html: str) -> None:
+    assert check_template_html(html)[-1] == MISSING
+
+
+@pytest.mark.parametrize(
+    "start",
+    [
+        f"<!doctype html>{META}",
+        f"<!DOCTYPE html>{META}",
+        f"<!DocType HTML>{META}",
+        f"<!doctype html><html>{META}",
+        f"<HTML LANG=ES>{META}",
+        f"<html lang='es' dir=rtl data-theme=\"dark\" hidden>{META}",
+        '<!doctype html>\n<html lang="es">\n<head>\n<meta charset="utf-8">\n',
+        f"<!doctype html><head>{META}",
+        "<!doctype html><meta charset=utf-8>",
+        "<!doctype html><meta charset=utf-8 />",
+        "<!doctype html><meta charset=utf-8\t>",
+        "<!doctype html><meta charset='utf-8'/>",
+        "<!doctype html><html><head><meta charset='UTF-8' />",
+        '<!doctype html><html><HEAD><META CHARSET="utf-8">',
+        chr(0xFEFF) + f"<!doctype html>\r\n<html>\r\n<head>\r\n{META}\r\n",
+        f" \t\n\f\r<!doctype html> \t<html >\n\n<head>\t{META}\t",
+    ],
+)
+def test_legal_prefixes_are_accepted(start: str) -> None:
+    assert check_template_html(f"{start}{TEMPLATE_MARKER}{REST}") == ()
+
+
+@pytest.mark.parametrize("start", [META, f"<head>{META}"])
+def test_a_marker_first_fragment_only_lacks_the_doctype(start: str) -> None:
+    html = f"{start}{TEMPLATE_MARKER}{REST}"
+    assert check_template_html(html) == (HtmlProblem("not_document", "doctype"),)
+
+
+@pytest.mark.parametrize("start", ["", "<head>"])
+def test_a_fragment_without_the_meta_lacks_the_doctype_and_the_marker(start: str) -> None:
+    html = f"{start}{TEMPLATE_MARKER}{REST}"
+    assert check_template_html(html) == (HtmlProblem("not_document", "doctype"), MISSING)
+
+
+# --- one meta charset, the prefix one (security re-review P3, amendment A52) -------------------
+#
+# Bytes served without a charset leave the encoding tentative, so a later <meta charset> can
+# make a browser re-decode the page. No parser decides where a meta is: after the prefix, the
+# word `charset` may not appear at all, in any case.
+
+CHARSET_FORBIDDEN = HtmlProblem("tag_forbidden", "meta[charset]")
+
+
+@pytest.mark.parametrize(
+    "after",
+    [
+        "<meta charset='windows-1252'>",
+        "<meta charset='utf-8'>",  # even the same one
+        "<META CHARSET=ISO-2022-JP>",
+        "<meta name='x>' charset='windows-1252'>",
+        "<meta name='x' content='a' charset=utf-16>",
+        "<svg><meta charset='windows-1252'/></svg>",
+        "<!-- a --!><meta charset='windows-1252'>",
+        "<![CDATA[<meta charset='windows-1252'>",
+    ],
+)
+def test_a_second_meta_charset_is_refused(after: str) -> None:
+    for html in (
+        MARKED.replace("<p>x</p>", f"<p>x</p>{after}"),
+        MARKED.replace(f"{TEMPLATE_MARKER}</head>", f"{TEMPLATE_MARKER}{after}</head>"),
+    ):
+        assert CHARSET_FORBIDDEN in check_template_html(html), html
+
+
+def test_the_prefix_meta_alone_is_not_a_second_one() -> None:
+    assert check_template_html(MARKED) == ()
+    assert check_html(doc()) == ()  # check_html keeps no charset rule: HEAD has a meta
+
+
+@pytest.mark.parametrize(
+    "after",
+    [
+        "<title>t</title><style>p { color: red }</style>",
         "<template><p>row</p></template>",
         "<noscript>Enable scripts</noscript>",
         "<textarea>notes</textarea>",
-        "<template><div></template>",  # the end tag closes what the template left open
-        "<br/><img alt='x'><input>",  # void elements open nothing
+        "<template><div></template>",
+        "<!-- a comment -->",
+        "<svg><title>t</title></svg><math><mi>x</mi></math>",
+        "<br/><img alt='x'><input>",
     ],
 )
-def test_closed_inert_elements_before_the_marker_are_fine(before: str) -> None:
-    html = MARKED.replace("<p>x</p>", f"<p>x</p>{before}")
+def test_anything_may_follow_the_marker(after: str) -> None:
+    html = MARKED.replace("<p>x</p>", f"<p>x</p>{after}")
     assert check_template_html(html) == ()
 
 
-def test_title_in_the_head_does_not_hide_a_body_marker() -> None:
-    html = doc(f"<p>x</p>{TEMPLATE_MARKER}<script>go()</script>")
-    assert check_template_html(html) == ()
+# --- raw scans behind the parser (security re-review P3, amendment A52) ------------------------
+#
+# html.parser reads some comments and CDATA differently from a browser, so markup after the
+# marker could hide from it. A raw, case-insensitive scan of the whole text also refuses
+# `http-equiv` anywhere, `tutor-bridge` anywhere and a second `id=tutor-params`.
+
+DIFFERENTIALS = ("<!-- a --!>", "<!--->", "</ template>", "<![CDATA[")
+DIFFERENTIAL_IDS = ("comment-bang-close", "comment-abrupt-dash", "spaced-end-tag", "cdata-open")
+
+
+def after_differential(differential: str, item: str) -> str:
+    return MARKED.replace("<p>x</p>", f"<p>x</p>{differential}{item}")
+
+
+@pytest.mark.parametrize("differential", DIFFERENTIALS, ids=DIFFERENTIAL_IDS)
+@pytest.mark.parametrize(
+    "item",
+    [
+        '<meta http-equiv="refresh" content="0">',
+        "<META HTTP-EQUIV=Content-Security-Policy content='default-src *'>",
+    ],
+    ids=["refresh", "csp-upper"],
+)
+def test_http_equiv_after_a_parser_differential_is_refused(differential: str, item: str) -> None:
+    html = after_differential(differential, item)
+    assert HtmlProblem("tag_forbidden", "meta[http-equiv]") in check_html(html)
+    assert HtmlProblem("tag_forbidden", "meta[http-equiv]") in check_template_html(html)
+
+
+@pytest.mark.parametrize("differential", DIFFERENTIALS, ids=DIFFERENTIAL_IDS)
+@pytest.mark.parametrize(
+    "item",
+    [
+        '<p id="tutor-bridge">x</p>',
+        "<script id=TUTOR-BRIDGE>window.tutorSubmit = 0;</script>",
+        '<div id="tutor-params"></div>',
+        "<div ID = 'Tutor-Params'></div>",
+        '<div id="tutor&#45;params"></div>',  # a browser decodes the reference
+        '<script type="application/json" id="tutor-params">{"v":0}</script>',
+    ],
+    ids=["bridge", "bridge-upper", "params", "params-spaced", "params-entity", "params-script"],
+)
+def test_reserved_ids_after_a_parser_differential_are_refused(differential: str, item: str) -> None:
+    assert check_template_html(after_differential(differential, item))[-1] == MISSING
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["tutor-bridge", "TUTOR&#45;BRIDGE", "var b = document.getElementById('tutor-bridge');"],
+)
+def test_tutor_bridge_is_refused_anywhere(text: str) -> None:
+    assert check_template_html(MARKED.replace("<p>x</p>", f"<p>{text}</p>"))[-1] == MISSING
+
+
+def test_http_equiv_is_refused_anywhere_even_as_text() -> None:
+    html = MARKED.replace("<p>x</p>", "<p>http-equiv</p>")
+    assert check_html(html) == (HtmlProblem("tag_forbidden", "meta[http-equiv]"),)
+
+
+def test_reading_the_params_element_by_id_is_not_a_second_one() -> None:
+    script = (
+        "<script>var p = JSON.parse(document.getElementById('tutor-params').textContent);"
+        'var q = document.getElementById("tutor-params");</script>'
+    )
+    assert check_template_html(MARKED.replace("<p>x</p>", script)) == ()
