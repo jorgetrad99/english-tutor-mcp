@@ -49,6 +49,7 @@ from tutor.domain.templates import (
     param_specs_to_json,
     parse_answer,
     parse_number,
+    permutation,
     pool_size,
     public_params,
     public_payload,
@@ -744,6 +745,39 @@ def test_draws_are_deterministic_distinct_and_never_in_the_right_order(seed: int
     assert draw(ok(STEPS), steps, seed).order != (0, 1, 2)  # never the key order
     flash = params_ok(ok(FLASHCARD), ParamPair("deck", "pool", entries(3)))
     assert 0 <= draw(ok(FLASHCARD), flash, seed).entries[0] < 3
+
+
+@given(st.integers(min_value=-(2**63), max_value=2**63 - 1))
+def test_a_draw_avoids_entries_while_unused_ones_remain(seed: int) -> None:
+    # Slice B: within one session a pool entry is not asked twice while others remain.
+    flash = params_ok(ok(FLASHCARD), ParamPair("deck", "pool", entries(5)))
+    assert draw(ok(FLASHCARD), flash, seed, avoid=frozenset({0, 1, 2, 3})).entries == (4,)
+    every = frozenset(range(5))
+    assert draw(ok(FLASHCARD), flash, seed, avoid=every) == draw(ok(FLASHCARD), flash, seed)
+    choices = params_ok(ok(CHOICE_POOL), ParamPair("deck", "pool", entries(6)))
+    asked = draw(ok(CHOICE_POOL), choices, seed, avoid=frozenset({0, 1, 2, 3, 4}))
+    assert asked.entries[0] == 5 and len(set(asked.entries)) == 4
+    timeline = params_ok(ok(TIMELINE), ParamPair("deck", "pool", entries(6, ordered=True)))
+    shown = draw(ok(TIMELINE), timeline, seed, avoid=frozenset({0, 1}))
+    assert set(shown.entries) <= {2, 3, 4, 5} and len(set(shown.entries)) == 4
+    partly = draw(ok(TIMELINE), timeline, seed, avoid=frozenset({0, 1, 2, 3}))
+    assert {4, 5} <= set(partly.entries) and len(set(partly.entries)) == 4
+
+
+def test_an_empty_avoid_set_keeps_the_pinned_draws() -> None:
+    flash = params_ok(ok(FLASHCARD), ParamPair("deck", "pool", entries(10)))
+    choices = params_ok(ok(CHOICE_POOL), ParamPair("deck", "pool", entries(10)))
+    timeline = params_ok(ok(TIMELINE), ParamPair("deck", "pool", entries(10, ordered=True)))
+    assert draw(ok(FLASHCARD), flash, 42, avoid=frozenset()) == PINNED["flash"]
+    assert draw(ok(CHOICE_POOL), choices, 42, avoid=frozenset()) == PINNED["choices"]
+    assert draw(ok(TIMELINE), timeline, 42, avoid=frozenset()) == PINNED["timeline"]
+
+
+def test_permutation_is_seeded_and_complete() -> None:
+    assert permutation(0, 7) == ()
+    assert sorted(permutation(9, 7)) == list(range(9))
+    assert permutation(9, 7) == permutation(9, 7)
+    assert permutation(9, 7) != permutation(9, 8)
 
 
 @given(st.integers(min_value=-(2**63), max_value=2**63 - 1))

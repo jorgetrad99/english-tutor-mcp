@@ -1314,15 +1314,30 @@ def _not(order: list[int], forbidden: tuple[int, ...]) -> tuple[int, ...]:
     return tuple(order)
 
 
-def draw(spec: TemplateSpec, params: Mapping[str, object], seed: int) -> Draw:
-    """What one showing presents (spec 15.4.1): picked pool entries and the order shown."""
+def permutation(size: int, seed: int) -> tuple[int, ...]:
+    """A seeded shuffle of `range(size)` by the same fixed generator as `draw`."""
+    return tuple(_SplitMix64(seed).permutation(size))
+
+
+def draw(
+    spec: TemplateSpec,
+    params: Mapping[str, object],
+    seed: int,
+    avoid: frozenset[int] = frozenset(),
+) -> Draw:
+    """What one showing presents (spec 15.4.1): picked pool entries and the order shown.
+
+    `avoid` holds pool entries already asked in the same practice session: the asked entry
+    (`one`, `one_of_choices`) comes from the others, and an ordering takes the others first,
+    while any remain (slice B). An empty set, or one that covers the pool, draws as before."""
     rng = _SplitMix64(seed)
     entries = _pool_entries(spec, params)
     count = spec.pool_count or 0
+    fresh = [i for i in range(len(entries)) if i not in avoid] or list(range(len(entries)))
     if spec.pool_draw == "one" and entries:
-        return Draw(entries=(rng.below(len(entries)),))
+        return Draw(entries=(fresh[rng.below(len(fresh))],))
     if spec.pool_draw == "one_of_choices" and entries:
-        first = rng.below(len(entries))
+        first = fresh[rng.below(len(fresh))]
         picked = [first]
         seen = {normalise_answer(str(entries[first]["answer"]), "fold_all")}
         for index in rng.permutation(len(entries)):
@@ -1334,7 +1349,9 @@ def draw(spec: TemplateSpec, params: Mapping[str, object], seed: int) -> Draw:
                 picked.append(index)
         return Draw(entries=tuple(picked), order=tuple(rng.permutation(len(picked))))
     if spec.pool_draw == "ordered" and entries:
-        picked = rng.permutation(len(entries))[:count]
+        fresh_set = set(fresh)
+        mixed = rng.permutation(len(entries))
+        picked = sorted(mixed, key=lambda i: i not in fresh_set)[:count]  # stable: fresh first
         shown = rng.permutation(len(picked))
         right = tuple(sorted(range(len(picked)), key=lambda k: entries[picked[k]]["order"]))
         return Draw(entries=tuple(picked), order=_not(shown, right))
