@@ -121,6 +121,15 @@ def test_choosing_exercises_carries_the_decision_path() -> None:
     assert "get_template_guide('contract')" in text and "yes" in text
 
 
+def test_the_guide_says_its_examples_are_illustrations_and_the_contract_is_neutral() -> None:
+    # Plan ruling 40: the worked examples keep their fields on purpose; the guide says so
+    # where it introduces them, and that the contract itself names no field.
+    text = guide_section("choosing_exercises")
+    assert "illustrations from different fields" in text
+    assert "the contract itself is field-neutral" in text
+    assert TEMPLATE_GUIDE_VERSION == 3
+
+
 def test_inline_guide_is_the_decision_path_only_and_fits_the_cap() -> None:
     # Contract review: the contract is read after the learner's yes, before writing HTML.
     text = inline_guide()

@@ -12,4 +12,4 @@ Works for any subject. The server grades; you write templates, only after the le
 
 Practice kind (derived by the server): {{PRACTICE_KINDS}}.
 
-After the learner's yes, and before writing any HTML, read get_template_guide('contract'): it holds the parameter types, the grading kinds with their answer shapes, the pool draws and the sandbox rules. The worked examples are further sections of get_template_guide.
+After the learner's yes, and before writing any HTML, read get_template_guide('contract'): it holds the parameter types, the grading kinds with their answer shapes, the pool draws and the sandbox rules. The worked examples are further sections of get_template_guide; they are illustrations from different fields (language, math, history, music), chosen to show one contract applied to very different subjects, and the contract itself is field-neutral.
