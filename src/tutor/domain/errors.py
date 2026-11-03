@@ -1,8 +1,8 @@
 """Field errors the domain returns instead of raising (plan ruling 13).
 
 A validator returns its value or a tuple of `FieldError`; the service turns the tuple into a
-`ServiceError` with the field paths. `field` is a path such as `notes[2].quiz_items[0].options`,
-never a value.
+`ServiceError` with the field paths. `field` is a path such as
+`notes[2].instances[0].params[1].pool[7].answer`, never a value.
 """
 
 from dataclasses import dataclass
@@ -15,6 +15,7 @@ FieldErrorCode = Literal[
     "too_many",
     "out_of_range",
     "invalid",
+    "stale",  # an out-of-date version, such as save_template.guide_version (plan ruling 21)
 ]
 
 

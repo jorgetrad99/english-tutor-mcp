@@ -1,4 +1,4 @@
-"""Artifact HTML guard (subjects spec 4.4): a deny list over the standard-library parser.
+"""Template HTML guard (subjects spec 4.4, 15.5): a deny list over the standard-library parser.
 
 Hygiene only: the sandbox (`Content-Security-Policy: sandbox allow-scripts`, `<iframe sandbox>`)
 is the security boundary (spec 10). Problems name the tag or attribute, never the content.
@@ -10,12 +10,13 @@ from html.parser import HTMLParser
 from typing import Literal
 
 # UTF-8 bytes; leaves room for JSON escaping inside the 64 KB request body (BodySizeGuard).
-# The database CHECK (49,152 bytes, migration 0006) is only a backstop.
-MAX_ARTIFACT_BYTES = 40_000
-ARTIFACT_TITLE_MAX = 200
+# Migration 0006 checks the same number on exercise_templates.bytes.
+MAX_TEMPLATE_BYTES = 40_000
 
-ArtifactKind = Literal["lesson_view", "exercise_view", "other"]
-ARTIFACT_KINDS: tuple[ArtifactKind, ...] = ("lesson_view", "exercise_view", "other")
+# The one empty element a template must contain: the server puts the parameters (as JSON) in it
+# and its bridge script right after it (spec 15.5).
+TEMPLATE_MARKER = '<script type="application/json" id="tutor-params"></script>'
+_RESERVED_IDS = frozenset({"tutor-params", "tutor-bridge"})
 
 HtmlProblemCode = Literal[
     "too_large",
@@ -24,6 +25,7 @@ HtmlProblemCode = Literal[
     "attr_forbidden",
     "url_forbidden",
     "css_forbidden",
+    "marker_missing",
 ]
 
 
@@ -61,6 +63,7 @@ class _Guard(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.problems: list[HtmlProblem] = []
         self._style: list[str] | None = None
+        self.reserved_ids: list[str] = []  # tutor-params / tutor-bridge elements, in order
 
     def _add(self, code: HtmlProblemCode, detail: str) -> None:
         problem = HtmlProblem(code, detail)
@@ -68,6 +71,7 @@ class _Guard(HTMLParser):
             self.problems.append(problem)
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.reserved_ids += [v for n, v in attrs if n == "id" and v in _RESERVED_IDS]
         if tag in _FORBIDDEN_TAGS:
             self._add("tag_forbidden", tag)
             return
@@ -129,11 +133,27 @@ def check_html(html: str) -> tuple[HtmlProblem, ...]:
     `doctype`; tag problems carry the tag (`meta[http-equiv]` for a meta refresh); attribute and
     inline-style problems carry `tag[attr]`; a `<style>` element carries `style`.
     """
-    if len(html.encode("utf-8", "surrogatepass")) > MAX_ARTIFACT_BYTES:
-        return (HtmlProblem("too_large", "html"),)
+    return _check(html)[0]
+
+
+def _check(html: str) -> tuple[tuple[HtmlProblem, ...], tuple[str, ...]]:
+    if len(html.encode("utf-8", "surrogatepass")) > MAX_TEMPLATE_BYTES:
+        return (HtmlProblem("too_large", "html"),), ()
     guard = _Guard()
     if not _DOCUMENT_START.match(html.lstrip(_BOM)):
         guard.problems.append(HtmlProblem("not_document", "doctype"))
     guard.feed(html)
     guard.close()
-    return tuple(guard.problems)
+    return tuple(guard.problems), tuple(guard.reserved_ids)
+
+
+def check_template_html(html: str) -> tuple[HtmlProblem, ...]:
+    """`check_html` plus the marker rule (spec 15.5): exactly one empty
+    `<script type="application/json" id="tutor-params"></script>` and no other element with id
+    `tutor-params` or `tutor-bridge`; otherwise `marker_missing` (detail `tutor-params`)."""
+    problems, reserved = _check(html)
+    if problems and problems[0].code == "too_large":
+        return problems
+    if html.count(TEMPLATE_MARKER) != 1 or reserved != ("tutor-params",):
+        return (*problems, HtmlProblem("marker_missing", "tutor-params"))
+    return problems

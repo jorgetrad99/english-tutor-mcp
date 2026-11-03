@@ -55,7 +55,7 @@ def fields_of(value: SubjectInput) -> tuple[str, ...]:
 
 def test_enums_are_closed_tuples() -> None:
     assert PREFERENCES == ("practice_first", "theory_first", "balanced")
-    assert EXERCISE_KINDS == ("quiz", "ear", "exercise")
+    assert EXERCISE_KINDS == ("quiz", "drill", "exercise")
     assert SUBJECT_STATUSES == ("active", "paused", "archived")
     assert DEFAULT_EXERCISE_KINDS == ("quiz", "exercise")
     assert (NAME_MAX, GOAL_TEXT_MAX, CONTEXT_TEXT_MAX) == (80, 300, 600)
@@ -83,7 +83,7 @@ def test_every_field_is_kept_when_given() -> None:
             goal_text="  Tocar en la boda de mi hermana.  ",
             context_text="Dos meses con el curso de Justin.",
             preference="practice_first",
-            exercise_kinds=["ear"],
+            exercise_kinds=["drill"],
             minutes_per_session=10,
             sessions_per_week=7,
             target_date=target,
@@ -93,7 +93,7 @@ def test_every_field_is_kept_when_given() -> None:
     assert subject.goal_text == "Tocar en la boda de mi hermana."
     assert subject.context_text == "Dos meses con el curso de Justin."
     assert subject.preference == "practice_first"
-    assert subject.exercise_kinds == ("ear",)
+    assert subject.exercise_kinds == ("drill",)
     assert (subject.minutes_per_session, subject.sessions_per_week) == (10, 7)
     assert subject.target_date == target
     assert subject.status == "paused"
@@ -108,7 +108,7 @@ def test_empty_exercise_kinds_take_the_default() -> None:
 
 
 def test_exercise_kinds_are_stored_in_canonical_order() -> None:
-    assert ok(raw(exercise_kinds=["exercise", "ear", "quiz"])).exercise_kinds == EXERCISE_KINDS
+    assert ok(raw(exercise_kinds=["exercise", "drill", "quiz"])).exercise_kinds == EXERCISE_KINDS
 
 
 def test_optional_texts_empty_become_none() -> None:
@@ -151,8 +151,9 @@ def test_boundaries_are_allowed() -> None:
         ({"preference": ""}, "preference"),
         ({"preference": "random"}, "preference"),
         ({"exercise_kinds": ["karaoke"]}, "exercise_kinds"),
+        ({"exercise_kinds": ["ear"]}, "exercise_kinds"),  # replaced by drill (spec 15.13 D1)
         ({"exercise_kinds": ["quiz", "quiz"]}, "exercise_kinds"),
-        ({"exercise_kinds": ["quiz", "ear", "exercise", "quiz"]}, "exercise_kinds"),
+        ({"exercise_kinds": ["quiz", "drill", "exercise", "quiz"]}, "exercise_kinds"),
         ({"minutes_per_session": MINUTES_MIN - 1}, "minutes_per_session"),
         ({"minutes_per_session": MINUTES_MAX + 1}, "minutes_per_session"),
         ({"sessions_per_week": SESSIONS_MIN - 1}, "sessions_per_week"),
@@ -258,3 +259,15 @@ def test_subject_question_texts_are_filled_in_both_languages() -> None:
             texts = (option.label_es, option.label_en, option.description_es, option.description_en)
             assert all(t.strip() for t in texts)
             assert all(len(t) <= 120 for t in texts)
+
+
+def test_kinds_question_is_domain_neutral() -> None:
+    # Spec 3.2 amended by 15: `drill` (varied review from a list) replaces music ear training.
+    kinds = next(q for q in SUBJECT_QUESTIONS if q.id == "kinds")
+    assert "repaso variado" in kinds.prompt_es and "varied review" in kinds.prompt_en
+    texts = [kinds.prompt_es, kinds.prompt_en]
+    for option in kinds.options or ():
+        texts += [option.label_es, option.label_en, option.description_es, option.description_en]
+    assert not any(word in text.lower() for text in texts for word in ("oído", "ear ", "música"))
+    drill = next(o for o in kinds.options or () if o.value == "drill")
+    assert drill.label_es == "Repaso variado"

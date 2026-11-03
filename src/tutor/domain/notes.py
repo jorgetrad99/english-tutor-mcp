@@ -11,21 +11,14 @@ from uuid import UUID
 
 from tutor.domain.errors import FieldError, FieldErrorCode
 from tutor.domain.subjects import collapse_name
+from tutor.domain.templates import MAX_INSTANCES, PROMPT_TEXT_MAX, ParamPair
 
 SourceKind = Literal["course", "pdf", "text", "url", "other"]
 LinkKind = Literal["prerequisite", "related"]
-NoteExerciseKind = Literal["technique", "repertoire", "theory", "ear", "other"]
 Origin = Literal["mcp", "web"]
 
 SOURCE_KINDS: tuple[SourceKind, ...] = ("course", "pdf", "text", "url", "other")
 LINK_KINDS: tuple[LinkKind, ...] = ("prerequisite", "related")
-NOTE_EXERCISE_KINDS: tuple[NoteExerciseKind, ...] = (
-    "technique",
-    "repertoire",
-    "theory",
-    "ear",
-    "other",
-)
 ORIGINS: tuple[Origin, ...] = ("mcp", "web")
 
 # Caps (plan ruling 10); the MCP schemas and the migration restate them.
@@ -36,8 +29,7 @@ MAX_WEB_NOTE_CHARS = 400_000
 MAX_CALL_CHARS = 16_000
 MAX_CONCEPTS = 12
 MAX_LINKS = 12
-MAX_EXERCISES = 10
-MAX_QUIZ_ITEMS = 10
+# MAX_INSTANCES (12 per note) lives in tutor.domain.templates (plan ruling 24).
 MAX_SEARCH_LIMIT = 10
 DEFAULT_SEARCH_LIMIT = 5
 QUERY_MAX = 200
@@ -48,17 +40,6 @@ LESSON_REF_MAX = 120
 SOURCE_TITLE_MAX = 200
 URL_MAX = 2000
 CONCEPT_NAME_MAX = 80
-EXERCISE_NAME_MAX = 120
-INSTRUCTIONS_MAX = 2000
-TEMPO_MIN = 20
-TEMPO_MAX = 300
-DURATION_MIN = 1
-DURATION_MAX = 120
-QUESTION_MAX = 500
-OPTION_MAX = 200
-MIN_OPTIONS = 2
-MAX_OPTIONS = 5
-EXPLANATION_MAX = 500
 
 PASSAGE_TARGET = 1200
 PASSAGE_HARD = 2000
@@ -255,21 +236,15 @@ class ConceptLinkInput:
 
 
 @dataclass(frozen=True, slots=True)
-class ExerciseInput:
-    name: str
-    instructions: str
-    kind: str
-    tempo_bpm: int | None = None
-    duration_min: int | None = None
+class InstanceInput:
+    """One instance of a subject's template (spec 15.4). Its parameters are checked against the
+    template by the service (plan ruling 23); here only the shape around them."""
 
-
-@dataclass(frozen=True, slots=True)
-class QuizItemInput:
-    question: str
-    options: Sequence[str]
-    answer_index: int
-    explanation: str | None = None
+    template_id: UUID | str
+    params: Sequence[ParamPair]
+    prompt_text: str
     concept: str | None = None
+    replaces_instance_id: UUID | str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -280,8 +255,7 @@ class NoteInput:
     raw_text: str
     concepts: Sequence[str] = ()
     links: Sequence[ConceptLinkInput] = ()
-    exercises: Sequence[ExerciseInput] = ()
-    quiz_items: Sequence[QuizItemInput] = ()
+    instances: Sequence[InstanceInput] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -307,21 +281,12 @@ class ConceptLink:
 
 
 @dataclass(frozen=True, slots=True)
-class Exercise:
-    name: str
-    instructions: str
-    kind: NoteExerciseKind
-    tempo_bpm: int | None
-    duration_min: int | None
-
-
-@dataclass(frozen=True, slots=True)
-class QuizItem:
-    question: str
-    options: tuple[str, ...]
-    answer_index: int
-    explanation: str | None
+class ValidInstance:
+    template_id: UUID
+    params: tuple[ParamPair, ...]
+    prompt_text: str
     concept: ConceptName | None
+    replaces_instance_id: UUID | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -339,8 +304,7 @@ class ValidNote:
     passages: tuple[str, ...]
     concepts: tuple[ConceptName, ...]
     links: tuple[ConceptLink, ...]
-    exercises: tuple[Exercise, ...]
-    quiz_items: tuple[QuizItem, ...]
+    instances: tuple[ValidInstance, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -371,10 +335,6 @@ def _is_source_kind(value: str) -> TypeGuard[SourceKind]:
 
 def _is_link_kind(value: str) -> TypeGuard[LinkKind]:
     return value in LINK_KINDS
-
-
-def _is_exercise_kind(value: str) -> TypeGuard[NoteExerciseKind]:
-    return value in NOTE_EXERCISE_KINDS
 
 
 Errors = list[FieldError]
@@ -414,15 +374,6 @@ def _optional_text(value: str | None, limit: int, field: str, errors: Errors) ->
     text = (value or "").strip()
     _length(text, limit, field, errors, required=False)
     return text if text and len(text) <= limit else None
-
-
-def _optional_range(
-    value: int | None, low: int, high: int, field: str, errors: Errors
-) -> int | None:
-    if value is not None and not low <= value <= high:
-        _fail(errors, field, "out_of_range")
-        return None
-    return value
 
 
 def _concept(value: str, field: str, errors: Errors) -> ConceptName | None:
@@ -479,35 +430,31 @@ def _links(
     return tuple(links.values())
 
 
-def _exercise(data: ExerciseInput, path: str, errors: Errors) -> Exercise | None:
-    name = _name(data.name, EXERCISE_NAME_MAX, f"{path}.name", errors)
-    instructions = _text(data.instructions, INSTRUCTIONS_MAX, f"{path}.instructions", errors)
-    kind_value = data.kind.strip()
-    kind = kind_value if _is_exercise_kind(kind_value) else None
-    if kind is None:
-        _fail(errors, f"{path}.kind", "required" if not kind_value else "invalid_choice")
-    tempo = _optional_range(data.tempo_bpm, TEMPO_MIN, TEMPO_MAX, f"{path}.tempo_bpm", errors)
-    duration = _optional_range(
-        data.duration_min, DURATION_MIN, DURATION_MAX, f"{path}.duration_min", errors
-    )
-    return Exercise(name, instructions, kind, tempo, duration) if kind is not None else None
+def _uuid(value: UUID | str, field: str, errors: Errors) -> UUID | None:
+    if isinstance(value, UUID):
+        return value
+    try:
+        return UUID(value.strip())
+    except ValueError:
+        _fail(errors, field, "invalid")
+        return None
 
 
-def _quiz_item(data: QuizItemInput, path: str, errors: Errors) -> QuizItem:
-    question = _text(data.question, QUESTION_MAX, f"{path}.question", errors)
-    options = tuple(option.strip() for option in data.options)
-    options_ok = MIN_OPTIONS <= len(options) <= MAX_OPTIONS and all(
-        1 <= len(option) <= OPTION_MAX for option in options
-    )
-    if not options_ok:
-        _fail(errors, f"{path}.options", "invalid")  # count outside 2-5, or an option's length
-    elif not 0 <= data.answer_index < len(options):
-        _fail(errors, f"{path}.answer_index", "out_of_range")
-    explanation = _optional_text(data.explanation, EXPLANATION_MAX, f"{path}.explanation", errors)
+def validate_instance(data: InstanceInput, path: str, errors: Errors) -> ValidInstance | None:
+    """`template_id` (and `replaces_instance_id`) a UUID, `prompt_text` 1-500 after strip, the
+    optional concept name. Paths start at `path` (`""` for the top level)."""
+    at = f"{path}." if path else ""
+    template_id = _uuid(data.template_id, f"{at}template_id", errors)
+    replaces = None
+    if data.replaces_instance_id is not None:
+        replaces = _uuid(data.replaces_instance_id, f"{at}replaces_instance_id", errors)
+    prompt_text = _text(data.prompt_text, PROMPT_TEXT_MAX, f"{at}prompt_text", errors)
     concept = None
     if data.concept is not None and data.concept.strip():
-        concept = _concept(data.concept, f"{path}.concept", errors)
-    return QuizItem(question, options, data.answer_index, explanation, concept)
+        concept = _concept(data.concept, f"{at}concept", errors)
+    if template_id is None:
+        return None
+    return ValidInstance(template_id, tuple(data.params), prompt_text, concept, replaces)
 
 
 def _note(data: NoteInput, path: str, *, note_cap: int, errors: Errors) -> ValidNote:
@@ -523,14 +470,10 @@ def _note(data: NoteInput, path: str, *, note_cap: int, errors: Errors) -> Valid
         _fail(errors, f"{path}.raw_text", "too_long")
     concepts = _concepts(data.concepts, f"{path}.concepts", errors)
     links = _links(data.links, f"{path}.links", errors)
-    exercises = tuple(
-        exercise
-        for index, item in enumerate(data.exercises)
-        if (exercise := _exercise(item, f"{path}.exercises[{index}]", errors)) is not None
-    )
-    quiz_items = tuple(
-        _quiz_item(item, f"{path}.quiz_items[{index}]", errors)
-        for index, item in enumerate(data.quiz_items)
+    instances = tuple(
+        instance
+        for index, item in enumerate(data.instances)
+        if (instance := validate_instance(item, f"{path}.instances[{index}]", errors)) is not None
     )
     return ValidNote(
         title=title,
@@ -543,8 +486,7 @@ def _note(data: NoteInput, path: str, *, note_cap: int, errors: Errors) -> Valid
         passages=split_passages(cleaned),
         concepts=concepts,
         links=links,
-        exercises=exercises,
-        quiz_items=quiz_items,
+        instances=instances,
     )
 
 
@@ -560,8 +502,7 @@ def _limit_hit(notes: Sequence[NoteInput], origin: Origin) -> FieldError | None:
         counts = (
             ("concepts", len(note.concepts), MAX_CONCEPTS),
             ("links", len(note.links), MAX_LINKS),
-            ("exercises", len(note.exercises), MAX_EXERCISES),
-            ("quiz_items", len(note.quiz_items), MAX_QUIZ_ITEMS),
+            ("instances", len(note.instances), MAX_INSTANCES),
         )
         for field, count, cap in counts:
             if count > cap:
@@ -576,7 +517,7 @@ def validate_notes(
 
     Count and total-character caps give `limit_exceeded` with the offending field before any
     field is examined; then every field is checked and `validation_failed` lists each bad field
-    path (`notes[2].quiz_items[0].options`) in payload order. Concept names are deduplicated by
+    path (`notes[2].instances[0].prompt_text`) in payload order. Concept names are deduplicated by
     `name_norm` within a note, duplicate links are dropped and self-links are rejected.
     """
     if len(notes) < MIN_NOTES_PER_CALL:

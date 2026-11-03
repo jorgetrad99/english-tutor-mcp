@@ -9,11 +9,11 @@ from typing import Literal, TypeGuard
 from tutor.domain.errors import FieldError
 
 Preference = Literal["practice_first", "theory_first", "balanced"]
-ExerciseKind = Literal["quiz", "ear", "exercise"]
+ExerciseKind = Literal["quiz", "drill", "exercise"]
 SubjectStatus = Literal["active", "paused", "archived"]
 
 PREFERENCES: tuple[Preference, ...] = ("practice_first", "theory_first", "balanced")
-EXERCISE_KINDS: tuple[ExerciseKind, ...] = ("quiz", "ear", "exercise")
+EXERCISE_KINDS: tuple[ExerciseKind, ...] = ("quiz", "drill", "exercise")
 SUBJECT_STATUSES: tuple[SubjectStatus, ...] = ("active", "paused", "archived")
 DEFAULT_EXERCISE_KINDS: tuple[ExerciseKind, ...] = ("quiz", "exercise")
 DEFAULT_STATUS: SubjectStatus = "active"
@@ -196,11 +196,11 @@ _KIND_OPTIONS: tuple[QuestionOption, ...] = (
         "Short questions about what your notes say.",
     ),
     QuestionOption(
-        "ear",
-        "Ejercicios de oído (música)",
-        "Ear training (music)",
-        "Identificar notas e intervalos que el servidor genera.",
-        "Identify notes and intervals the server generates.",
+        "drill",
+        "Repaso variado",
+        "Varied review",
+        "El servidor arma cada pregunta de una lista: vocabulario, fechas, notas, operaciones.",
+        "The server builds each question from a list: vocabulary, dates, notes, sums.",
     ),
     QuestionOption(
         "exercise",
@@ -258,12 +258,14 @@ SUBJECT_QUESTIONS: tuple[SubjectQuestion, ...] = (
         id="kinds",
         fields=("exercise_kinds",),
         prompt_es=(
-            "¿Qué tipo de práctica quieres? Preguntas de teoría, ejercicios de oído (música), "
+            "¿Qué tipo de práctica quieres? Preguntas de teoría, repaso variado (el servidor "
+            "arma cada pregunta de una lista: vocabulario, fechas, notas, operaciones), "
             "ejercicios del curso. Elige 1 a 3."
         ),
         prompt_en=(
-            "What kind of practice do you want? Theory questions, ear training (music), "
-            "exercises from the course. Pick 1 to 3."
+            "What kind of practice do you want? Theory questions, varied review (the server "
+            "builds each question from a list: vocabulary, dates, notes, sums), exercises from "
+            "the course. Pick 1 to 3."
         ),
         options=_KIND_OPTIONS,
         optional=False,

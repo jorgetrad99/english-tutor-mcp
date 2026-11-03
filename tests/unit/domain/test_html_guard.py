@@ -1,11 +1,11 @@
 import pytest
 
 from tutor.domain.html_guard import (
-    ARTIFACT_KINDS,
-    ARTIFACT_TITLE_MAX,
-    MAX_ARTIFACT_BYTES,
+    MAX_TEMPLATE_BYTES,
+    TEMPLATE_MARKER,
     HtmlProblem,
     check_html,
+    check_template_html,
 )
 
 pytestmark = pytest.mark.unit
@@ -18,9 +18,8 @@ def doc(body: str = "", head: str = HEAD, start: str = "<!doctype html>") -> str
 
 
 def test_constants() -> None:
-    assert MAX_ARTIFACT_BYTES == 40_000  # room for JSON escaping in a 64 KB body
-    assert ARTIFACT_KINDS == ("lesson_view", "exercise_view", "other")
-    assert ARTIFACT_TITLE_MAX == 200
+    assert MAX_TEMPLATE_BYTES == 40_000  # room for JSON escaping in a 64 KB body
+    assert TEMPLATE_MARKER == '<script type="application/json" id="tutor-params"></script>'
 
 
 # --- Review Focus 4 ----------------------------------------------------------------------------
@@ -78,20 +77,20 @@ def padded(size: int) -> str:
 
 
 def test_exactly_the_byte_cap_is_accepted_and_one_more_is_too_large() -> None:
-    assert len(padded(MAX_ARTIFACT_BYTES).encode()) == MAX_ARTIFACT_BYTES
-    assert check_html(padded(MAX_ARTIFACT_BYTES)) == ()
-    over = padded(MAX_ARTIFACT_BYTES + 1)
-    assert len(over.encode()) == MAX_ARTIFACT_BYTES + 1
+    assert len(padded(MAX_TEMPLATE_BYTES).encode()) == MAX_TEMPLATE_BYTES
+    assert check_html(padded(MAX_TEMPLATE_BYTES)) == ()
+    over = padded(MAX_TEMPLATE_BYTES + 1)
+    assert len(over.encode()) == MAX_TEMPLATE_BYTES + 1
     assert check_html(over) == (HtmlProblem("too_large", "html"),)
 
 
 def test_size_is_measured_in_utf8_bytes() -> None:
-    body = "é" * (MAX_ARTIFACT_BYTES // 2)
+    body = "é" * (MAX_TEMPLATE_BYTES // 2)
     assert check_html(doc(body)) == (HtmlProblem("too_large", "html"),)
 
 
 def test_too_large_short_circuits_other_checks() -> None:
-    html = padded(MAX_ARTIFACT_BYTES + 100).replace("<body>", "<body><iframe></iframe>")
+    html = padded(MAX_TEMPLATE_BYTES + 100).replace("<body>", "<body><iframe></iframe>")
     assert check_html(html) == (HtmlProblem("too_large", "html"),)
 
 
@@ -337,3 +336,50 @@ def test_problem_is_frozen() -> None:
     problem = HtmlProblem("tag_forbidden", "iframe")
     with pytest.raises(AttributeError):
         problem.detail = "x"  # type: ignore[misc]
+
+
+# --- the template marker (spec 15.5) ------------------------------------------------------------
+
+MARKED = f"<!doctype html><html><body><p>x</p>{TEMPLATE_MARKER}<script>go()</script></body></html>"
+
+
+def test_template_with_one_marker_passes() -> None:
+    assert check_template_html(MARKED) == ()
+
+
+@pytest.mark.parametrize(
+    "html",
+    [
+        "<!doctype html><html><body><p>no marker</p></body></html>",
+        MARKED.replace("<p>x</p>", TEMPLATE_MARKER),  # two markers
+        MARKED.replace(TEMPLATE_MARKER, f"<!-- {TEMPLATE_MARKER} -->"),  # only in a comment
+        MARKED.replace(  # only inside another script's text
+            TEMPLATE_MARKER, "<script>const m = '<div id=\"x\"></div>';</script>"
+        ),
+        MARKED.replace("<p>x</p>", '<p id="tutor-bridge">x</p>'),  # a reserved id
+        MARKED.replace("<p>x</p>", '<div id="tutor-params"></div>'),  # a second params element
+        MARKED.replace(
+            TEMPLATE_MARKER, '<script type="application/json" id="tutor-params">{}</script>'
+        ),  # not empty
+    ],
+)
+def test_marker_rule(html: str) -> None:
+    assert check_template_html(html)[-1] == HtmlProblem("marker_missing", "tutor-params")
+
+
+def test_marker_problem_comes_after_the_html_problems() -> None:
+    html = MARKED.replace("<p>x</p>", "<iframe></iframe>").replace(TEMPLATE_MARKER, "")
+    assert check_template_html(html) == (
+        HtmlProblem("tag_forbidden", "iframe"),
+        HtmlProblem("marker_missing", "tutor-params"),
+    )
+
+
+def test_oversized_template_reports_too_large_alone() -> None:
+    body = "x" * (MAX_TEMPLATE_BYTES - len(MARKED) + 2)  # replaces the one "x"
+    over = MARKED.replace("<p>x</p>", f"<p>{body}</p>")
+    assert len(over.encode()) == MAX_TEMPLATE_BYTES + 1
+    assert check_template_html(over) == (HtmlProblem("too_large", "html"),)
+    fits = MARKED.replace("<p>x</p>", f"<p>{body[:-1]}</p>")
+    assert len(fits.encode()) == MAX_TEMPLATE_BYTES
+    assert check_template_html(fits) == ()

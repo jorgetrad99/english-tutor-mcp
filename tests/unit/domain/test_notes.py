@@ -8,32 +8,25 @@ from hypothesis import strategies as st
 
 from tutor.domain.notes import (
     CONCEPT_NAME_MAX,
-    EXPLANATION_MAX,
-    INSTRUCTIONS_MAX,
     LESSON_REF_MAX,
     MAX_CALL_CHARS,
     MAX_CONCEPTS,
-    MAX_EXERCISES,
     MAX_LINKS,
     MAX_NOTE_CHARS,
     MAX_NOTES_PER_CALL,
-    MAX_QUIZ_ITEMS,
     MAX_SEARCH_LIMIT,
     MAX_WEB_NOTE_CHARS,
-    OPTION_MAX,
     PASSAGE_HARD,
     PASSAGE_TARGET,
-    QUESTION_MAX,
     SOURCE_KINDS,
     TITLE_MAX,
     URL_MAX,
     ConceptLink,
     ConceptLinkInput,
     ConceptName,
-    ExerciseInput,
+    InstanceInput,
     NoteInput,
     NotesErrors,
-    QuizItemInput,
     SourceInput,
     ValidNotes,
     clean_text,
@@ -45,11 +38,13 @@ from tutor.domain.notes import (
     strip_nul,
     validate_notes,
 )
+from tutor.domain.templates import MAX_INSTANCES, PROMPT_TEXT_MAX, ParamPair
 
 pytestmark = pytest.mark.unit
 
 SUBJECT = UUID("00000000-0000-0000-0000-000000000001")
 SOURCE = UUID("00000000-0000-0000-0000-000000000002")
+TEMPLATE = UUID("00000000-0000-0000-0000-000000000003")
 
 SENTENCE = "Acorde de séptima 🎸 en el quinto traste. "
 
@@ -68,15 +63,11 @@ def note(**changes: object) -> NoteInput:
         raw_text="El acorde de séptima tiene cuatro notas.\n\nSe toca en el quinto traste.",
         concepts=("Acorde de séptima", "Quinto traste"),
         links=(ConceptLinkInput("Quinto traste", "Acorde de séptima", "prerequisite"),),
-        exercises=(
-            ExerciseInput("Cambio C7-G7", "Cambia entre C7 y G7 cada compás.", "technique", 60, 5),
-        ),
-        quiz_items=(
-            QuizItemInput(
-                "¿Cuántas notas tiene un acorde de séptima?",
-                ("Tres", "Cuatro", "Cinco"),
-                1,
-                "La séptima se suma a la tríada.",
+        instances=(
+            InstanceInput(
+                TEMPLATE,
+                (ParamPair("question", "text", "¿Cuántas notas tiene un acorde de séptima?"),),
+                "  Elige cuántas notas tiene el acorde.  ",
                 "Acorde de séptima",
             ),
         ),
@@ -87,6 +78,13 @@ def note(**changes: object) -> NoteInput:
 def source(**changes: object) -> SourceInput:
     return dataclasses.replace(
         SourceInput("course", "Curso de guitarra", "https://example.test/curso"),
+        **changes,  # type: ignore[arg-type]
+    )
+
+
+def instance(**changes: object) -> InstanceInput:
+    return dataclasses.replace(
+        InstanceInput(TEMPLATE, (ParamPair("term", "text", "la cuenta"),), "Traduce.", "Acorde"),
         **changes,  # type: ignore[arg-type]
     )
 
@@ -109,7 +107,7 @@ def failure(*notes: NoteInput, src: SourceInput | None = None, origin: str = "mc
 def test_caps_match_ruling_10() -> None:
     assert (MAX_NOTES_PER_CALL, MAX_NOTE_CHARS, MAX_WEB_NOTE_CHARS) == (4, 6000, 400_000)
     assert (MAX_CALL_CHARS, MAX_CONCEPTS, MAX_LINKS) == (16_000, 12, 12)
-    assert (MAX_EXERCISES, MAX_QUIZ_ITEMS, MAX_SEARCH_LIMIT) == (10, 10, 10)
+    assert (MAX_INSTANCES, MAX_SEARCH_LIMIT) == (12, 10)  # ruling 24
     assert (PASSAGE_TARGET, PASSAGE_HARD) == (1200, 2000)
     assert SOURCE_KINDS == ("course", "pdf", "text", "url", "other")
 
@@ -350,24 +348,23 @@ def test_valid_notes_return_cleaned_text_passages_and_structure() -> None:
             "prerequisite",
         ),
     )
-    exercise = n.exercises[0]
-    assert (exercise.name, exercise.kind) == ("Cambio C7-G7", "technique")
-    assert (exercise.tempo_bpm, exercise.duration_min) == (60, 5)
-    quiz = n.quiz_items[0]
-    assert quiz.options == ("Tres", "Cuatro", "Cinco")
-    assert quiz.answer_index == 1
-    assert quiz.concept == ConceptName("Acorde de séptima", "acorde de septima")
+    [instance] = n.instances
+    assert instance.template_id == TEMPLATE
+    assert instance.prompt_text == "Elige cuántas notas tiene el acorde."  # stripped
+    assert instance.concept == ConceptName("Acorde de séptima", "acorde de septima")
+    assert instance.params == note().instances[0].params  # checked later, by the service
+    assert instance.replaces_instance_id is None
 
 
 def test_optional_fields_default_to_none_and_empty() -> None:
     valid = ok(
-        note(lesson_ref="  ", position=None, concepts=(), links=(), exercises=(), quiz_items=()),
+        note(lesson_ref="  ", position=None, concepts=(), links=(), instances=()),
         src=source(url="  "),
     )
     assert valid.source is not None and valid.source.url is None
     n = valid.notes[0]
     assert (n.lesson_ref, n.position) == (None, None)
-    assert (n.concepts, n.links, n.exercises, n.quiz_items) == ((), (), (), ())
+    assert (n.concepts, n.links, n.instances) == ((), (), ())
 
 
 def test_no_source_is_allowed() -> None:
@@ -473,22 +470,8 @@ def test_call_character_cap_does_not_apply_to_the_web() -> None:
             "notes[1].links",
         ),
         (
-            {
-                "exercises": tuple(
-                    ExerciseInput(f"e{i}", "x", "other", None, None)
-                    for i in range(MAX_EXERCISES + 1)
-                )
-            },
-            "notes[1].exercises",
-        ),
-        (
-            {
-                "quiz_items": tuple(
-                    QuizItemInput("q?", ("a", "b"), 0, None, None)
-                    for i in range(MAX_QUIZ_ITEMS + 1)
-                )
-            },
-            "notes[1].quiz_items",
+            {"instances": tuple(instance(prompt_text=f"p{i}") for i in range(MAX_INSTANCES + 1))},
+            "notes[1].instances",
         ),
     ],
 )
@@ -509,35 +492,15 @@ def test_item_counts_at_the_cap_are_accepted() -> None:
         note(
             concepts=tuple(f"c{i}" for i in range(MAX_CONCEPTS)),
             links=tuple(ConceptLinkInput("a", f"b{i}", "related") for i in range(MAX_LINKS)),
-            exercises=tuple(
-                ExerciseInput(f"e{i}", "x", "other", None, None) for i in range(MAX_EXERCISES)
-            ),
-            quiz_items=tuple(
-                QuizItemInput("q?", ("a", "b"), 0, None, None) for i in range(MAX_QUIZ_ITEMS)
-            ),
+            instances=tuple(instance(prompt_text=f"p{i}") for i in range(MAX_INSTANCES)),
         )
     ).notes[0]
     assert len(n.concepts) == MAX_CONCEPTS
     assert len(n.links) == MAX_LINKS
-    assert len(n.exercises) == MAX_EXERCISES
-    assert len(n.quiz_items) == MAX_QUIZ_ITEMS
+    assert len(n.instances) == MAX_INSTANCES
 
 
 # --- validate_notes: field validation ----------------------------------------------------------
-
-
-def exercise(**changes: object) -> ExerciseInput:
-    return dataclasses.replace(
-        ExerciseInput("Cambio C7-G7", "Cambia cada compás.", "technique", 60, 5),
-        **changes,  # type: ignore[arg-type]
-    )
-
-
-def quiz(**changes: object) -> QuizItemInput:
-    return dataclasses.replace(
-        QuizItemInput("¿Cuántas notas?", ("Tres", "Cuatro"), 1, "Cuatro.", "Acorde"),
-        **changes,  # type: ignore[arg-type]
-    )
 
 
 @pytest.mark.parametrize(
@@ -558,55 +521,22 @@ def quiz(**changes: object) -> QuizItemInput:
         ({"links": (ConceptLinkInput("", "b", "related"),)}, "notes[0].links[0].from"),
         ({"links": (ConceptLinkInput("a", "b" * 81, "related"),)}, "notes[0].links[0].to"),
         ({"links": (ConceptLinkInput("a", "b", "causes"),)}, "notes[0].links[0].kind"),
-        ({"exercises": (exercise(name=""),)}, "notes[0].exercises[0].name"),
-        ({"exercises": (exercise(name="n" * 121),)}, "notes[0].exercises[0].name"),
-        ({"exercises": (exercise(instructions=" "),)}, "notes[0].exercises[0].instructions"),
+        ({"instances": (instance(template_id="nope"),)}, "notes[0].instances[0].template_id"),
         (
-            {"exercises": (exercise(instructions="i" * (INSTRUCTIONS_MAX + 1)),)},
-            "notes[0].exercises[0].instructions",
+            {"instances": (instance(replaces_instance_id="x"),)},
+            "notes[0].instances[0].replaces_instance_id",
         ),
-        ({"exercises": (exercise(kind="cardio"),)}, "notes[0].exercises[0].kind"),
-        ({"exercises": (exercise(tempo_bpm=19),)}, "notes[0].exercises[0].tempo_bpm"),
-        ({"exercises": (exercise(tempo_bpm=301),)}, "notes[0].exercises[0].tempo_bpm"),
-        ({"exercises": (exercise(duration_min=0),)}, "notes[0].exercises[0].duration_min"),
-        ({"exercises": (exercise(duration_min=121),)}, "notes[0].exercises[0].duration_min"),
-        ({"quiz_items": (quiz(question=""),)}, "notes[0].quiz_items[0].question"),
+        ({"instances": (instance(prompt_text=" "),)}, "notes[0].instances[0].prompt_text"),
         (
-            {"quiz_items": (quiz(question="q" * (QUESTION_MAX + 1)),)},
-            "notes[0].quiz_items[0].question",
+            {"instances": (instance(prompt_text="p" * (PROMPT_TEXT_MAX + 1)),)},
+            "notes[0].instances[0].prompt_text",
         ),
-        ({"quiz_items": (quiz(options=("solo",)),)}, "notes[0].quiz_items[0].options"),
-        (
-            {"quiz_items": (quiz(options=("a", "b", "c", "d", "e", "f"), answer_index=0),)},
-            "notes[0].quiz_items[0].options",
-        ),
-        (
-            {"quiz_items": (quiz(options=("a", " "), answer_index=0),)},
-            "notes[0].quiz_items[0].options",
-        ),
-        (
-            {"quiz_items": (quiz(options=("o" * (OPTION_MAX + 1),) * 3, answer_index=0),)},
-            "notes[0].quiz_items[0].options",
-        ),
-        ({"quiz_items": (quiz(answer_index=2),)}, "notes[0].quiz_items[0].answer_index"),
-        ({"quiz_items": (quiz(answer_index=-1),)}, "notes[0].quiz_items[0].answer_index"),
-        (
-            {"quiz_items": (quiz(explanation="e" * (EXPLANATION_MAX + 1)),)},
-            "notes[0].quiz_items[0].explanation",
-        ),
-        ({"quiz_items": (quiz(concept="c" * 81),)}, "notes[0].quiz_items[0].concept"),
+        ({"instances": (instance(concept="c" * 81),)}, "notes[0].instances[0].concept"),
     ],
 )
 def test_each_note_field_error(changes: dict[str, object], field: str) -> None:
     error = failure(note(**changes))
     assert (error.code, error.fields) == ("validation_failed", (field,))
-
-
-def test_review_focus_6_three_options_of_201_characters() -> None:
-    # Review Focus 6
-    item = quiz(options=("o" * (OPTION_MAX + 1),) * 3, answer_index=0)
-    error = failure(note(quiz_items=(item,)))
-    assert (error.code, error.fields) == ("validation_failed", ("notes[0].quiz_items[0].options",))
 
 
 def test_boundary_lengths_are_accepted() -> None:
@@ -616,32 +546,23 @@ def test_boundary_lengths_are_accepted() -> None:
             lesson_ref="r" * LESSON_REF_MAX,
             position=0,
             concepts=("c" * CONCEPT_NAME_MAX,),
-            exercises=(
-                exercise(
-                    name="n" * 120,
-                    instructions="i" * INSTRUCTIONS_MAX,
-                    tempo_bpm=20,
-                    duration_min=120,
-                ),
-            ),
-            quiz_items=(
-                quiz(
-                    question="q" * QUESTION_MAX,
-                    options=("o" * OPTION_MAX,) * 5,
-                    answer_index=4,
-                    explanation="e" * EXPLANATION_MAX,
-                    concept="c" * CONCEPT_NAME_MAX,
-                ),
+            instances=(
+                instance(prompt_text="p" * PROMPT_TEXT_MAX, concept="c" * CONCEPT_NAME_MAX),
             ),
         )
     ).notes[0]
-    assert n.quiz_items[0].answer_index == 4
-    assert n.quiz_items[0].explanation == "e" * EXPLANATION_MAX
+    assert n.instances[0].prompt_text == "p" * PROMPT_TEXT_MAX
 
 
-def test_quiz_explanation_and_concept_empty_become_none() -> None:
-    item = ok(note(quiz_items=(quiz(explanation="  ", concept=""),))).notes[0].quiz_items[0]
-    assert (item.explanation, item.concept) == (None, None)
+def test_instance_template_id_may_be_text_and_empty_concept_is_none() -> None:
+    replaced = UUID("00000000-0000-0000-0000-000000000009")
+    item = instance(template_id=f" {TEMPLATE} ", concept="  ", replaces_instance_id=str(replaced))
+    [valid] = ok(note(instances=(item,))).notes[0].instances
+    assert (valid.template_id, valid.concept, valid.replaces_instance_id) == (
+        TEMPLATE,
+        None,
+        replaced,
+    )
 
 
 @pytest.mark.parametrize(
@@ -661,7 +582,7 @@ def test_each_source_field_error(changes: dict[str, object], field: str) -> None
 def test_all_validation_errors_are_reported_in_order() -> None:
     error = failure(
         note(title="", raw_text="", links=(ConceptLinkInput("x", "x", "related"),)),
-        note(position=-1, quiz_items=(quiz(answer_index=9),)),
+        note(position=-1, instances=(instance(prompt_text=""),)),
         src=source(kind="nope", url="u" * 2001),
     )
     assert error.code == "validation_failed"
@@ -672,5 +593,5 @@ def test_all_validation_errors_are_reported_in_order() -> None:
         "notes[0].raw_text",
         "notes[0].links[0]",
         "notes[1].position",
-        "notes[1].quiz_items[0].answer_index",
+        "notes[1].instances[0].prompt_text",
     )
