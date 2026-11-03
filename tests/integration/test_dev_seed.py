@@ -7,11 +7,11 @@ from datetime import datetime, timedelta
 import pytest
 from cryptography.fernet import Fernet
 from sqlalchemy import Engine, func, select
-from tutor.ops.dev_seed import SeedReport, seed
 
 from tutor.db.tables import audit_log, plans, profiles, users
 from tutor.db.uow import PgIdentity, pg_uow_factory
 from tutor.ops import dev_seed
+from tutor.ops.dev_seed import SeedReport, seed
 from tutor.services.context import Services
 from tutor.services.profile import get_profile
 
