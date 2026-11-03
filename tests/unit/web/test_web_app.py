@@ -13,7 +13,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from tutor.domain.dashboard.types import Lang, Role, User
 from tutor.web import i18n
 from tutor.web.app import ErrorGuardMiddleware
-from tutor.web.security import CSP, safe_next
+from tutor.web.security import CSP, TEMPLATE_FRAME_CSP, safe_next, template_frame_csp
 
 
 def test_login_page_renders_in_spanish_with_security_headers(client: TestClient) -> None:
@@ -288,3 +288,19 @@ def test_forms_post_only_to_this_site_or_google() -> None:
     [form_action] = [d for d in CSP.split("; ") if d.startswith("form-action")]
     assert form_action == "form-action 'self' https://accounts.google.com"
     assert "stripe" not in CSP
+
+
+def test_template_frame_policy_is_the_binding_one() -> None:
+    # Task 4b security review (ADR 0005 decision 8, spec 9 and 10): the web and app_frame
+    # routes that serve a composed template send exactly this, from their own origin.
+    assert TEMPLATE_FRAME_CSP == (
+        "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; "
+        "style-src 'unsafe-inline'; img-src data:; connect-src 'none'; form-action 'none'"
+    )
+    assert "allow-same-origin" not in TEMPLATE_FRAME_CSP
+    assert "navigate-to" not in TEMPLATE_FRAME_CSP  # no browser implements it
+    full = template_frame_csp("https://tutor.example")
+    assert full == (f"{TEMPLATE_FRAME_CSP}; base-uri 'none'; frame-ancestors https://tutor.example")
+    for bad in ("", "'self'", "*", "https://a.example https://b.example", "https://x;y"):
+        with pytest.raises(ValueError):
+            template_frame_csp(bad)

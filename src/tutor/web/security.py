@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from urllib.parse import parse_qs, urlsplit
 
 from starlette.datastructures import MutableHeaders
@@ -15,8 +16,26 @@ CSP = (
     "form-action 'self' https://accounts.google.com; frame-ancestors 'none'; base-uri 'none'; "
     "object-src 'none'"
 )
+# The policy every route that serves a composed template sends (the web frame and slice C's
+# app_frame), from its own origin with no cookies (ADR 0005 decision 8, spec 9 and 10). Scripts
+# and styles inline only, images only as data: URLs built by the template's own script, no
+# network, no forms, an opaque origin. `navigate-to` is left out: no browser implements it.
+TEMPLATE_FRAME_CSP = (
+    "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; "
+    "style-src 'unsafe-inline'; img-src data:; connect-src 'none'; form-action 'none'"
+)
+_ORIGIN = re.compile(r"https://[a-z0-9.-]+(?::\d{1,5})?|http://localhost(?::\d{1,5})?")
 MAX_NEXT_LENGTH = 512  # bounds what an anonymous login session can store
 _HSTS = "max-age=31536000; includeSubDomains"
+
+
+def template_frame_csp(dashboard_origin: str) -> str:
+    """`TEMPLATE_FRAME_CSP` plus what does not fall back to default-src: no `<base>`, and only
+    the dashboard's origin (one `https://` origin, or `http://localhost` in development) may
+    frame the template. Slice D calls it with its configured origin."""
+    if not _ORIGIN.fullmatch(dashboard_origin):
+        raise ValueError("dashboard_origin must be one origin")
+    return f"{TEMPLATE_FRAME_CSP}; base-uri 'none'; frame-ancestors {dashboard_origin}"
 
 
 class SecurityHeadersMiddleware:
