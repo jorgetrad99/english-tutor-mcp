@@ -896,3 +896,11 @@ Recorded on 2026-11-03 at the end of slice A (`docs/superpowers/plans/2026-11-02
 - **A56. Active instances of a retired template are still drawn;** only retired instances leave practice. Amends 15.3.
 - **A57. `short` is true only when fewer than 4 items exist** for the session. Amends 6.2.
 - **A58. Practice documents use the `artifact` bridge until slice C;** `text` mode returns no document. Amends 15.7.
+
+**Slice B Tasks 3–4 (2026-11-03; slice B plan rulings 81–85)**
+
+- **A59. Migration 0007 keys.** Plan keys start with `user_id`; the showing-to-instance key is `NO ACTION` deferred to commit, because a subject cascade reaches showings one level after instances; a session's plan is `SET NULL (plan_id)`; answer columns are all or nothing. Amends 8.2 and 16.10.
+- **A60. Partial unique indexes are matched with a literal predicate** in `ON CONFLICT` (`status = 'active'`), not a bound parameter, which fails once psycopg prepares the statement.
+- **A61. MCP names:** input `practice_mode` (`app`, `text`), output `practice_mode` (`app`, `text`, `class`), `result_outcome` (`new`, `existing`), `concept_rank`; `record_result.answer` is tagged by `answer_kind`, a choice is sent as `option_number` only, and every call is recorded with `source = chat` until slice C gives the practice app its own channel. Amends 7.1 and 15.9.
+- **A62. Practice error hints are in the error's `response_rules`,** chosen by tool, code and field (`start_practice` on `subject_id` or `practice_mode`, `record_result` on `item_id`, and `session_closed` from a practice tool); a tagged-union tag is dropped from error paths.
+- **A63. The tool surface is 22 tools** (six English, sixteen subjects); 15.9 and 16.8 counted nine English tools.
