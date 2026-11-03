@@ -72,3 +72,15 @@ Recorded at implementation time (2026-11-02, branch `feat/dev-environment`); the
 - **D7, D9: no `inspector` service.** MCP Inspector v2 refuses to bind a non-loopback host inside a container without `DANGEROUSLY_BIND_ALL_INTERFACES=true`, and bound to `localhost` it is unreachable through published ports. The profile has `migrate-dev` and `app-dev` only; `inspector-dev` prints the token and runs the Inspector on host Node (default loopback bind and session token) against `http://localhost:8000/mcp`. `dev-down` stops the two dev services (`db` and `db-test` keep running); `dev-reset` takes the project down and removes `<project>_pgdata`, refusing without `CONFIRM=1`.
 - **D10.** `TUTOR_DEV_AUTH` is absent from every production compose file and env example, `deploy/tutor.env.example` included (a comment there says why); `tutor.settings.DEV_ONLY_KEYS` names it for the tests. `is_loopback` also accepts `*.localhost` names (RFC 6761).
 - **Section 5.** This branch registers six tools; "the nine English tools" is the count after Subjects v0.
+
+### Security review fixes (2026-11-02)
+
+- **D1, D10.** `Settings.__post_init__` repeats the env and loopback guard (same `SystemExit` as `from_env`), so a `Settings` built directly or through `dataclasses.replace` cannot carry the flag in prod. `from_env` also refuses the flag when `FORWARDED_ALLOW_IPS` is set (blank counts as unset): a proxy in front could expose dev auth.
+- **D2.** fastmcp 4.0.11's `JWTVerifier.load_access_token` checks `exp` only when present and never the lifetime or `sub`. `DevJWTVerifier` runs it, then refuses a token without `iat` or `exp`, living over 24 hours, expiring more than 24 hours from now, or naming a `sub` other than `dev-ana` and `dev-nuevo`. With the flag on, the MCP side sits behind Starlette's `TrustedHostMiddleware` (`localhost`, `127.0.0.1`, `[::1]` and the loopback base URL host), so a host-side tunnel forwarding a public Host gets 400; the Google path is unchanged.
+- **D6.** The `dev` stage sits above `runtime`, so a build without `--target` gets the product image, and every production build block (`compose.prod.yml`, both in `compose.coolify.yml`, `compose.local.yml`) pins `target: runtime`.
+- **D7.** `db` and `db-test` publish on `127.0.0.1` only (superuser `tutor:tutor`). `app-dev` gets `MIGRATION_DATABASE_URL` and `REPORT_DB_PASSWORD` blanked through `environment`; `migrate-dev` keeps them from `deploy/dev.env`.
+- **D9.** `dev-reset` removes only this compose project's `pgdata` volume: `scripts/dev_pgdata.py` takes the project name and the volume's resolved name from `docker compose config --format json` and refuses anything but `<project>_pgdata`. The `CONFIRM=1` gate is unchanged.
+
+### Known accepted risks
+
+- **D5: login CSRF on the dev login.** `GET /auth/dev-login?as=...` switches the browser session on a plain GET, so any page the developer opens could sign the browser in as `dev-ana` or `dev-nuevo`. Accepted and not changed: the route exists only with the flag (loopback dev), names only the two seeded identities, and reaches no real account or data beyond them.
