@@ -81,6 +81,26 @@ async def send_json(send: Send, status: int, body: dict[str, Any]) -> None:
     await send({"type": "http.response.body", "body": data})
 
 
+class RejectProxyHeaders:
+    """400 for any request carrying `Forwarded` or an `X-Forwarded-*` header (dev auth only).
+
+    A tunnel that rewrites Host to localhost (ngrok --host-header) passes the loopback Host
+    check, but proxies add these headers; loopback dev traffic never carries them.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and any(
+            name.lower() == b"forwarded" or name.lower().startswith(b"x-forwarded-")
+            for name, _ in scope.get("headers", [])
+        ):
+            await send_json(send, 400, {"error": "proxied_request"})
+            return
+        await self.app(scope, receive, send)
+
+
 class BodySizeGuard:
     """Rejects bodies over 64 KB (POST, PUT, PATCH, DELETE) with 413 before the app reads them.
 
@@ -302,7 +322,8 @@ def build_app(
     On Postgres the login role is checked first (RLS must bind it), and the server lifespan
     purges expired web sessions at startup and then hourly. With TUTOR_DEV_AUTH (loopback dev
     only) the OAuth proxy and its discovery routes are replaced by the dev token verifier, and
-    the MCP side answers only loopback Host names (TrustedHost, as the website does)."""
+    the MCP side answers only loopback Host names (TrustedHost, as the website does), and both
+    sides refuse requests carrying Forwarded or X-Forwarded-* headers (RejectProxyHeaders)."""
     engine = engine if engine is not None else make_engine(settings.database_url)
     on_postgres = engine.dialect.name == "postgresql"
     if on_postgres:
@@ -321,12 +342,16 @@ def build_app(
     mcp_app: ASGIApp = BodySizeGuard(mcp.http_app(path=MCP_PATH))
     if settings.dev_auth:
         mcp_app = TrustedHostMiddleware(mcp_app, allowed_hosts=dev_mcp_hosts(settings))
+        mcp_app = RejectProxyHeaders(mcp_app)
     mcp_app = RequestLog(mcp_app)
     if on_postgres and isinstance(deps.sessions, PgWebBackend):
         mcp_app = PeriodicPurge(mcp_app, _session_purge(deps.sessions, config, deps.clock))
     web = create_app(deps, config)
     install_profiles(web, ServicesProfiles(svc))  # Perfil saves through the same Services
-    web_app = RequestLog(BodySizeGuard(web))
+    web_app: ASGIApp = BodySizeGuard(web)
+    if settings.dev_auth:
+        web_app = RejectProxyHeaders(web_app)  # covers /auth/dev-login
+    web_app = RequestLog(web_app)
     return PathDispatch(mcp_app, web_app=web_app)
 
 

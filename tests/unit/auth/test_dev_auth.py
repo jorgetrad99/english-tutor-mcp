@@ -412,6 +412,83 @@ async def test_the_mcp_host_check_is_dev_only(tmp_path: Path) -> None:
     assert public.status_code == 401
 
 
+# A tunnel that rewrites Host to localhost (ngrok --host-header) passes the loopback Host check, but
+# it still adds Forwarded or X-Forwarded-*: under dev auth both sides refuse those with 400.
+PROXY_HEADERS = [
+    ("forwarded", "for=203.0.113.7;proto=https;host=tutor.example.com"),
+    ("x-forwarded-for", "203.0.113.7"),
+    ("x-forwarded-host", "tutor.example.com"),
+    ("x-forwarded-proto", "https"),
+    ("x-forwarded-port", "443"),
+    ("X-Forwarded-Prefix", "/tutor"),
+]
+DEV_WEB_CONFIG = WebConfig(
+    env="dev",
+    base_url=BASE_URL,
+    mcp_url=MCP_URL,
+    support_email="soporte@example.test",
+    dev_auth=True,
+)
+
+
+@pytest.mark.parametrize(("name", "value"), PROXY_HEADERS, ids=[n for n, _ in PROXY_HEADERS])
+@pytest.mark.asyncio
+async def test_dev_mcp_refuses_proxy_headers_behind_a_loopback_host(
+    tmp_path: Path, name: str, value: str
+) -> None:
+    settings = dev_settings(tmp_path)
+    app = build_app(settings, engine=sqlalchemy.create_engine("sqlite://"), web_config=WEB_CONFIG)
+    token = mint_dev_token(settings, "dev-ana", now=datetime.now(UTC))
+    auth = {**HEADERS, "authorization": f"Bearer {token}", "host": "localhost:8000"}
+    async with serving(app) as client:
+        refused = await client.post("/mcp", json=INIT, headers={**auth, name: value})
+        accepted = await client.post("/mcp", json=INIT, headers=auth)
+    assert refused.status_code == 400, name
+    assert accepted.status_code == 200
+
+
+@pytest.mark.parametrize(("name", "value"), PROXY_HEADERS, ids=[n for n, _ in PROXY_HEADERS])
+@pytest.mark.asyncio
+async def test_dev_website_and_dev_login_refuse_proxy_headers(
+    tmp_path: Path, name: str, value: str
+) -> None:
+    app = build_app(
+        dev_settings(tmp_path),
+        engine=sqlalchemy.create_engine("sqlite://"),
+        web_config=DEV_WEB_CONFIG,
+    )
+    tunnel = {"host": "localhost:8000", name: value}
+    async with serving(app) as client:
+        dev_login = await client.get("/auth/dev-login?as=dev-ana", headers=tunnel)
+        login = await client.get("/login", headers=tunnel)
+        clean = await client.get("/login", headers={"host": "localhost:8000"})
+    assert (dev_login.status_code, login.status_code) == (400, 400), name
+    assert "set-cookie" not in dev_login.headers
+    assert clean.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_the_google_path_accepts_proxy_headers(tmp_path: Path) -> None:
+    # Production sits behind the tunnel, which always adds X-Forwarded-*: never refused there.
+    google = build_app(
+        google_settings(tmp_path),
+        engine=sqlalchemy.create_engine("sqlite://"),
+        web_config=WEB_CONFIG,
+    )
+    proxied = {
+        "host": "tutor.example.com",
+        "x-forwarded-for": "203.0.113.7",
+        "x-forwarded-proto": "https",
+        "x-forwarded-host": "tutor.example.com",
+        "forwarded": "for=203.0.113.7;proto=https",
+    }
+    async with serving(google) as client:
+        mcp = await client.post("/mcp", json=INIT, headers={**HEADERS, **proxied})
+        login = await client.get("/login", headers={**proxied, "host": "localhost:8000"})
+    assert mcp.status_code == 401  # reaches the OAuth proxy's bearer check, not a 400
+    assert login.status_code == 200
+
+
 # --- the CLI ------------------------------------------------------------------------------------
 
 
