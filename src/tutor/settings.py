@@ -11,6 +11,8 @@ from urllib.parse import urlsplit
 
 from cryptography.fernet import Fernet
 
+from tutor.web.security import dashboard_csp, template_frame_csp
+
 Env = Literal["dev", "test", "prod"]
 ENVS: tuple[Env, ...] = ("dev", "test", "prod")
 REQUIRED = (
@@ -32,6 +34,11 @@ DEV_AUTH_GUARD = "TUTOR_DEV_AUTH requires TUTOR_ENV=dev|test and a loopback TUTO
 # FORWARDED_ALLOW_IPS means a proxy (a tunnel) is in front: dev auth must not be reachable.
 DEV_AUTH_PROXY_GUARD = "TUTOR_DEV_AUTH must not run behind a proxy: leave FORWARDED_ALLOW_IPS unset"
 MIN_SIGNING_KEY_CHARS = 32
+# The origin that serves composed templates to the website's frames, and the key of the signed
+# frame tokens (spec 10, binding (c) and (d)). Optional: both set, or both empty and the website
+# shows no frames.
+TEMPLATE_ORIGIN_KEYS = ("TUTOR_TEMPLATE_ORIGIN", "TUTOR_FRAME_TOKEN_KEY")
+_TOGETHER = "TUTOR_TEMPLATE_ORIGIN and TUTOR_FRAME_TOKEN_KEY must be set together or both empty"
 DEFAULT_OAUTH_STORAGE_DIR = "data/oauth"
 DEFAULT_PORT = 8000
 
@@ -73,6 +80,29 @@ def is_loopback(host: str) -> bool:
         return False
 
 
+def template_origin_problem(origin: str | None, base_url: str) -> str | None:
+    """Why `origin` (already through parse_base_url) cannot serve templates to `base_url`.
+
+    A distinct host from the website's (requests are routed by Host), the same scheme, and a
+    website origin that `template_frame_csp` can name in `frame-ancestors`."""
+    if origin is None:
+        return "TUTOR_TEMPLATE_ORIGIN must be an https origin (http only on loopback)"
+    template, website = urlsplit(origin), urlsplit(base_url)
+    if template.scheme != website.scheme:
+        return "TUTOR_TEMPLATE_ORIGIN must use the scheme of TUTOR_BASE_URL"
+    if template.hostname == website.hostname:
+        return "TUTOR_TEMPLATE_ORIGIN must have a host of its own, not the host of TUTOR_BASE_URL"
+    try:
+        dashboard_csp(origin)
+    except ValueError:
+        return "TUTOR_TEMPLATE_ORIGIN must be lower case, https or http on a *.localhost name"
+    try:
+        template_frame_csp(base_url)
+    except ValueError:
+        return "TUTOR_BASE_URL must be https or http://localhost to serve template frames"
+    return None
+
+
 def dev_auth_flag(env: Mapping[str, str]) -> bool:
     """TUTOR_DEV_AUTH is on for 1, true or yes (case-insensitive); anything else is off."""
     return env.get("TUTOR_DEV_AUTH", "").strip().lower() in DEV_AUTH_TRUE
@@ -103,12 +133,17 @@ class Settings:
     port: int = DEFAULT_PORT
     # Dev-only bearer tokens instead of the Google OAuth proxy (dev-environment design D1).
     dev_auth: bool = False
+    # Both or neither (TEMPLATE_ORIGIN_KEYS); None means the website renders no template frames.
+    template_origin: str | None = None
+    frame_token_key: str | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         # The same guard as from_env and WebConfig, so a Settings built directly (or through
         # dataclasses.replace) cannot carry the flag outside loopback dev either.
         if self.dev_auth and not dev_auth_allowed(self.env, self.base_url):
             raise SystemExit(f"Invalid settings: {DEV_AUTH_GUARD}")
+        if (self.template_origin is None) != (self.frame_token_key is None):
+            raise SystemExit(f"Invalid settings: {_TOGETHER}")
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> Settings:
@@ -151,6 +186,25 @@ class Settings:
             problems.append(
                 "TUTOR_JWT_SIGNING_KEY, TUTOR_OAUTH_STORAGE_KEY must not share the same value"
             )
+        raw_origin = env.get("TUTOR_TEMPLATE_ORIGIN", "").strip()
+        frame_key = env.get("TUTOR_FRAME_TOKEN_KEY", "").strip()
+        template_origin: str | None = None
+        if bool(raw_origin) != bool(frame_key):
+            problems.append(_TOGETHER)
+        elif raw_origin and base_url is not None:
+            template_origin = parse_base_url(raw_origin)
+            origin_problem = template_origin_problem(template_origin, base_url)
+            if origin_problem:
+                problems.append(origin_problem)
+        if frame_key and len(frame_key) < MIN_SIGNING_KEY_CHARS:
+            problems.append(
+                f"TUTOR_FRAME_TOKEN_KEY must be at least {MIN_SIGNING_KEY_CHARS} characters"
+            )
+        if frame_key and frame_key in (jwt_key, storage_key):
+            problems.append(
+                "TUTOR_FRAME_TOKEN_KEY must not share a value with TUTOR_JWT_SIGNING_KEY or "
+                "TUTOR_OAUTH_STORAGE_KEY"
+            )
         if tutor_env == "prod" and not env["DATABASE_URL"].strip().startswith(
             ("postgresql:", "postgresql+", "postgres:")
         ):
@@ -179,4 +233,6 @@ class Settings:
             ),
             port=port,
             dev_auth=dev_auth,
+            template_origin=template_origin,
+            frame_token_key=frame_key or None,
         )

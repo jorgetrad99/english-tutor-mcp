@@ -283,3 +283,74 @@ def test_a_blank_forwarded_allow_ips_is_unset_and_prod_keeps_it() -> None:
     assert Settings.from_env(blank).dev_auth
     prod = env(TUTOR_ENV="prod", FORWARDED_ALLOW_IPS="172.30.10.3")
     assert Settings.from_env(prod).env == "prod"
+
+
+# --- the template origin and the frame token key (spec 10, binding (c) and (d)) ---------------
+
+FRAME_KEY = "f" * 40
+
+
+def test_template_origin_and_frame_key_are_optional_and_go_together() -> None:
+    plain = Settings.from_env(env())
+    assert (plain.template_origin, plain.frame_token_key) == (None, None)
+    both = Settings.from_env(
+        env(TUTOR_TEMPLATE_ORIGIN="https://templates.example.com/", TUTOR_FRAME_TOKEN_KEY=FRAME_KEY)
+    )
+    assert both.template_origin == "https://templates.example.com"
+    assert both.frame_token_key == FRAME_KEY
+    assert FRAME_KEY not in repr(both)
+    for one in (
+        {"TUTOR_TEMPLATE_ORIGIN": "https://templates.example.com"},
+        {"TUTOR_FRAME_TOKEN_KEY": FRAME_KEY},
+    ):
+        with pytest.raises(SystemExit, match="must be set together"):
+            Settings.from_env(env(**one))
+    with pytest.raises(SystemExit, match="must be set together"):
+        replace(plain, template_origin="https://templates.example.com")
+
+
+def test_loopback_dev_template_origin_is_a_localhost_subdomain() -> None:
+    s = Settings.from_env(
+        env(
+            TUTOR_BASE_URL="http://localhost:8000",
+            TUTOR_TEMPLATE_ORIGIN="http://templates.localhost:8000",
+            TUTOR_FRAME_TOKEN_KEY=FRAME_KEY,
+        )
+    )
+    assert s.template_origin == "http://templates.localhost:8000"
+
+
+@pytest.mark.parametrize(
+    ("base", "origin", "message"),
+    [
+        ("https://tutor.example.com", "https://tutor.example.com:8443", "host of its own"),
+        ("https://tutor.example.com", "http://templates.example.com", "https origin"),
+        ("https://tutor.example.com", "https://templates.example.com/raw", "https origin"),
+        ("https://tutor.example.com", "http://templates.localhost", "scheme of TUTOR_BASE_URL"),
+        ("http://localhost:8000", "http://127.0.0.2:8000", "lower case"),
+        ("https://tutor.example.com", "https://Templates.example.com", "lower case"),
+        ("http://127.0.0.1:8000", "http://templates.localhost:8000", "http://localhost"),
+    ],
+)
+def test_bad_template_origins_are_named_without_values(
+    base: str, origin: str, message: str
+) -> None:
+    with pytest.raises(SystemExit, match=message) as info:
+        Settings.from_env(
+            env(TUTOR_BASE_URL=base, TUTOR_TEMPLATE_ORIGIN=origin, TUTOR_FRAME_TOKEN_KEY=FRAME_KEY)
+        )
+    assert PRIVATE_MARKER not in str(info.value)
+    assert FRAME_KEY not in str(info.value)
+
+
+def test_frame_key_is_long_and_its_own() -> None:
+    origin = {"TUTOR_TEMPLATE_ORIGIN": "https://templates.example.com"}
+    with pytest.raises(SystemExit, match="TUTOR_FRAME_TOKEN_KEY must be at least 32"):
+        Settings.from_env(env(**origin, TUTOR_FRAME_TOKEN_KEY="short"))  # noqa: S106
+    storage = Fernet.generate_key().decode()
+    for reused in ("j" * 40, storage):
+        with pytest.raises(SystemExit, match="must not share a value") as info:
+            Settings.from_env(
+                env(**origin, TUTOR_OAUTH_STORAGE_KEY=storage, TUTOR_FRAME_TOKEN_KEY=reused)
+            )
+        assert reused not in str(info.value)

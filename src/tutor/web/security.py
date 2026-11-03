@@ -10,12 +10,6 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from tutor.web.assets import AssetManifest
 
-CSP = (
-    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
-    "font-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; "
-    "form-action 'self' https://accounts.google.com; frame-ancestors 'none'; base-uri 'none'; "
-    "object-src 'none'"
-)
 # The policy every route that serves a composed template sends (the web frame and slice C's
 # app_frame), from its own origin with no cookies (ADR 0005 decision 8, spec 9 and 10). Scripts
 # and styles inline only, images only as data: URLs built by the template's own script, no
@@ -27,8 +21,31 @@ TEMPLATE_FRAME_CSP = (
     "style-src 'unsafe-inline'; img-src data:; connect-src 'none'; form-action 'none'"
 )
 _ORIGIN = re.compile(r"https://[a-z0-9.-]+(?::\d{1,5})?|http://localhost(?::\d{1,5})?")
+# A template origin: https, or http on localhost or a *.localhost name (a distinct origin that
+# browsers resolve to loopback); or 'none' when no template origin is configured.
+_ORIGIN_FORM = re.compile(
+    r"'none'|https://[a-z0-9.-]+(?::\d{1,5})?|http://(?:[a-z0-9-]+\.)*localhost(?::\d{1,5})?"
+)
 MAX_NEXT_LENGTH = 512  # bounds what an anonymous login session can store
 _HSTS = "max-age=31536000; includeSubDomains"
+
+
+def dashboard_csp(template_origin: str | None) -> str:
+    """The website's policy. `frame-src` names exactly the template origin when one is
+    configured (spec 10, binding (b)), else nothing may be framed; nothing may frame the site."""
+    frames = template_origin if template_origin is not None else "'none'"
+    if not _ORIGIN_FORM.fullmatch(frames):
+        raise ValueError("template_origin must be one origin")
+    return (
+        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+        "font-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; "
+        f"frame-src {frames}; "
+        "form-action 'self' https://accounts.google.com; frame-ancestors 'none'; base-uri 'none'; "
+        "object-src 'none'"
+    )
+
+
+CSP = dashboard_csp(None)
 
 
 def template_frame_csp(dashboard_origin: str) -> str:
@@ -43,9 +60,10 @@ def template_frame_csp(dashboard_origin: str) -> str:
 class SecurityHeadersMiddleware:
     """Outermost layer: every response, including error pages, gets the same headers."""
 
-    def __init__(self, app: ASGIApp, assets: AssetManifest) -> None:
+    def __init__(self, app: ASGIApp, assets: AssetManifest, csp: str = CSP) -> None:
         self.app = app
         self.assets = assets
+        self.csp = csp
 
     def _is_versioned(self, path: str, query: bytes) -> bool:
         if not path.startswith("/static/"):
@@ -72,7 +90,7 @@ class SecurityHeadersMiddleware:
         async def send_with_headers(message: Message) -> None:
             if message["type"] == "http.response.start":
                 headers = MutableHeaders(scope=message)
-                headers["Content-Security-Policy"] = CSP
+                headers["Content-Security-Policy"] = self.csp
                 headers["Strict-Transport-Security"] = _HSTS
                 headers["X-Content-Type-Options"] = "nosniff"
                 headers["Referrer-Policy"] = "same-origin"

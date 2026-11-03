@@ -35,6 +35,7 @@ from tutor.services.context import Services
 from tutor.settings import Settings, is_loopback
 from tutor.web.app import create_app
 from tutor.web.config import MCP_PATH, WebConfig
+from tutor.web.frames import FrameTokens, FrameUrl, make_frame_url
 from tutor.web.pg import (
     PURGE_ABSOLUTE,
     PURGE_ANONYMOUS,
@@ -44,6 +45,7 @@ from tutor.web.pg import (
 )
 from tutor.web.profile import ServicesProfiles, install_profiles
 from tutor.web.sessions import ANONYMOUS_LIFETIME
+from tutor.web.template_origin import InstanceDocument, TemplateOriginApp
 
 Scope = MutableMapping[str, Any]
 Message = MutableMapping[str, Any]
@@ -290,13 +292,31 @@ class PeriodicPurge:
 
 
 class PathDispatch:
-    """Lifespan goes to the MCP app; requests go by path; no web app means 404 JSON."""
+    """Lifespan goes to the MCP app; a request on the template host goes to the template
+    origin whatever its path (spec 10, binding (d)); other requests go by path; no web app
+    means 404 JSON."""
 
-    def __init__(self, mcp_app: ASGIApp, web_app: ASGIApp | None) -> None:
+    def __init__(
+        self,
+        mcp_app: ASGIApp,
+        web_app: ASGIApp | None,
+        *,
+        template_app: ASGIApp | None = None,
+        template_host: str | None = None,
+    ) -> None:
+        if (template_app is None) != (template_host is None):
+            raise ValueError("template_app and template_host go together")
         self.mcp_app = mcp_app
         self.web_app = web_app
+        self.template_app = template_app
+        self.template_host = template_host.lower() if template_host else None
+        # The website's frame src factory (tutor.web.frames.make_frame_url); integration
+        # installs it on the web app. None when no template origin is configured.
+        self.frame_url: FrameUrl | None = None
 
-    def route(self, path: str) -> ASGIApp | None:
+    def route(self, path: str, host: str | None = None) -> ASGIApp | None:
+        if self.template_host is not None and host == self.template_host:
+            return self.template_app
         if path in MCP_PATHS or path.startswith(WELL_KNOWN_PREFIX):
             return self.mcp_app
         return self.web_app
@@ -305,13 +325,24 @@ class PathDispatch:
         if scope["type"] == "lifespan":
             await self.mcp_app(scope, receive, send)
             return
-        app = self.route(scope.get("path", ""))
+        app = self.route(scope.get("path", ""), request_host(scope))
         if app is not None:
             await app(scope, receive, send)
         elif scope["type"] == "websocket":
             await send({"type": "websocket.close", "code": 1000})
         else:
             await send_json(send, 404, {"error": "not_found"})
+
+
+def request_host(scope: Scope) -> str | None:
+    """The Host header's name, lower case, without the port; None when absent."""
+    for name, value in scope.get("headers", []):
+        if name.lower() == b"host":
+            host = value.decode("latin-1").strip().lower()
+            if host.startswith("["):  # an IPv6 literal keeps its brackets
+                return host.split("]", 1)[0] + "]"
+            return host.rsplit(":", 1)[0] if ":" in host else host
+    return None
 
 
 def _utc_now() -> datetime:
@@ -336,7 +367,11 @@ def dev_mcp_hosts(settings: Settings) -> list[str]:
 
 
 def build_app(
-    settings: Settings, *, engine: Engine | None = None, web_config: WebConfig | None = None
+    settings: Settings,
+    *,
+    engine: Engine | None = None,
+    web_config: WebConfig | None = None,
+    instance_document: InstanceDocument | None = None,
 ) -> PathDispatch:
     """MCP + OAuth proxy and the website, both behind the body-size guard and the request log.
 
@@ -344,12 +379,16 @@ def build_app(
     purges expired web sessions at startup and then hourly. With TUTOR_DEV_AUTH (loopback dev
     only) the OAuth proxy and its discovery routes are replaced by the dev token verifier, and
     the MCP side answers only loopback Host names (TrustedHost, as the website does), and both
-    sides refuse requests carrying Forwarded or X-Forwarded-* headers (RejectProxyHeaders)."""
+    sides refuse requests carrying Forwarded or X-Forwarded-* headers (RejectProxyHeaders).
+    With a template origin, requests on its host reach only `TemplateOriginApp`, which serves
+    `instance_document` (404 for everything while it is None)."""
     engine = engine if engine is not None else make_engine(settings.database_url)
     on_postgres = engine.dialect.name == "postgresql"
     if on_postgres:
         check_app_role(engine)  # RLS must bind this login role; SystemExit otherwise
     config = web_config if web_config is not None else web_config_from_env(os.environ)
+    if config.template_origin != settings.template_origin:
+        raise SystemExit("TUTOR_TEMPLATE_ORIGIN must be the same for the website and the server")
     svc = Services(
         uow=pg_uow_factory(engine),
         clock=_utc_now,
@@ -373,7 +412,22 @@ def build_app(
     if settings.dev_auth:
         web_app = RejectProxyHeaders(web_app)  # covers /auth/dev-login
     web_app = RequestLog(web_app)
-    return PathDispatch(mcp_app, web_app=web_app)
+    if settings.template_origin is None or settings.frame_token_key is None:
+        return PathDispatch(mcp_app, web_app=web_app)
+    tokens = FrameTokens(settings.frame_token_key, settings.template_origin)
+    template_app: ASGIApp = BodySizeGuard(
+        TemplateOriginApp(tokens, instance_document, settings.base_url)
+    )
+    if settings.dev_auth:
+        template_app = RejectProxyHeaders(template_app)
+    dispatch = PathDispatch(
+        mcp_app,
+        web_app=web_app,
+        template_app=RequestLog(template_app),
+        template_host=urlsplit(settings.template_origin).hostname,
+    )
+    dispatch.frame_url = make_frame_url(tokens, settings.template_origin)
+    return dispatch
 
 
 def _session_purge(

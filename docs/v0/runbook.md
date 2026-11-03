@@ -48,6 +48,19 @@ Git Bash on Windows rewrites arguments that start with `/` (for example `/app/..
 6. **Bot protection.** On Free, Bot Fight Mode cannot be skipped for any source, and it will challenge Claude's connector calls: turn it **off** for the zone (Security, Bots) and rely on the rate limit. On Pro or higher use Super Bot Fight Mode and extend the skip rule above with Super Bot Fight Mode and the remaining custom rules for `ip.src in {160.79.104.0/21}`, the same range the spike runbook (`spike/README.md`) skips.
 7. The application trusts `X-Forwarded-*` only from the cloudflared container (`FORWARDED_ALLOW_IPS=172.30.10.3`, its fixed address on the `edge` network; dynamic addresses come from `172.30.10.128/25`, so they can never take it). If `172.30.10.0/24` collides with your LAN or another Docker network, pick another /24 in `compose.prod.yml` and set the same address in `tutor.env`.
 
+## Template origin
+
+The website shows template instances only in sandboxed frames loaded from a **second hostname** (spec 9 and 10, ADR 0005 decision 8). That host is served by the same container. The app routes every request whose `Host` is the template host to a separate ASGI app. That app answers only `GET /app/instances/<uuid>/raw?t=<frame token>`: no cookies, no redirects, and 404 for everything else. Every response it sends carries the sandbox policy (`template_frame_csp`, `frame-ancestors` = the website origin). The dashboard CSP's `frame-src` names exactly this origin.
+
+1. **DNS and tunnel.** Add a second public hostname on the same tunnel (Cloudflare) or the same Coolify resource, for example `templates.<host>`, pointing at the same `app:8000` service. It must be a different host from `<host>`, not just a different port. Apply the Cache Rule (bypass) and HTTPS settings of the edge section to it too.
+2. **Coolify.** Add the hostname as a second domain on the same `app` service. Set the two variables below in its environment, as with the other secrets.
+3. **Logs.** The frame token travels in the query string. The reverse proxy and the tunnel must not log query strings for this host. The app's own request log never logs them, and records the route template only.
+4. **Variables** (`tutor.env`, Coolify, `local.env`, `dev.env`):
+   - `TUTOR_TEMPLATE_ORIGIN`: `https://templates.<host>` (https, no path; in the dev profile `http://templates.localhost:8000`, a distinct origin that browsers resolve to loopback).
+   - `TUTOR_FRAME_TOKEN_KEY`: at least 32 characters (`openssl rand -base64 48`), its own value. The server refuses one equal to `TUTOR_JWT_SIGNING_KEY` or `TUTOR_OAUTH_STORAGE_KEY`. Rotating it only breaks frames already on screen: tokens live 5 minutes and are single use within the process.
+   - Both are optional **as a pair**. Both empty is the current production state: the website shows notes without frames, and the dashboard CSP has `frame-src 'none'`. One without the other stops the server.
+5. **Smoke check.** `curl -si https://templates.<host>/login` and `curl -si https://templates.<host>/mcp` return `404 Not found` with the `sandbox allow-scripts` CSP and no `Set-Cookie`. `https://<host>/login` carries `frame-src https://templates.<host>` in its CSP.
+
 ## First deploy
 
 1. Install Docker Engine with the Compose plugin. Create the deploy user and `/opt/tutor`. `git clone <repo> /opt/tutor && cd /opt/tutor && git checkout <release tag>`.

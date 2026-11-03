@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import re
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -12,8 +13,16 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from tutor.domain.dashboard.types import Lang, Role, User
 from tutor.web import i18n
-from tutor.web.app import ErrorGuardMiddleware
-from tutor.web.security import CSP, TEMPLATE_FRAME_CSP, safe_next, template_frame_csp
+from tutor.web.app import ErrorGuardMiddleware, create_app
+from tutor.web.config import WebConfig
+from tutor.web.memory import FixedClock, MemoryBackend, memory_deps
+from tutor.web.security import (
+    CSP,
+    TEMPLATE_FRAME_CSP,
+    dashboard_csp,
+    safe_next,
+    template_frame_csp,
+)
 
 
 def test_login_page_renders_in_spanish_with_security_headers(client: TestClient) -> None:
@@ -304,3 +313,40 @@ def test_template_frame_policy_is_the_binding_one() -> None:
     for bad in ("", "'self'", "*", "https://a.example https://b.example", "https://x;y"):
         with pytest.raises(ValueError):
             template_frame_csp(bad)
+
+
+def test_dashboard_csp_frames_only_the_template_origin_and_is_never_framed() -> None:
+    # Spec 10, binding (b): frame-src is exactly the template origin; nothing frames the site.
+    directives = CSP.split("; ")
+    assert "frame-src 'none'" in directives and "frame-ancestors 'none'" in directives
+    framed = dashboard_csp("https://templates.tutor.example").split("; ")
+    assert [d for d in framed if d.startswith("frame-src")] == [
+        "frame-src https://templates.tutor.example"
+    ]
+    assert "frame-ancestors 'none'" in framed
+    assert [d for d in framed if not d.startswith("frame-src")] == [
+        d for d in directives if not d.startswith("frame-src")
+    ]
+    assert "frame-src http://templates.localhost:8000" in dashboard_csp(
+        "http://templates.localhost:8000"
+    )
+    for bad in (
+        "",
+        "*",
+        "'self'",
+        "https://a.example https://b.example",
+        "https://x;y",
+        "http://x",
+    ):
+        with pytest.raises(ValueError):
+            dashboard_csp(bad)
+
+
+def test_a_configured_template_origin_reaches_the_dashboard_csp(
+    backend: MemoryBackend, clock: FixedClock, config: WebConfig
+) -> None:
+    framed = replace(config, template_origin="https://templates.localhost")
+    app = create_app(memory_deps(backend, clock), framed)
+    with TestClient(app, base_url="https://localhost") as client:
+        csp = client.get("/login").headers["content-security-policy"]
+    assert csp == dashboard_csp("https://templates.localhost")

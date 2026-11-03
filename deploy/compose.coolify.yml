@@ -85,6 +85,10 @@ services:
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
       TUTOR_JWT_SIGNING_KEY: ${TUTOR_JWT_SIGNING_KEY}
       TUTOR_OAUTH_STORAGE_KEY: ${TUTOR_OAUTH_STORAGE_KEY}
+      # Optional pair (runbook "Template origin"): both empty, the website shows no template
+      # frames; one without the other, the server refuses to start.
+      TUTOR_TEMPLATE_ORIGIN: ${TUTOR_TEMPLATE_ORIGIN}
+      TUTOR_FRAME_TOKEN_KEY: ${TUTOR_FRAME_TOKEN_KEY}
       TUTOR_OAUTH_STORAGE_DIR: /data/oauth
       TUTOR_PORT: "8000"
       TUTOR_HOST: 0.0.0.0

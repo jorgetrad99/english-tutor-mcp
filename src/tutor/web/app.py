@@ -26,7 +26,7 @@ from tutor.web.deps import (
 )
 from tutor.web.ports import WebDeps
 from tutor.web.routes import all_routers
-from tutor.web.security import SecurityHeadersMiddleware
+from tutor.web.security import SecurityHeadersMiddleware, dashboard_csp
 from tutor.web.sessions import ServerSessionMiddleware
 from tutor.web.views import Views, is_htmx, render
 
@@ -51,7 +51,11 @@ def create_app(deps: WebDeps, config: WebConfig) -> FastAPI:
     app.add_middleware(ErrorGuardMiddleware)
     host = urlsplit(config.base_url).hostname or "localhost"
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=[host])
-    app.add_middleware(SecurityHeadersMiddleware, assets=app.state.assets)
+    app.add_middleware(
+        SecurityHeadersMiddleware,
+        assets=app.state.assets,
+        csp=dashboard_csp(config.template_origin),
+    )
     return app
 
 
