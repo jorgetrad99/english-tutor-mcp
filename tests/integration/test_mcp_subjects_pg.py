@@ -8,6 +8,7 @@ from fastmcp import Client
 from mcp_lesson import Clock, call, random_sub, text_of
 from sqlalchemy import Engine
 
+from tutor.domain.html_guard import MAX_ARTIFACT_BYTES
 from tutor.mcp import rules
 
 from .test_mcp_lesson_pg import server, signed_in
@@ -96,3 +97,39 @@ async def test_subjects_tools_on_postgres_with_the_login_role(login_engine: Engi
                 assert result.is_error, tool
                 body = json.loads(text_of(result))
                 assert (body["code"], body["fields"]) == ("not_found", [field]), tool
+
+
+def sized_html(size: int) -> str:
+    """A complete document of exactly `size` UTF-8 bytes, mostly two-byte characters."""
+    head, tail = "<!doctype html><html><body><p>", "</p></body></html>"
+    room = size - len(head) - len(tail)
+    return head + "é" * (room // 2) + "a" * (room % 2) + tail
+
+
+@pytest.mark.asyncio
+async def test_an_artifact_at_the_byte_cap_saves_and_one_byte_over_is_validation_failed(
+    login_engine: Engine,
+) -> None:
+    """The domain cap sits under the database CHECK: neither side is internal_error."""
+    at_cap, over = sized_html(MAX_ARTIFACT_BYTES), sized_html(MAX_ARTIFACT_BYTES + 1)
+    assert (len(at_cap.encode()), len(over.encode())) == (
+        MAX_ARTIFACT_BYTES,
+        MAX_ARTIFACT_BYTES + 1,
+    )
+    with signed_in(random_sub()):
+        async with Client(server(login_engine, Clock())) as client:
+            subject_id = (await call(client, "save_subject", SUBJECT_ARGS))["subject"]["subject_id"]
+            saved = await call(client, "save_notes", {"subject_id": subject_id, "notes": [NOTE]})
+            note_id = saved["notes"][0]["note_id"]
+            args = {"note_id": note_id, "artifact_kind": "lesson_view", "title": "Vista"}
+            artifact = await call(client, "save_artifact", {**args, "html": at_cap})
+            fetched = await call(client, "get_artifact", {"artifact_id": artifact["artifact_id"]})
+            result = await client.call_tool(
+                "save_artifact", {**args, "html": over}, raise_on_error=False
+            )
+            listed = await call(client, "get_note", {"note_id": note_id})
+    assert fetched["html"] == at_cap
+    assert result.is_error
+    body = json.loads(text_of(result))
+    assert (body["code"], body["fields"]) == ("validation_failed", ["html"])
+    assert [a["artifact_id"] for a in listed["artifacts"]] == [artifact["artifact_id"]]

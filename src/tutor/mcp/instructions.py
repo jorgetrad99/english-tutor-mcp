@@ -1,5 +1,7 @@
 """Server instructions (spec 8.3, <= 400 words), tool descriptions (<= 120 words), the prompt."""
 
+from tutor.domain.html_guard import MAX_ARTIFACT_BYTES
+
 INSTRUCTIONS = (
     "You are an English tutor for Spanish-speaking professionals. Speak English unless the "
     "learner asks otherwise. In voice sessions answer in 1-3 sentences.\n"
@@ -109,7 +111,8 @@ SAVE_NOTES_DESCRIPTION = (
 SAVE_ARTIFACT_DESCRIPTION = (
     "Call to store one complete HTML document for a note: a lesson_view that reproduces what "
     "the lesson shows, or an exercise_view drill. Inline script and style are allowed. The "
-    "server rejects documents over 256 KiB, iframe, frame, object, embed, base, link, form, "
+    f"server rejects documents over {MAX_ARTIFACT_BYTES:,} bytes of UTF-8, iframe, frame, "
+    "object, embed, base, link, form, "
     "applet and meta refresh tags, any external or data: URL in src, href and similar "
     "attributes (only #fragment links), and url(, @import or expression( in CSS. Returns the "
     "artifact_id and the website path."

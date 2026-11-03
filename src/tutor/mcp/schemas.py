@@ -1382,7 +1382,7 @@ ArtifactHtml = Annotated[
         title="HTML",
         description=(
             "One complete HTML document starting with <!doctype html> or <html>, at most "
-            "256 KiB in UTF-8, with no external resources."
+            f"{MAX_ARTIFACT_BYTES:,} bytes in UTF-8, with no external resources."
         ),
         min_length=1,
         max_length=MAX_ARTIFACT_BYTES,

@@ -1,4 +1,5 @@
 import pytest
+
 from tutor.domain.html_guard import (
     ARTIFACT_KINDS,
     ARTIFACT_TITLE_MAX,
@@ -17,7 +18,7 @@ def doc(body: str = "", head: str = HEAD, start: str = "<!doctype html>") -> str
 
 
 def test_constants() -> None:
-    assert MAX_ARTIFACT_BYTES == 262_144
+    assert MAX_ARTIFACT_BYTES == 40_000  # room for JSON escaping in a 64 KB body
     assert ARTIFACT_KINDS == ("lesson_view", "exercise_view", "other")
     assert ARTIFACT_TITLE_MAX == 200
 

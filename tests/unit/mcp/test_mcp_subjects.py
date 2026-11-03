@@ -181,11 +181,22 @@ def test_descriptions_say_what_the_spec_asks() -> None:
     assert "16,000 characters" in ingest
     assert "describe images" in ingest.lower() and "never download" in ingest.lower()
     artifact = TOOL_DESCRIPTIONS["save_artifact"]
-    for phrase in ("iframe", "external", "url(", "script"):
+    for phrase in ("iframe", "external", "url(", "script", f"{MAX_ARTIFACT_BYTES:,} bytes"):
         assert phrase in artifact, phrase
     search = TOOL_DESCRIPTIONS["search_notes"]
     assert "excerpts" in search and "lesson" in search
     assert "get_subjects" in INSTRUCTIONS and "search_notes" in INSTRUCTIONS
+
+
+@pytest.mark.asyncio
+async def test_the_artifact_html_field_states_the_byte_cap_from_the_constant() -> None:
+    async with Client(World().mcp) as client:
+        tools = {tool.name: tool for tool in await client.list_tools()}
+    html = tools["save_artifact"].input_schema["properties"]["html"]
+    assert f"{MAX_ARTIFACT_BYTES:,} bytes" in html["description"]
+    assert html["maxLength"] == MAX_ARTIFACT_BYTES
+    assert "KiB" not in html["description"]
+    assert "KiB" not in TOOL_DESCRIPTIONS["save_artifact"]
 
 
 # --- subjects -----------------------------------------------------------------------------------
@@ -535,7 +546,7 @@ async def test_artifacts_that_try_to_escape_are_rejected_on_html(html: str) -> N
 
 @pytest.mark.asyncio
 async def test_an_artifact_one_byte_over_the_cap_is_rejected() -> None:
-    """Review Focus 6: 262,145 bytes."""
+    """Review Focus 6: 40,001 bytes."""
     head = "<!doctype html><html><body><p>"
     tail = "</p></body></html>"
     html = head + "é" * ((MAX_ARTIFACT_BYTES + 1 - len(head) - len(tail)) // 2) + tail

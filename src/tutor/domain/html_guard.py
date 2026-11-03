@@ -9,7 +9,9 @@ from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import Literal
 
-MAX_ARTIFACT_BYTES = 262_144
+# UTF-8 bytes; leaves room for JSON escaping inside the 64 KB request body (BodySizeGuard).
+# The database CHECK (49,152 bytes, migration 0006) is only a backstop.
+MAX_ARTIFACT_BYTES = 40_000
 ARTIFACT_TITLE_MAX = 200
 
 ArtifactKind = Literal["lesson_view", "exercise_view", "other"]
