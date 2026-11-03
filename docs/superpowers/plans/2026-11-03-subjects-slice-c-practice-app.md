@@ -152,3 +152,7 @@ Spike 05; ruling 47.
 - Q2 bridge: `app_frame` for app mode and `show_exercise`; `artifact` for text mode. No acknowledgement-timeout fallback.
 - Q3 frame failure at run time: add a server skip path. The app calls `record_result` with a closed `skipped` outcome; the item is not graded, does not count toward accuracy, and the session continues. Record it as a ruling in Task 1.
 - Q4 spike item 8 pass rule: 4 of 5 attempts on claude.ai web and 4 of 5 on Claude Desktop before `NESTED_FRAME_VERIFIED` flips.
+
+## Open question from slice B (2026-11-03)
+
+- **How does the server tell an answer from the view apart from one Claude sends?** Slice B records every `record_result` with `source = chat` and takes a choice only as the 1-based `option_number` (slice B plan ruling 83, spec A61), because both arrive as the same `tools/call` on the chat's session and spec 7.2 rules out `visibility: ["app"]` in v0. Slice C must decide, with Context7 on `fastmcp.apps` and the MCP Apps spec, whether the app gets its own channel or tool (and with it `source = app` and the 0-based `option_index` of slice A ruling 36), or whether the app converts to `option_number` and `source` stays `chat`.
