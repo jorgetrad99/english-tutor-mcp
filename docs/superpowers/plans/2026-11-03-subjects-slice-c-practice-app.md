@@ -145,3 +145,10 @@ Spike 05; ruling 47.
 2. **Which bridge for an item the server cannot place.** `show_exercise` and the practice tools do not know whether the client renders apps. Proposed: `app_frame` in `app` mode and for `show_exercise`, `artifact` in `text` mode (ruling 42). Alternative: one bridge that posts to the app and, with no acknowledgement within a second, shows the artifact text ("Díselo a Claude"). Which one?
 3. **A `needs_view` item that is already drawn when the frame fails at run time** (the flag says verified, but one host blocks `srcdoc`): `next_exercise` returns the first unanswered item, so the session would stop there. Should the app show "este ejercicio necesita la vista interactiva; termina la sesión" and leave it unanswered, or does the server need a "skip" path (a new answer shape or tool, which the spec does not have)?
 4. **Spike pass rule for item 8.** Spike 05's pass criterion counts checks 1–4 only. How many of five attempts must item 8 pass, and on which surfaces, before `NESTED_FRAME_VERIFIED` becomes `True` (proposed: 4 of 5 on claude.ai web and on Desktop, as the other checks)?
+
+## Decisions by the controller (2026-11-03)
+
+- Q1 scope: slice C is the practice app, as the spec says. Whether subject metrics beyond slice B are wanted is asked to Jorge separately; nothing is added here until the spec defines them.
+- Q2 bridge: `app_frame` for app mode and `show_exercise`; `artifact` for text mode. No acknowledgement-timeout fallback.
+- Q3 frame failure at run time: add a server skip path. The app calls `record_result` with a closed `skipped` outcome; the item is not graded, does not count toward accuracy, and the session continues. Record it as a ruling in Task 1.
+- Q4 spike item 8 pass rule: 4 of 5 attempts on claude.ai web and 4 of 5 on Claude Desktop before `NESTED_FRAME_VERIFIED` flips.

@@ -212,3 +212,13 @@ Spec 15.13 D9, slice A ruling 29; ruling 59.
 5. **Upload body size.** `BodySizeGuard` caps every web request at 64 KB, which a 20 MB PDF and a 400,000-character paste (up to about 1.6 MB of UTF-8) exceed. Proposed: a per-path limit of 20 MB + 64 KB on `POST /app/materias/{id}/pdf` and 2 MB on `POST /app/materias/{id}/texto`, 64 KB everywhere else, and the same at the edge (Cloudflare tunnel, Coolify proxy). Do you accept these limits, and should the paste form exist at all (spec section 1 mentions pasting text; section 9 lists only the PDF form)?
 6. **Templates on the website beyond the retire button.** Spec 9 lists no templates page. This plan shows a list of active templates on the subject page (name, description, purpose, grading kind, active instance count) so the button has a place. Is that enough, or do you also want to see a template rendered (it needs an instance to show anything) or retired templates listed?
 7. **Retiring an instance from the website.** D9 covers templates only; instances are retired through `replaces_instance_id`. Do you want a retire button on note pages too, or not in v0?
+
+## Decisions by the controller (2026-11-03)
+
+- Q1 paths: follow the existing website (English paths with Spanish labels from the `.po` files), for consistency with `/app/glossary`. The spec's Spanish paths are read as labels.
+- Q2 retiring a template: its instances stay visible on note pages but are never drawn again in practice. `replaces_template_id` does the same for the old version.
+- Q3 PDF parsing: run in a subprocess killed at 20 s, with the size and page caps.
+- Q4 frame height: fixed height per purpose in v0.
+- Q5 upload size: per-path body limits, about 20 MB for the PDF route and 2 MB for the paste route; every other path keeps 64 KB. The paste form stays (Jorge asked for PDF and text uploads).
+- Q6 templates on the website: list of active templates with the retire button; previews and retired lists later.
+- Q7 instance retire button: not in v0; Claude replaces an instance with `replaces_instance_id`.
