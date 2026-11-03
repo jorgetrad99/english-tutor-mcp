@@ -9,7 +9,7 @@ from cryptography.fernet import Fernet
 from tutor.__main__ import run_kwargs
 from tutor.ops.provision_roles import KEYS as MIGRATE_KEYS
 from tutor.ops.provision_roles import check_inputs
-from tutor.settings import OWNER_ONLY_KEYS, Settings
+from tutor.settings import DEV_ONLY_KEYS, OWNER_ONLY_KEYS, Settings
 from tutor.web.config import WebConfig
 
 pytestmark = pytest.mark.unit
@@ -18,6 +18,8 @@ DEPLOY = Path(__file__).resolve().parents[3] / "deploy"
 SUFFIX = ".env.example"
 # The app never gets the owner URL (Settings reads it only for local tooling).
 OWNER_ONLY = set(OWNER_ONLY_KEYS)
+# Settings reads the dev-auth flag too, but no production file may carry it (dev environment D10).
+NEVER_IN_PROD = OWNER_ONLY | set(DEV_ONLY_KEYS)
 FULL = {
     "TUTOR_ENV": "prod",
     "TUTOR_BASE_URL": "https://tutor.example.com",
@@ -70,7 +72,7 @@ def test_app_example_lists_exactly_the_keys_the_server_reads() -> None:
     settings = Settings.from_env(env)
     WebConfig.from_env(env)
     run_kwargs(settings, env)
-    assert set(_pairs("tutor")) == env.read - OWNER_ONLY
+    assert set(_pairs("tutor")) == env.read - NEVER_IN_PROD
 
 
 def test_app_example_has_production_values_and_no_owner_url() -> None:
@@ -81,7 +83,7 @@ def test_app_example_has_production_values_and_no_owner_url() -> None:
     assert pairs["TUTOR_OAUTH_STORAGE_DIR"] == "/data/oauth"
     assert pairs["FORWARDED_ALLOW_IPS"] and "*" not in pairs["FORWARDED_ALLOW_IPS"]
     assert pairs["TUTOR_TEST_LOGIN"] == ""
-    assert not set(pairs) & {*OWNER_ONLY, "POSTGRES_PASSWORD", "TUNNEL_TOKEN", "APP_DB_PASSWORD"}
+    assert not set(pairs) & {*NEVER_IN_PROD, "POSTGRES_PASSWORD", "TUNNEL_TOKEN", "APP_DB_PASSWORD"}
     assert pairs["DATABASE_URL"].startswith("postgresql://")
 
 
