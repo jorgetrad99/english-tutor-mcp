@@ -74,6 +74,9 @@ services:
     env_file: deploy/dev.env
     environment:
       TUTOR_DEV_AUTH: "1"
+      # migrate-dev's credentials (same file): blank here, so the running app never holds them.
+      MIGRATION_DATABASE_URL: ""
+      REPORT_DB_PASSWORD: ""
     volumes:
       - ./src:/src/src
     ports:

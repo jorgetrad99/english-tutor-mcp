@@ -2,8 +2,8 @@
 
 `db` and `db-test` keep no profile and publish on loopback only (superuser tutor:tutor); the dev
 services carry the profile, bind to loopback, run the `dev` Dockerfile target from the bind-mounted
-./src, and are the only place TUTOR_DEV_AUTH is set. No production file (compose or env example)
-carries the flag or the dev target.
+./src, and are the only place TUTOR_DEV_AUTH is set. app-dev never holds the owner URL or the
+report password. No production file (compose or env example) carries the flag or the dev target.
 """
 
 import re
@@ -19,6 +19,8 @@ pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[3]
 DEPLOY = ROOT / "deploy"
 DEV_SERVICES = ("migrate-dev", "app-dev")
+# In deploy/dev.env for migrate-dev (migrations, provision_roles); blanked for the running app.
+MIGRATE_ONLY_CREDENTIALS = ("MIGRATION_DATABASE_URL", "REPORT_DB_PASSWORD")
 PROD_COMPOSE = ("compose.prod.yml", "compose.coolify.yml", "compose.local.yml")
 PROD_EXAMPLES = ("tutor", "local-docker", "local", "db", "migrate", "tunnel")
 
@@ -145,6 +147,18 @@ def test_dev_env_feeds_the_app_services_only_and_is_git_ignored() -> None:
         capture_output=True,
     )
     assert tracked.returncode != 0
+
+
+def test_app_dev_never_holds_the_owner_url_or_the_report_password() -> None:
+    # One generated file feeds both dev services; compose `environment` overrides `env_file`, so
+    # the running app sees these keys blank (Settings treats blank as unset) and migrate-dev keeps
+    # the values from the file.
+    dev_keys = _example_keys("dev")
+    app, migrate = _env("app-dev"), _env("migrate-dev")
+    for key in MIGRATE_ONLY_CREDENTIALS:
+        assert key in dev_keys, key
+        assert app.get(key) == "", key
+        assert key not in migrate, key
 
 
 def test_the_inspector_is_not_a_compose_service() -> None:
