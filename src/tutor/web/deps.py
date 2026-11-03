@@ -98,6 +98,7 @@ async def require_csrf(request: Request) -> None:
         field = (await request.form(max_part_size=FORM_PART_MAX_BYTES)).get(CSRF_FIELD)
         sent = field if isinstance(field, str) else None
     if not expected or not sent or not secrets.compare_digest(sent.encode(), expected.encode()):
+        await request.close()  # a parsed form's spooled files go now, not with the request
         raise HTTPException(status_code=403)
 
 
@@ -124,14 +125,14 @@ class WriteLimits:
         self.profile_saves = SlidingWindowLimiter(PROFILE_SAVES_PER_MINUTE, 60.0, clock)
 
 
-def limit_writes(request: Request) -> None:
+async def limit_writes(request: Request) -> None:
     """Unsafe methods on /app: 429 over the per-user caps. Runs after `require_csrf`, so forged
-    or anonymous requests never spend a learner's allowance. Blocking-free but sync (it loads
-    the user through a port), so FastAPI runs it in a worker thread."""
+    or anonymous requests never spend a learner's allowance. The user comes through a port, so
+    in a worker thread. A form `require_csrf` parsed is closed before the 429."""
     path = request.url.path
     if request.method in _SAFE_METHODS or not (path == "/app" or path.startswith("/app/")):
         return
-    user = optional_user(request)
+    user = await run_in_threadpool(optional_user, request)
     limits: WriteLimits | None = getattr(request.app.state, "write_limits", None)
     if user is None or limits is None:
         return
@@ -140,6 +141,7 @@ def limit_writes(request: Request) -> None:
     if allowed and path == PROFILE_SAVE_PATH:
         allowed = limits.profile_saves.allow(key)
     if not allowed:
+        await request.close()
         raise HTTPException(status_code=429, headers={"Retry-After": "60"})
 
 

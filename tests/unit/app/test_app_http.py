@@ -19,6 +19,7 @@ from mcp_lesson import NOW
 from tutor.app import (
     MAX_BODY_BYTES,
     MAX_CONCURRENT_UPLOADS,
+    MAX_UPLOADS_PER_SESSION,
     BodySizeGuard,
     Message,
     PathDispatch,
@@ -26,10 +27,12 @@ from tutor.app import (
     RequestLog,
     Scope,
     Send,
+    UploadRule,
     body_limit,
     build_app,
     has_session_cookie,
     send_json,
+    session_cookie_value,
 )
 from tutor.auth.mcp_auth import build_google_provider
 from tutor.mcp.server import build_mcp
@@ -487,18 +490,134 @@ async def test_more_uploads_at_once_than_the_cap_get_503() -> None:
     path = f"/app/subjects/{SUBJECT}/pdf"
     async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
         held = [
-            asyncio.create_task(client.post(path, content=b"x", headers=SESSION))
-            for _ in range(MAX_CONCURRENT_UPLOADS)
+            asyncio.create_task(client.post(path, content=b"x", headers=session_of(f"s{n}")))
+            for n in range(MAX_CONCURRENT_UPLOADS)
         ]
         await asyncio.wait_for(entered.wait(), 5)
-        extra = await client.post(path, content=b"x", headers=SESSION)
+        extra = await client.post(path, content=b"x", headers=session_of("another"))
         release.set()
         statuses = [(await task).status_code for task in held]
         after = await client.post(path, content=b"x", headers=SESSION)
     assert (extra.status_code, extra.json()) == (503, {"error": "busy"})
     assert statuses == [200] * MAX_CONCURRENT_UPLOADS
     assert after.status_code == 200
+    assert guard._uploads == 0 and guard._per_session == {}
+
+
+def session_of(value: str) -> dict[str, str]:
+    return {"cookie": f"__Host-tutor_session={value}"}
+
+
+@pytest.mark.asyncio
+async def test_one_session_holds_at_most_two_upload_slots() -> None:
+    # Security review P3: one learner cannot take every upload slot.
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    inside = 0
+
+    async def slow(scope: Scope, receive: Receive, send: Send) -> None:
+        nonlocal inside
+        await receive()
+        inside += 1
+        if inside == MAX_UPLOADS_PER_SESSION:
+            entered.set()
+        await release.wait()
+        await send_json(send, 200, {})
+
+    guard = BodySizeGuard(slow)
+    transport = httpx.ASGITransport(app=guard)
+    path = f"/app/subjects/{SUBJECT}/text"
+    async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
+        held = [
+            asyncio.create_task(client.post(path, content=b"x", headers=SESSION))
+            for _ in range(MAX_UPLOADS_PER_SESSION)
+        ]
+        await asyncio.wait_for(entered.wait(), 5)
+        same = await client.post(path, content=b"x", headers=SESSION)
+        assert len(guard._per_session) == 1
+        assert "opaque-value" not in next(iter(guard._per_session))  # hashed, never raw
+        other = asyncio.create_task(client.post(path, content=b"x", headers=session_of("b")))
+        await asyncio.sleep(0.05)
+        release.set()
+        statuses = [(await task).status_code for task in held]
+        assert (await other).status_code == 200
+    assert (same.status_code, same.json()) == (503, {"error": "busy"})
+    assert statuses == [200] * MAX_UPLOADS_PER_SESSION
+    assert guard._uploads == 0 and guard._per_session == {}
+
+
+def test_the_session_cookie_value_is_read_from_the_header() -> None:
+    assert session_cookie_value(b"lang=es; __Host-tutor_session=abc ; x=1") == b"abc"
+    assert session_cookie_value(b"__Host-tutor_session=") is None
+    assert session_cookie_value(None) is None
+
+
+QUICK_TEXT = UploadRule(re.compile(rf"/app/subjects/{SUBJECT}/text"), TEXT_LIMIT, 0.2)
+UPLOAD_SCOPE: Scope = {
+    "type": "http",
+    "method": "POST",
+    "path": f"/app/subjects/{SUBJECT}/text",
+    "headers": [(b"cookie", b"__Host-tutor_session=slow")],
+}
+
+
+async def _drive_slow(receive: Receive) -> tuple[BodySizeGuard, list[str], list[Message]]:
+    seen: list[str] = []
+    sent: list[Message] = []
+
+    async def reader(scope: Scope, receive: Receive, send: Send) -> None:
+        while True:
+            message = await receive()
+            seen.append(message["type"])
+            if message["type"] == "http.disconnect" or not message.get("more_body", False):
+                break
+        await send_json(send, 200, {"ok": True})  # dropped once the deadline passed
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    guard = BodySizeGuard(reader, rules=(QUICK_TEXT,))
+    await asyncio.wait_for(guard(UPLOAD_SCOPE, receive, send), 5)
+    return guard, seen, sent
+
+
+@pytest.mark.asyncio
+async def test_a_stalled_upload_body_gets_408_at_the_deadline_and_frees_its_slot() -> None:
+    calls = 0
+
+    async def stalled() -> Message:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return {"type": "http.request", "body": b"x", "more_body": True}
+        await asyncio.sleep(10)  # the client sends nothing more
+        return {"type": "http.request", "body": b"", "more_body": False}  # pragma: no cover
+
+    guard, seen, sent = await _drive_slow(stalled)
+    assert seen == ["http.request", "http.disconnect"]
+    assert sent[0]["status"] == 408 and json.loads(sent[1]["body"]) == {"error": "timeout"}
+    assert guard._uploads == 0 and guard._per_session == {}
+
+
+@pytest.mark.asyncio
+async def test_the_deadline_is_for_the_whole_body_not_each_chunk() -> None:
+    async def dripping() -> Message:
+        await asyncio.sleep(0.05)  # each chunk is quick, the body never ends
+        return {"type": "http.request", "body": b"x", "more_body": True}
+
+    guard, seen, sent = await _drive_slow(dripping)
+    assert seen[-1] == "http.disconnect" and 3 <= len(seen) <= 6
+    assert sent[0]["status"] == 408
     assert guard._uploads == 0
+
+
+@pytest.mark.asyncio
+async def test_a_body_in_time_is_not_cut_by_the_deadline() -> None:
+    async def quick() -> Message:
+        return {"type": "http.request", "body": b"x", "more_body": False}
+
+    _guard, seen, sent = await _drive_slow(quick)
+    assert seen == ["http.request"] and sent[0]["status"] == 200
 
 
 @pytest.mark.asyncio

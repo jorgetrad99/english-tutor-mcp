@@ -8,18 +8,21 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
 import os
 import re
 import time
 import zoneinfo
-from collections.abc import Awaitable, Callable, Mapping, MutableMapping
+from collections.abc import Awaitable, Callable, Mapping, MutableMapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlsplit
 from uuid import UUID
 
+import anyio
 import anyio.to_thread
 from fastmcp.server.auth import AuthProvider
 from sqlalchemy import Engine
@@ -108,25 +111,58 @@ class RejectProxyHeaders:
 # Starlette's UUIDConvertor form: either case, hyphens optional. Any other spelling a UUID
 # parser might accept (braces, `urn:uuid:`) does not match and keeps 64 KB: it fails closed.
 _UUID_PART = "[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}"
+
+
+@dataclass(frozen=True, slots=True)
+class UploadRule:
+    """One upload route: its body limit and the time its whole body may take to arrive."""
+
+    pattern: re.Pattern[str]
+    limit: int
+    read_deadline_s: float
+
+
 # Fixed per-path body limits (slice D controller decision Q5): a POST whose whole path matches
 # gets that limit; every other request keeps MAX_BODY_BYTES. Nothing in a request changes it.
-UPLOAD_BODY_LIMITS: tuple[tuple[re.Pattern[str], int], ...] = (
-    (re.compile(rf"/app/subjects/{_UUID_PART}/pdf"), 20 * 1024 * 1024 + MAX_BODY_BYTES),
-    (re.compile(rf"/app/subjects/{_UUID_PART}/text"), 2 * 1024 * 1024),
+# The deadline bounds a slow body (security review P3): 20 MB in 120 s is about 170 KB/s.
+UPLOAD_RULES: tuple[UploadRule, ...] = (
+    UploadRule(
+        re.compile(rf"/app/subjects/{_UUID_PART}/pdf"), 20 * 1024 * 1024 + MAX_BODY_BYTES, 120.0
+    ),
+    UploadRule(re.compile(rf"/app/subjects/{_UUID_PART}/text"), 2 * 1024 * 1024, 30.0),
 )
 MAX_CONCURRENT_UPLOADS = 4  # large bodies in flight at once per process; one more gets 503
+MAX_UPLOADS_PER_SESSION = 2  # of those, at most this many per session cookie
 _SESSION_COOKIE = COOKIE.encode("ascii") + b"="
 
 
-def has_session_cookie(cookie_header: bytes | None) -> bool:
-    """Whether the request carries a non-empty session cookie. Presence only: the session
-    itself is checked by the website after the body is read."""
+def session_cookie_value(cookie_header: bytes | None) -> bytes | None:
+    """The session cookie's value when the request carries a non-empty one. Not checked: the
+    website checks the session after the body is read."""
     if not cookie_header:
-        return False
-    return any(
-        part.strip().startswith(_SESSION_COOKIE) and len(part.strip()) > len(_SESSION_COOKIE)
-        for part in cookie_header.split(b";")
-    )
+        return None
+    for part in cookie_header.split(b";"):
+        part = part.strip()
+        if part.startswith(_SESSION_COOKIE) and len(part) > len(_SESSION_COOKIE):
+            return part[len(_SESSION_COOKIE) :]
+    return None
+
+
+def has_session_cookie(cookie_header: bytes | None) -> bool:
+    """Whether the request carries a non-empty session cookie (presence only)."""
+    return session_cookie_value(cookie_header) is not None
+
+
+def upload_rule(
+    method: str | None, path: str, *, session: bool, rules: Sequence[UploadRule] = UPLOAD_RULES
+) -> UploadRule | None:
+    """The upload route a request is for: a POST with a session cookie whose whole path
+    matches one of `rules`."""
+    if method == "POST" and session:
+        for rule in rules:
+            if rule.pattern.fullmatch(path):
+                return rule
+    return None
 
 
 def body_limit(
@@ -134,84 +170,114 @@ def body_limit(
 ) -> int:
     """The body limit for one request: an upload route's from the table when the request
     carries a session cookie, else `default`."""
-    if method == "POST" and session:
-        for pattern, limit in UPLOAD_BODY_LIMITS:
-            if pattern.fullmatch(path):
-                return limit
-    return default
+    rule = upload_rule(method, path, session=session)
+    return rule.limit if rule is not None else default
 
 
 class BodySizeGuard:
     """Rejects bodies over the limit (POST, PUT, PATCH, DELETE) with 413: 64 KB, except the
-    two upload routes of UPLOAD_BODY_LIMITS for a request with a session cookie.
+    two upload routes of UPLOAD_RULES for a request with a session cookie.
 
     A 64 KB body is read whole before the app runs, so the app never sees a partial one. An
     upload body is not buffered: it streams to the app (Starlette spools file parts to disk)
     through a counter that, once the limit passes, tells the app the client left and answers
-    413 itself; at most MAX_CONCURRENT_UPLOADS stream at once, the next gets 503.
+    413 itself. The whole body must arrive within the route's read deadline, else the app is
+    told the client left and the guard answers 408. At most MAX_CONCURRENT_UPLOADS stream at
+    once, and at most MAX_UPLOADS_PER_SESSION per session cookie (counted by its SHA-256, the
+    value is never kept); the next gets 503.
 
     Spec section 5. It wraps both the MCP app and the website.
     """
 
-    def __init__(self, app: ASGIApp, limit: int = MAX_BODY_BYTES) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        limit: int = MAX_BODY_BYTES,
+        *,
+        rules: Sequence[UploadRule] = UPLOAD_RULES,
+    ) -> None:
         self.app = app
         self._limit = limit
+        self._rules = tuple(rules)
         self._uploads = 0
+        self._per_session: dict[str, int] = {}
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or scope.get("method") not in BODY_METHODS:
             await self.app(scope, receive, send)
             return
         headers = {k.decode("latin-1").lower(): v for k, v in scope.get("headers", [])}
-        session = has_session_cookie(headers.get("cookie"))
+        cookie = session_cookie_value(headers.get("cookie"))
         path = scope.get("path", "")
-        limit = body_limit(scope.get("method"), path, session=session, default=self._limit)
+        rule = upload_rule(scope.get("method"), path, session=cookie is not None, rules=self._rules)
+        limit = rule.limit if rule is not None else self._limit
         declared = headers.get("content-length")
         if declared is not None and (not declared.isdigit() or int(declared) > limit):
             await send_json(send, 413, {"error": "payload_too_large"})
             return
-        if limit > self._limit:
-            await self._stream(scope, receive, send, limit)
+        if rule is not None and cookie is not None and limit > self._limit:
+            await self._stream(scope, receive, send, rule, hashlib.sha256(cookie).hexdigest())
             return
         await self._buffered(scope, receive, send, limit)
 
-    async def _stream(self, scope: Scope, receive: Receive, send: Send, limit: int) -> None:
-        if self._uploads >= MAX_CONCURRENT_UPLOADS:
+    async def _stream(
+        self, scope: Scope, receive: Receive, send: Send, rule: UploadRule, session_key: str
+    ) -> None:
+        held = self._per_session.get(session_key, 0)
+        if self._uploads >= MAX_CONCURRENT_UPLOADS or held >= MAX_UPLOADS_PER_SESSION:
             await send_json(send, 503, {"error": "busy"})
             return
         self._uploads += 1
+        self._per_session[session_key] = held + 1
+        deadline = anyio.current_time() + rule.read_deadline_s
         size = 0
         over = False
+        expired = False
+        complete = False
         started = False
 
         async def counted() -> Message:
-            nonlocal size, over
-            if over:
+            nonlocal size, over, expired, complete
+            if over or expired:
                 return {"type": "http.disconnect"}
-            message = await receive()
+            if complete:  # the body is in: the app only waits for a disconnect now
+                return await receive()
+            with anyio.move_on_after(deadline - anyio.current_time()) as timer:
+                message = await receive()
+            if timer.cancelled_caught:
+                expired = True
+                return {"type": "http.disconnect"}
             if message["type"] == "http.request":
                 size += len(message.get("body", b""))
-                if size > limit:
+                if size > rule.limit:
                     over = True
                     return {"type": "http.disconnect"}
+                complete = not message.get("more_body", False)
             return message
 
         async def guarded(message: Message) -> None:
             nonlocal started
-            if over and not started:
-                return  # the app's answer to the cut body is dropped; the 413 is ours
+            if (over or expired) and not started:
+                return  # the app's answer to the cut body is dropped; the 413 or 408 is ours
             started = True
             await send(message)
 
         try:
             await self.app(scope, counted, guarded)
         except Exception:
-            if not over:
+            if not (over or expired):
                 raise
         finally:
             self._uploads -= 1
+            left = self._per_session[session_key] - 1
+            if left:
+                self._per_session[session_key] = left
+            else:
+                del self._per_session[session_key]
         if over and not started:
             await send_json(send, 413, {"error": "payload_too_large"})
+        elif expired and not started:
+            await send_json(send, 408, {"error": "timeout"})
 
     async def _buffered(self, scope: Scope, receive: Receive, send: Send, limit: int) -> None:
         chunks: list[bytes] = []
