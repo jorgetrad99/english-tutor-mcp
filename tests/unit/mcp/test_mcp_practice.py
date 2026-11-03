@@ -477,3 +477,67 @@ def test_the_answer_union_is_tagged_and_closed() -> None:
     for ref in answer["oneOf"]:
         model = schema["$defs"][ref["$ref"].rsplit("/", 1)[-1]]
         assert model["additionalProperties"] is False
+
+
+def test_answer_list_items_carry_a_title_and_a_description() -> None:
+    defs = RecordResultInput.model_json_schema()["$defs"]
+    for name in ("ValuesAnswerIn", "SequenceAnswerIn"):
+        items = defs[name]["properties"]["values"]["items"]
+        assert items.get("title") and items.get("description"), name
+
+
+@pytest.mark.asyncio
+async def test_start_practice_is_marked_destructive() -> None:
+    # It marks the learner's open practice session incomplete (ruling 30).
+    async with Client(World().mcp) as client:
+        tools = {tool.name: tool for tool in await client.list_tools()}
+    annotations = tools["start_practice"].annotations
+    assert annotations is not None and annotations.destructive_hint is True
+    for name in ("next_exercise", "record_result", "end_practice"):
+        later = tools[name].annotations
+        assert later is not None and later.destructive_hint is False, name
+
+
+@pytest.mark.asyncio
+async def test_a_self_report_is_acknowledged_not_judged() -> None:
+    async with Client(World().mcp) as client:
+        subject_id = await new_subject(client)
+        template = await call(
+            client,
+            "save_template",
+            {
+                "subject_id": subject_id,
+                "name": "Práctica libre",
+                "template_purpose": "exercise",
+                "grading_kind": "self_report",
+                "params": [
+                    {"name": "task", "param_type": "text", "param_role": "prompt", "label": "T"}
+                ],
+                "html": example("numeric")["html"],
+                "guide_version": TEMPLATE_GUIDE_VERSION,
+                "learner_confirmed": True,
+            },
+        )
+        await call(
+            client,
+            "create_instance",
+            {
+                "subject_id": subject_id,
+                "template_id": template["template_id"],
+                "params": [{"name": "task", "text": "Toca la escala diez minutos."}],
+                "prompt_text": "Practica y cuéntame.",
+            },
+        )
+        started = await call(client, "start_practice", {"subject_id": subject_id})
+        graded = await call(
+            client,
+            "record_result",
+            {
+                "session_id": started["session_id"],
+                "item_id": started["item"]["item_id"],
+                "answer": {"answer_kind": "self_report", "rating": 3, "minutes": 10},
+            },
+        )
+    assert (graded["correct"], graded["score"]) == (None, 75)
+    assert graded["response_rules"] == rules.RECORD_RESULT_SELF_REPORT
+    assert "correct" not in rules.RECORD_RESULT_SELF_REPORT

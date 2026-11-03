@@ -2470,7 +2470,14 @@ class ValueAnswerIn(StrictInput):
     )
 
 
-AnswerItem = Annotated[str, Field(max_length=ANSWER_VALUE_MAX)]
+AnswerItem = Annotated[
+    str,
+    Field(
+        max_length=ANSWER_VALUE_MAX,
+        title="Part",
+        description="One part of the learner's answer, as they gave it.",
+    ),
+]
 
 
 class ValuesAnswerIn(StrictInput):

@@ -451,7 +451,10 @@ def _register_practice_tools(mcp: FastMCP, svc: Services) -> None:
             graded = practice_svc.record_result(
                 svc, _user(), session_id, item_id, args.answer_data(), source="chat"
             )
-            return s.RecordResultOutput.of(graded, rules.RECORD_RESULT)
+            chosen = (
+                rules.RECORD_RESULT_SELF_REPORT if graded.correct is None else rules.RECORD_RESULT
+            )
+            return s.RecordResultOutput.of(graded, chosen)
 
         return _guard("record_result", run)
 
@@ -471,15 +474,29 @@ def _register_practice_tools(mcp: FastMCP, svc: Services) -> None:
 
         return _guard("get_subject_progress", run)
 
-    def write(title: str, *, idempotent: bool) -> ToolAnnotations:
+    def write(title: str, *, idempotent: bool, destructive: bool = False) -> ToolAnnotations:
         return ToolAnnotations(
-            title=title, idempotent_hint=idempotent, destructive_hint=False, open_world_hint=False
+            title=title,
+            idempotent_hint=idempotent,
+            destructive_hint=destructive,
+            open_world_hint=False,
         )
 
-    _register(mcp, start_practice, s.StartPracticeInput, write("Start practice", idempotent=False))
+    # Both may mark the learner's open practice session incomplete (ruling 30).
+    _register(
+        mcp,
+        start_practice,
+        s.StartPracticeInput,
+        write("Start practice", idempotent=False, destructive=True),
+    )
     # next_exercise only reads, except that it stamps shown_at once (the first call wins).
     _register(mcp, next_exercise, s.NextExerciseInput, write("Next exercise", idempotent=True))
-    _register(mcp, show_exercise, s.ShowExerciseInput, write("Show exercise", idempotent=False))
+    _register(
+        mcp,
+        show_exercise,
+        s.ShowExerciseInput,
+        write("Show exercise", idempotent=False, destructive=True),
+    )
     _register(mcp, record_result, s.RecordResultInput, write("Record result", idempotent=True))
     _register(mcp, end_practice, s.EndPracticeInput, write("End practice", idempotent=True))
     _register(

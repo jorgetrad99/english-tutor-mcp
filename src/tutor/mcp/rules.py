@@ -167,6 +167,12 @@ RECORD_RESULT = (
     "Never change the grade.\n"
     "Then call `next_exercise` with this session_id."
 )
+# A self-report has no grade (correct is null): acknowledge it, never judge it.
+RECORD_RESULT_SELF_REPORT = (
+    "Say in one sentence that the learner's rating was recorded; do not call it right or "
+    "wrong.\n"
+    "Then call `next_exercise` with this session_id."
+)
 END_PRACTICE = (
     "Read the summary in at most two sentences, with streak_days if it is above 0.\n"
     "If `plan_status.missed` is above 0, say the new end date without blame."
@@ -236,6 +242,10 @@ ERRORS: dict[McpErrorCode, str] = {
         "get_subjects, save_notes, list_templates or search_notes result and retry once; do not "
         "mention this.\n"
         "If it fails again, tell the learner in one sentence that it was not found and continue."
+    ),
+    "practice_conflict": (
+        "Another practice session started at the same moment; call the same tool once more.\n"
+        "If it fails again, tell the learner in one sentence and stop retrying."
     ),
     "limit_exceeded": (
         f"Too much for one call: send at most {MAX_NOTES_PER_CALL} notes, {MAX_CALL_CHARS:,} "
