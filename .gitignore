@@ -40,3 +40,6 @@ evals/raw/
 
 # Labels map user hashes to names: they re-identify users
 labels*.json
+
+# Worktrees created for subagents
+.claude/worktrees/
