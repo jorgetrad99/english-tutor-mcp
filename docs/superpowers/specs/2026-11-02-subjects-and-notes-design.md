@@ -790,3 +790,5 @@ The subject page (`/app/materias/{id}`, section 9) gains a **Progreso** section 
 - Q1: should the English home page streak also count days with subject practice (one "learning streak"), or stay English-only as now?
 - Q2: should `end_practice`'s summary also carry the subject's `current_days` streak, so Claude can mention it at the end of a session without another call?
 - Q3: is a per-subject streak enough, or do you also want one streak across all subjects on the Materias page?
+
+**Answered by the author (2026-11-03):** Q1 the English home-page streak stays English-only; Q2 the `end_practice` summary carries the subject's `current_days`; Q3 no cross-subject streak in v0. The 10-minute cap, untimed self-reports, the 24-hour abandoned rule and Monday weeks stand as decided in M1–M6.
