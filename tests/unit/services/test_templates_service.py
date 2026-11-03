@@ -264,7 +264,7 @@ def test_create_instance_new_then_existing_with_a_preview(
 ) -> None:
     subject_id = create_subject(svc, user_id)
     template_id = saved(svc, user_id, subject_id, NUMERIC)
-    data = InstanceInput(template_id, numeric_params(), "Resuelve.", "Suma")
+    data = InstanceInput(template_id, numeric_params(), "Resuelve.")
     first = create_instance(svc, user_id, subject_id, data)
     assert (first.outcome, first.purpose) == ("new", "exercise")
     assert first.text == "Resuelve.\nEtiqueta problem: 2 + 2\nResponde con un número."
@@ -556,3 +556,66 @@ def test_a_corrected_lesson_can_replace_its_instances(svc: Services, user_id: UU
     assert get_note(svc, user_id, first.note_id).instances == ()  # retired, out of the list
     assert len(get_note(svc, user_id, fixed.note_id).instances) == 1
     assert get_instance_view(svc, user_id, first.instance_ids[0]).status == "retired"
+
+
+# --- concepts of instances (plan ruling 30) -----------------------------------------------------
+
+
+def test_an_instance_concept_must_exist_or_be_the_notes(
+    svc: Services, store: MemoryStore, user_id: UUID
+) -> None:
+    subject_id = create_subject(svc, user_id)
+    other = create_subject(svc, user_id, name="Piano")
+    save_notes(svc, user_id, other, None, [note(concepts=("Ajeno",))])
+    numeric = saved(svc, user_id, subject_id, NUMERIC)
+    concepts_before = len(store.tables.concepts)
+    with pytest.raises(ServiceError) as info:
+        create_instance(
+            svc, user_id, subject_id, InstanceInput(numeric, numeric_params(), "S.", "Suma")
+        )
+    assert fields_of(info) == ("not_found", ("concept",))
+    lesson = note(
+        concepts=("Suma",),
+        instances=(
+            InstanceInput(numeric, numeric_params(), "S.", "  SUMA "),  # the note's own
+            InstanceInput(numeric, numeric_params(5), "S.", "Ajeno"),  # another subject's
+        ),
+    )
+    with pytest.raises(ServiceError) as info:
+        save_notes(svc, user_id, subject_id, None, [lesson])
+    assert fields_of(info) == ("not_found", ("notes[0].instances[1].concept",))
+    assert len(store.tables.concepts) == concepts_before  # nothing written
+    saved_note = save_notes(
+        svc,
+        user_id,
+        subject_id,
+        None,
+        [dataclasses.replace(lesson, instances=lesson.instances[:1])],
+    ).notes[0]
+    [instance] = get_note(svc, user_id, saved_note.note_id).instances
+    assert instance.concept == "Suma"  # the note's spelling
+    # Now "Suma" exists in the subject: create_instance may name it, and creates no concept.
+    count = len(store.tables.concepts)
+    made = create_instance(
+        svc, user_id, subject_id, InstanceInput(numeric, numeric_params(7), "S.", "suma")
+    )
+    assert store.tables.template_instances[made.instance_id].concept_id is not None
+    assert len(store.tables.concepts) == count
+
+
+def test_a_note_with_one_concept_gives_it_to_instances_without_one(
+    svc: Services, store: MemoryStore, user_id: UUID
+) -> None:
+    subject_id = create_subject(svc, user_id)
+    numeric = saved(svc, user_id, subject_id, NUMERIC)
+    one = note(concepts=("Suma",), instances=(InstanceInput(numeric, numeric_params(), "S."),))
+    two = note(
+        title="Clase 2",
+        lesson_ref="2",
+        concepts=("Suma", "Resta"),
+        instances=(InstanceInput(numeric, numeric_params(9), "S."),),
+    )
+    first, second = save_notes(svc, user_id, subject_id, None, [one, two]).notes
+    assert [i.concept for i in get_note(svc, user_id, first.note_id).instances] == ["Suma"]
+    assert [i.concept for i in get_note(svc, user_id, second.note_id).instances] == [None]
+    assert sorted(c.name for c in store.tables.concepts.values()) == ["Resta", "Suma"]

@@ -45,7 +45,6 @@ from tutor.domain.levels import CefrLevel
 from tutor.domain.metrics import SessionMetrics
 from tutor.domain.notes import (
     ConceptLinkInput,
-    ConceptName,
     NoteInput,
     Origin,
     SourceKind,
@@ -1738,7 +1737,13 @@ class RepoContract:
         params: dict[str, Any] = {"problem": "2 + 2", KEY_NAME: 4.0, REVEAL_NAME: "Porque."}
         with uow_factory(user_id) as uow:
             subject_id = uow.subjects.create(sample_subject(), now).id
-            note = add_note(uow, subject_id, valid_note("Clase", long_paragraph("uno.")), now)
+            note = add_note(
+                uow,
+                subject_id,
+                valid_note("Clase", long_paragraph("uno."), concepts=["Suma"]),
+                now,
+            )
+            suma = present(uow.notes.concept_by_norm(subject_id, "suma"))
             template = uow.templates.create(subject_id, spec(NUMERIC), HTML, 1, now)
             key = content_key(subject_id, template.id, params, "Suma.", note.id)
             first, created = uow.instances.insert(
@@ -1747,7 +1752,7 @@ class RepoContract:
                 template=template,
                 params=params,
                 prompt_text="Suma.",
-                concept=ConceptName("Suma", "suma"),
+                concept_id=suma.id,
                 origin="ingest",
                 key=key,
                 now=now,
@@ -1758,7 +1763,7 @@ class RepoContract:
                 template=template,
                 params={**params, KEY_NAME: 5.0},
                 prompt_text="Suma otra vez.",
-                concept=None,
+                concept_id=None,
                 origin="ingest",
                 key="b" * 64,
                 now=now,
@@ -1769,7 +1774,7 @@ class RepoContract:
                 template=template,
                 params=params,
                 prompt_text="Suma.",
-                concept=ConceptName("suma", "suma"),
+                concept_id=suma.id,
                 origin="class",
                 key="c" * 64,
                 now=now,
@@ -1796,7 +1801,7 @@ class RepoContract:
             retired_at=None,
         )
         assert (second.seq, second.concept, loose.seq, loose.note_id) == (2, None, None, None)
-        assert loose.concept_id == first.concept_id  # one concept per name_norm in the subject
+        assert first.concept_id == loose.concept_id == suma.id
         with uow_factory(user_id) as uow:
             assert uow.instances.get(first.id) == first
             assert uow.instances.get(uuid4()) is None
@@ -1807,15 +1812,16 @@ class RepoContract:
                 template=template,
                 params=params,
                 prompt_text="Suma.",
-                concept=None,
+                concept_id=None,
                 origin="ingest",
                 key=key,
                 now=now + timedelta(minutes=1),
             )
             assert (again, created) == (first, False)
             assert len(uow.instances.for_note(note.id)) == 2  # nothing inserted
-            # The note's concept list is unchanged by instance concepts.
-            assert uow.notes.concepts(note.id) == ()
+            # An instance never creates a concept (plan ruling 30).
+            assert [c.name for c in uow.notes.concepts(note.id)] == ["Suma"]
+            assert uow.notes.concept_by_norm(subject_id, "resta") is None
 
     def test_instance_replacement_retires_the_old_row(
         self, uow_factory: UowFactory, user_id: UUID, now: datetime
@@ -1834,7 +1840,7 @@ class RepoContract:
                     template=template,
                     params={"rows": [[rows]]},
                     prompt_text="Mira.",
-                    concept=None,
+                    concept_id=None,
                     origin="ingest",
                     key=key * 64,
                     now=later,
@@ -1857,7 +1863,7 @@ class RepoContract:
                 template=template,
                 params={"rows": [["a"]]},
                 prompt_text="Mira.",
-                concept=None,
+                concept_id=None,
                 origin="ingest",
                 key="a" * 64,
                 now=later,
@@ -1871,7 +1877,10 @@ class RepoContract:
         # Review Focus 5 and plan ruling 16: same user and same subject, or LookupError.
         with uow_factory(other_user_id) as uow:
             theirs = uow.subjects.create(sample_subject("Theirs"), now).id
-            their_note = add_note(uow, theirs, valid_note("T", long_paragraph("ajeno.")), now)
+            their_note = add_note(
+                uow, theirs, valid_note("T", long_paragraph("ajeno."), concepts=["Ajeno"]), now
+            )
+            their_concept = present(uow.notes.concept_by_norm(theirs, "ajeno")).id
             their_template = uow.templates.create(theirs, spec(TABLE), HTML, 1, now)
             their_instance, _ = uow.instances.insert(
                 subject_id=theirs,
@@ -1879,7 +1888,7 @@ class RepoContract:
                 template=their_template,
                 params={"rows": [["x"]]},
                 prompt_text="Mira.",
-                concept=None,
+                concept_id=None,
                 origin="ingest",
                 key="d" * 64,
                 now=now,
@@ -1888,7 +1897,11 @@ class RepoContract:
             mine = uow.subjects.create(sample_subject("Mine"), now).id
             other = uow.subjects.create(sample_subject("Other"), now).id
             my_note = add_note(uow, mine, valid_note("M", long_paragraph("propio.")), now)
-            other_note = add_note(uow, other, valid_note("O", long_paragraph("otro.")), now)
+            other_note = add_note(
+                uow, other, valid_note("O", long_paragraph("otro."), concepts=["Otro"]), now
+            )
+            other_concept = present(uow.notes.concept_by_norm(other, "otro")).id
+            assert uow.notes.concept_by_norm(theirs, "ajeno") is None
             template = uow.templates.create(mine, spec(TABLE), HTML, 1, now)
             other_template = uow.templates.create(other, spec(TABLE), HTML, 1, now)
             retired = uow.templates.create(mine, spec(CHOICE), HTML, 1, now)
@@ -1907,7 +1920,7 @@ class RepoContract:
                 template=other_template,
                 params={"rows": [["x"]]},
                 prompt_text="Mira.",
-                concept=None,
+                concept_id=None,
                 origin="class",
                 key="e" * 64,
                 now=now,
@@ -1926,6 +1939,9 @@ class RepoContract:
             {"replaces": their_instance.id},
             {"replaces": other_instance.id},
             {"replaces": uuid4()},
+            {"concept_id": other_concept},  # a concept of another subject (plan ruling 30)
+            {"concept_id": their_concept},
+            {"concept_id": uuid4()},
         ]
         for changes in attempts:
             args: dict[str, Any] = {
@@ -1934,7 +1950,7 @@ class RepoContract:
                 "template": template,
                 "params": {"rows": [["y"]]},
                 "prompt_text": "Mira.",
-                "concept": None,
+                "concept_id": None,
                 "origin": "ingest",
                 "key": "f" * 64,
                 "now": now,

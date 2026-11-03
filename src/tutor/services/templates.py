@@ -188,7 +188,7 @@ class ResolvedInstance:
     template: TemplateRow
     params: dict[str, object]
     prompt_text: str
-    concept: ConceptName | None
+    concept_norm: str | None  # an existing concept, or one of the note's (plan ruling 30)
     replaces: UUID | None
 
 
@@ -199,10 +199,15 @@ def resolve_instance(
     path: str,
     not_found: list[str],
     errors: list[FieldError],
+    note_concepts: Sequence[ConceptName] | None = None,
 ) -> ResolvedInstance | None:
-    """Resolve the template (active, of the subject) and the replaced instance (of the subject),
-    then check the parameters (ruling 23). Unknown ids go to `not_found`, bad fields to
-    `errors`, both with paths under `path`."""
+    """Resolve the template (active, of the subject), the replaced instance (of the subject)
+    and the concept, then check the parameters (ruling 23). Unknown ids and concepts go to
+    `not_found`, bad fields to `errors`, both with paths under `path`.
+
+    The concept must be an existing concept of the subject or, from save_notes, one of the
+    note's `concepts` sent in the same call; an instance without one, on a note with exactly
+    one concept, gets that concept. An instance never creates a concept (plan ruling 30)."""
     at = f"{path}." if path else ""
     shape: list[FieldError] = []
     valid = validate_instance(data, path, shape)
@@ -218,12 +223,22 @@ def resolve_instance(
         if replaced is None or replaced.subject_id != subject_id:
             not_found.append(f"{at}replaces_instance_id")
             return None
+    own = {c.name_norm for c in note_concepts or ()}
+    concept_norm = None
+    if valid.concept is not None:
+        concept_norm = valid.concept.name_norm
+        known = concept_norm in own or uow.notes.concept_by_norm(subject_id, concept_norm)
+        if not known:
+            not_found.append(f"{at}concept")
+            return None
+    elif note_concepts is not None and len(note_concepts) == 1:
+        concept_norm = note_concepts[0].name_norm
     params = validate_params(template.spec, valid.params, path=path)
     if isinstance(params, tuple):
         errors.extend(params)
         return None
     return ResolvedInstance(
-        template, params, valid.prompt_text, valid.concept, valid.replaces_instance_id
+        template, params, valid.prompt_text, concept_norm, valid.replaces_instance_id
     )
 
 
@@ -239,13 +254,17 @@ def store_instance(
     key = content_key(
         subject_id, resolved.template.id, resolved.params, resolved.prompt_text, note_id
     )
+    concept_id = None
+    if resolved.concept_norm is not None:  # stored by now: checked, or the note's own concept
+        concept = uow.notes.concept_by_norm(subject_id, resolved.concept_norm)
+        concept_id = concept.id if concept is not None else None
     row, created = uow.instances.insert(
         subject_id=subject_id,
         note_id=note_id,
         template=resolved.template,
         params=resolved.params,
         prompt_text=resolved.prompt_text,
-        concept=resolved.concept,
+        concept_id=concept_id,
         origin=origin,
         key=key,
         now=now,

@@ -22,7 +22,7 @@ from tutor.domain.glossary import GlossaryAction, GlossaryKind, GlossaryStatus, 
 from tutor.domain.lesson import BriefVariant, DueCandidate, RecentResult
 from tutor.domain.levels import CefrLevel
 from tutor.domain.metrics import SessionMetrics
-from tutor.domain.notes import ConceptName, Origin, SourceKind, ValidNote, ValidSource
+from tutor.domain.notes import Origin, SourceKind, ValidNote, ValidSource
 from tutor.domain.plan_lite import PlannedItem, Variant
 from tutor.domain.profile import Domain, Profile
 from tutor.domain.subjects import Subject
@@ -473,6 +473,9 @@ class NoteRepo(Protocol):
     def passage_count(self, note_id: UUID) -> int:
         """How many passages the user's note has; 0 for another user's note."""
 
+    def concept_by_norm(self, subject_id: UUID, name_norm: str) -> ConceptRow | None:
+        """The subject's concept with this name_norm, or None (another user's subject too)."""
+
     def concepts(self, note_id: UUID) -> tuple[ConceptRow, ...]:
         """The concepts attached to the note, by name_norm; () for another user's note."""
 
@@ -523,19 +526,20 @@ class InstanceRepo(Protocol):
         template: TemplateRow,
         params: Mapping[str, Any],
         prompt_text: str,
-        concept: ConceptName | None,
+        concept_id: UUID | None,
         origin: InstanceOrigin,
         key: str,
         now: datetime,
         replaces: UUID | None = None,
     ) -> tuple[InstanceRow, bool]:
         """Insert an active instance of `template` with these canonical params; its purpose and
-        kinds are copied from the template, its concept upserted in the subject, its seq the
-        note's next one (None without a note). An active instance with content key `key`
-        is returned instead, with False, and nothing is inserted. `replaces` (an instance of
-        the same subject) is retired in the same call unless it is the returned row; the new
-        row records it as supersedes_instance_id. LookupError when the subject, the note, the
-        template (which must be active) or the replaced instance is not the user's or is of
+        kinds are copied from the template, its seq the note's next one (None without a note).
+        `concept_id` must be an existing concept of the subject: an instance never creates a
+        concept (plan ruling 30). An active instance with content key `key` is returned
+        instead, with False, and nothing is inserted. `replaces` (an instance of the same
+        subject) is retired in the same call unless it is the returned row; the new row records
+        it as supersedes_instance_id. LookupError when the subject, the note, the template
+        (which must be active), the concept or the replaced instance is not the user's or is of
         another subject."""
 
     def get(self, instance_id: UUID) -> InstanceRow | None:

@@ -441,6 +441,24 @@ class PgNoteRepo:
         ).scalar_one()
         return int(count)
 
+    def concept_by_norm(self, subject_id: UUID, name_norm: str) -> ConceptRow | None:
+        m = (
+            self._conn.execute(
+                select(concepts).where(
+                    concepts.c.user_id == self._user_id,
+                    concepts.c.subject_id == subject_id,
+                    concepts.c.name_norm == name_norm,
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if m is None:
+            return None
+        return ConceptRow(
+            id=m["id"], subject_id=m["subject_id"], name=m["name"], name_norm=m["name_norm"]
+        )
+
     def concepts(self, note_id: UUID) -> tuple[ConceptRow, ...]:
         rows = self._conn.execute(
             select(concepts)

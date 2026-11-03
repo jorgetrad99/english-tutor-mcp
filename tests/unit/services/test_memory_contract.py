@@ -16,6 +16,7 @@ from repo_contract import (
     insert_glossary,
     long_paragraph,
     planned_items,
+    present,
     sample_metrics,
     sample_profile,
     sample_subject,
@@ -26,7 +27,7 @@ from repo_contract import (
 from template_fixtures import HTML, KEY_NAME, NUMERIC, REVEAL_NAME, spec
 
 from tutor.domain.glossary import InsertItem
-from tutor.domain.notes import ConceptLinkInput, ConceptName
+from tutor.domain.notes import ConceptLinkInput
 from tutor.services.context import Services
 from tutor.services.errors import ServiceError
 from tutor.services.memory import MemoryStore, excerpt
@@ -103,7 +104,7 @@ def test_rollback_restores_every_table(
             template=template,
             params={"problem": "2 + 2", KEY_NAME: 4.0, REVEAL_NAME: "r"},
             prompt_text="Suma.",
-            concept=ConceptName("Ritmo", "ritmo"),
+            concept_id=present(uow.notes.concept_by_norm(subject_id, "ritmo")).id,
             origin="ingest",
             key="0" * 64,
             now=now,

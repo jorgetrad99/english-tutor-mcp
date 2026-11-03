@@ -17,9 +17,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import RowMapping
 
 from tutor.db.repos._guards import require_subject
-from tutor.db.repos.notes import upsert_concept
 from tutor.db.tables import concepts, exercise_templates, notes, template_instances
-from tutor.domain.notes import ConceptName, name_norm
+from tutor.domain.notes import name_norm
 from tutor.domain.templates import (
     Origin,
     TemplateSpec,
@@ -278,13 +277,23 @@ class PgInstanceRepo:
         template: TemplateRow,
         params: Mapping[str, Any],
         prompt_text: str,
-        concept: ConceptName | None,
+        concept_id: UUID | None,
         origin: Origin,
         key: str,
         now: datetime,
         replaces: UUID | None = None,
     ) -> tuple[InstanceRow, bool]:
         self._require(subject_id, note_id, template.id)
+        if concept_id is not None:
+            found = self._conn.execute(
+                select(concepts.c.id).where(
+                    concepts.c.id == concept_id,
+                    concepts.c.user_id == self._user_id,
+                    concepts.c.subject_id == subject_id,
+                )
+            ).scalar_one_or_none()
+            if found is None:
+                raise LookupError("concept not found")
         old_status = None
         if replaces is not None:
             old_status = self._conn.execute(
@@ -325,11 +334,6 @@ class PgInstanceRepo:
                     )
                 ).scalar_one()
             )
-        concept_id = (
-            upsert_concept(self._conn, self._user_id, subject_id, concept)
-            if concept is not None
-            else None
-        )
         spec = template.spec
         instance_id = self._conn.execute(
             pg_insert(template_instances)

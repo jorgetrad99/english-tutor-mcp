@@ -20,6 +20,7 @@ from tutor.domain.notes import (
     NotesErrors,
     Origin,
     SourceInput,
+    ValidNote,
     idempotency_key,
     validate_notes,
 )
@@ -72,7 +73,7 @@ def save_notes(
     with svc.uow(user_id) as uow:
         if uow.subjects.get(subject_id) is None:
             raise ServiceError("not_found", ("subject_id",))
-        resolved = _resolve_instances(uow, subject_id, notes)
+        resolved = _resolve_instances(uow, subject_id, notes, valid.notes)
         source_id = None
         if valid.source is not None:
             source_id = uow.notes.upsert_source(subject_id, valid.source, now).id
@@ -118,7 +119,10 @@ _OUTCOMES: tuple[Outcome, ...] = ("new", "existing", "superseded")
 
 
 def _resolve_instances(
-    uow: UnitOfWork, subject_id: UUID, notes: Sequence[NoteInput]
+    uow: UnitOfWork,
+    subject_id: UUID,
+    notes: Sequence[NoteInput],
+    valid_notes: Sequence[ValidNote],
 ) -> list[list[ResolvedInstance]]:
     """Every note's instances checked against their templates, or the collected errors."""
     not_found: list[str] = []
@@ -128,7 +132,9 @@ def _resolve_instances(
         items: list[ResolvedInstance] = []
         for i, data in enumerate(note.instances):
             path = f"notes[{n}].instances[{i}]"
-            item = resolve_instance(uow, subject_id, data, path, not_found, errors)
+            item = resolve_instance(
+                uow, subject_id, data, path, not_found, errors, valid_notes[n].concepts
+            )
             if item is not None:
                 items.append(item)
         resolved.append(items)

@@ -1174,6 +1174,14 @@ class MemoryNoteRepo(_Repo):
     def passage_count(self, note_id: UUID) -> int:
         return len(self._passages_of(note_id))
 
+    def concept_by_norm(self, subject_id: UUID, name_norm: str) -> ConceptRow | None:
+        for c in self._t.concepts.values():
+            if c.user_id == self._uid and c.subject_id == subject_id and c.name_norm == name_norm:
+                return ConceptRow(
+                    id=c.id, subject_id=c.subject_id, name=c.name, name_norm=c.name_norm
+                )
+        return None
+
     def concepts(self, note_id: UUID) -> tuple[ConceptRow, ...]:
         rows = sorted(
             (
@@ -1396,7 +1404,7 @@ class MemoryInstanceRepo(_Repo):
         template: TemplateRow,
         params: Mapping[str, Any],
         prompt_text: str,
-        concept: ConceptName | None,
+        concept_id: UUID | None,
         origin: InstanceOrigin,
         key: str,
         now: datetime,
@@ -1417,6 +1425,10 @@ class MemoryInstanceRepo(_Repo):
             or stored.status != "active"
         ):
             raise LookupError("template not found")
+        if concept_id is not None:
+            found = self._t.concepts.get(concept_id)
+            if found is None or found.user_id != self._uid or found.subject_id != subject_id:
+                raise LookupError("concept not found")
         old = None
         if replaces is not None:
             old = self._t.template_instances.get(replaces)
@@ -1442,11 +1454,7 @@ class MemoryInstanceRepo(_Repo):
             template=stored.spec,
             params=_json_copy(params),
             prompt_text=prompt_text,
-            concept_id=(
-                _upsert_concept(self._t, self._uid, subject_id, concept)
-                if concept is not None
-                else None
-            ),
+            concept_id=concept_id,
             origin=origin,
             content_key=key,
             status="active",

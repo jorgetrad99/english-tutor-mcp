@@ -266,7 +266,7 @@ def _seed_template(
             template=template,
             params={"problem": "2 + 2", KEY_NAME: 4.0, REVEAL_NAME: "r"},
             prompt_text="Suma.",
-            concept=None,
+            concept_id=None,
             origin="ingest",
             key="a" * 64,
             now=now,
