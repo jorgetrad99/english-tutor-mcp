@@ -104,7 +104,8 @@ SAVE_SUBJECT_DESCRIPTION = (
 SAVE_NOTES_DESCRIPTION = (
     "Call to store the learner's material for a subject: one note per lesson, sent in order, "
     "with the optional source (course, PDF, text) they come from. At most 4 notes and 16,000 "
-    "characters of raw_text per call, 6,000 per note; send more in further calls. If a note's "
+    "characters of raw_text per call (64 KB in all), 6,000 per note; send more in further "
+    "calls. If a note's "
     f"text is over {MAX_NOTE_CHARS:,} characters, split it into several notes with the same "
     "lesson_ref plus a suffix ('... / parte 2'). Send the text "
     "as the learner gave it; you may fix obvious extraction damage. Describe images in text "

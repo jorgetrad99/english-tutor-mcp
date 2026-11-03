@@ -13,8 +13,10 @@ import pytest
 from fastmcp import Client
 from mcp_lesson import NOW, Clock, call, text_of
 
+from tutor.app import MAX_BODY_BYTES, BodySizeGuard, Message, Receive, Scope, Send
 from tutor.domain.html_guard import MAX_ARTIFACT_BYTES
 from tutor.domain.notes import (
+    LESSON_REF_MAX,
     MAX_CALL_CHARS,
     MAX_CONCEPTS,
     MAX_NOTE_CHARS,
@@ -22,6 +24,9 @@ from tutor.domain.notes import (
     MAX_QUIZ_ITEMS,
     OPTION_MAX,
     NoteInput,
+)
+from tutor.domain.notes import (
+    TITLE_MAX as NOTE_TITLE_MAX,
 )
 from tutor.mcp import rules
 from tutor.mcp.instructions import INSTRUCTIONS, TOOL_DESCRIPTIONS
@@ -658,6 +663,84 @@ async def test_an_artifact_one_byte_over_the_cap_is_rejected() -> None:
             {"note_id": note_id, "artifact_kind": "other", "title": "Vista", "html": html},
         )
     assert (body["code"], body["fields"]) == ("validation_failed", ["html"])
+
+
+# --- the 64 KB request body cap ----------------------------------------------------------------
+
+
+def rpc_body(tool: str, arguments: dict[str, Any]) -> bytes:
+    """A tools/call request as a client sends it, in its smallest JSON form (raw UTF-8)."""
+    request = {
+        "jsonrpc": "2.0",
+        "id": 7,
+        "method": "tools/call",
+        "params": {"name": tool, "arguments": arguments},
+    }
+    return json.dumps(request, ensure_ascii=False, separators=(",", ":")).encode()
+
+
+async def through_guard(body: bytes) -> tuple[int, list[bytes]]:
+    """POST `body` to /mcp through BodySizeGuard; the status and what the app behind it read."""
+    reached: list[bytes] = []
+
+    async def app(scope: Scope, receive: Receive, send: Send) -> None:
+        reached.append((await receive())["body"])
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"{}"})
+
+    sent: list[Message] = []
+    queue = [{"type": "http.request", "body": body, "more_body": False}]
+
+    async def receive() -> Message:
+        return queue.pop(0) if queue else {"type": "http.disconnect"}
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    scope = {"type": "http", "method": "POST", "path": "/mcp", "headers": []}
+    await BodySizeGuard(app)(scope, receive, send)
+    return sent[0]["status"], reached
+
+
+@pytest.mark.asyncio
+async def test_a_valid_emoji_heavy_save_notes_call_is_a_bare_413_over_the_body_cap() -> None:
+    """Documents a known gap: the character caps allow a call whose UTF-8 body is over 64 KB.
+    Every character here is a 4-byte emoji, so the client gets the guard's 413
+    {"error": "payload_too_large"} before the tool runs, never a tool error."""
+    per_note = MAX_CALL_CHARS // MAX_NOTES_PER_CALL
+    assert per_note <= MAX_NOTE_CHARS
+    notes = [
+        note(
+            title="🎸" * NOTE_TITLE_MAX,
+            lesson_ref=f"{i}" + "🎵" * (LESSON_REF_MAX - 1),
+            position=i,
+            raw_text="🎸" * per_note,
+            exercises=[],
+            quiz_items=[],
+        )
+        for i in range(1, MAX_NOTES_PER_CALL + 1)
+    ]
+    world = World()
+    async with Client(world.mcp) as client:
+        subject_id = await new_subject(client)
+        saved = await save_notes(client, subject_id, notes)  # valid when it reaches the tool
+    assert [n["note_outcome"] for n in saved["notes"]] == ["new"] * MAX_NOTES_PER_CALL
+    body = rpc_body("save_notes", {"subject_id": subject_id, "notes": notes, "source": SOURCE})
+    assert len(body) > MAX_BODY_BYTES
+    status, reached = await through_guard(body)
+    assert (status, reached) == (413, [])
+    assert "64 KB in all" in TOOL_DESCRIPTIONS["save_notes"]
+
+
+@pytest.mark.asyncio
+async def test_an_ascii_artifact_at_the_byte_cap_fits_the_body_cap() -> None:
+    head, tail = "<!doctype html><html><body><p>", "</p></body></html>"
+    html = head + "a" * (MAX_ARTIFACT_BYTES - len(head) - len(tail)) + tail
+    assert len(html.encode()) == MAX_ARTIFACT_BYTES
+    args = {"note_id": str(uuid4()), "artifact_kind": "lesson_view", "title": "Vista", "html": html}
+    body = rpc_body("save_artifact", args)
+    status, reached = await through_guard(body)
+    assert (status, reached) == (200, [body])
 
 
 # --- foreign rows -------------------------------------------------------------------------------
