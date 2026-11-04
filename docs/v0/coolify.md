@@ -39,6 +39,8 @@ How it differs from `compose.prod.yml`:
    | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | from the Google console |
    | `TUTOR_JWT_SIGNING_KEY` | `openssl rand -base64 48` |
    | `TUTOR_OAUTH_STORAGE_KEY` | on your machine: `uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
+   | `TUTOR_TEMPLATE_ORIGIN` | `https://templates.<host>` (a second public hostname on the same tunnel; empty means no exercise frames on note pages) |
+   | `TUTOR_FRAME_TOKEN_KEY` | `openssl rand -base64 48`, its own value; set together with the origin |
    | `TUNNEL_TOKEN` | the tunnel token |
 
    Every password is different; hex keeps them free of URL-encoding. `TUTOR_ENV=prod`, `FORWARDED_ALLOW_IPS`, `TUTOR_MCP_URL` (`<TUTOR_BASE_URL>/mcp`) and the other fixed settings are literals in the compose file and do not appear in the UI. The build logs "variable is not set" warnings for each of them; that is expected. An empty value is caught at startup, by the service that uses it: `app` exits naming the key (runbook, "First deploy" step 4; also `TUTOR_SUPPORT_EMAIL`), `migrate` refuses empty role inputs and cannot connect with an empty owner, Postgres will not initialise without a password, and `cloudflared` has no tunnel without a token. Since `app` waits for `migrate` and `cloudflared` for `app`, nothing is reachable until every value is right.

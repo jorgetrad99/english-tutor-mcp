@@ -24,12 +24,12 @@
   <section class="card card--wide" aria-labelledby="instances-title">
     <h2 id="instances-title" class="card__title">{{ _("Ejercicios y material") }}</h2>
     {% if frames %}
-    <p class="muted">{{ _("Aquí puedes probar el ejercicio; la calificación cuenta solo en una práctica con Claude.") }}</p>
+    {% if frames_on %}<p class="muted">{{ _("Aquí puedes probar el ejercicio; la calificación cuenta solo en una práctica con Claude.") }}</p>{% endif %}
     <ul class="note-instances">
       {% for card, src in frames %}
       <li class="note-instance">
         <p class="muted">{{ card.template_name }} · {{ sl.purpose_label(card.purpose) }}</p>
-        {% with frame_src=src, prompt_text=card.prompt_text, purpose=card.purpose %}{% include "partials/instance_frame.html" %}{% endwith %}
+        {% if src %}{% with frame_src=src, prompt_text=card.prompt_text, purpose=card.purpose %}{% include "partials/instance_frame.html" %}{% endwith %}{% else %}<p class="instance-prompt">{{ card.prompt_text }}</p>{% endif %}
       </li>
       {% endfor %}
     </ul>

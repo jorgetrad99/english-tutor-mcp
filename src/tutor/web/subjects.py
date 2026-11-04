@@ -408,8 +408,8 @@ def install_frame_url(app: FastAPI, fn: FrameUrl) -> None:
     app.state.frame_url = fn
 
 
-def get_frame_url(request: Request) -> FrameUrl:
+def optional_frame_url(request: Request) -> FrameUrl | None:
+    """None when no template origin is configured (spec amendment A69): the note page then
+    lists its instances without frames."""
     fn: FrameUrl | None = getattr(request.app.state, "frame_url", None)
-    if fn is None:
-        raise RuntimeError("no frame URL signer installed; call install_frame_url(app, fn)")
     return fn
