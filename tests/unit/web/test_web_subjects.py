@@ -301,6 +301,22 @@ def test_a_note_without_instances_says_so(
     assert "<iframe" not in html and "Esta nota aún no tiene ejercicios." in html
 
 
+def test_a_note_without_a_frame_signer_lists_its_instances_without_frames(
+    app: FastAPI, login: Login, demo: DemoUsers, ana_world: SubjectWorld
+) -> None:
+    # Spec amendment A69: TUTOR_TEMPLATE_ORIGIN and TUTOR_FRAME_TOKEN_KEY both empty means no
+    # frames on note pages, not an error page (the product server then installs no signer).
+    app.state.frame_url = None
+    response = login(demo.ana).get(f"/app/notes/{ana_world.note_id}")
+    assert response.status_code == 200
+    html = response.text
+    assert "<iframe" not in html and "Esta nota aún no tiene ejercicios." not in html
+    assert "la calificación cuenta solo en una práctica con Claude" not in html
+    assert html.count('<li class="note-instance">') == 2  # the retired instance is not listed
+    assert "Respuesta numérica" in html
+    assert '<p class="instance-prompt">Suma dos y dos.</p>' in html
+
+
 def test_review_focus_5_learner_markup_renders_as_text(
     login: Login, subjects: MemorySubjects, demo: DemoUsers
 ) -> None:

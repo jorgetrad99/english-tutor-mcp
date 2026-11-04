@@ -34,8 +34,8 @@ from tutor.web.subjects import (
     SubjectPage,
     SubjectsPort,
     WebNoteSaved,
-    get_frame_url,
     get_subjects_port,
+    optional_frame_url,
 )
 from tutor.web.views import is_htmx, render
 
@@ -68,9 +68,14 @@ def note_page(
     page = get_subjects_port(request).note(user.id, nid) if nid else None
     if page is None:
         raise HTTPException(status_code=404)
-    frame_url = get_frame_url(request)
-    frames = [(card, frame_url(user.id, card.id)) for card in page.instances]
-    return render(request, "pages/note.html", {"page": page, "frames": frames})
+    # No template origin configured (spec amendment A69): the instances are listed, no frames.
+    frame_url = optional_frame_url(request)
+    frames = [
+        (card, frame_url(user.id, card.id) if frame_url is not None else None)
+        for card in page.instances
+    ]
+    ctx = {"page": page, "frames": frames, "frames_on": frame_url is not None}
+    return render(request, "pages/note.html", ctx)
 
 
 # --- writes (slice D Tasks 4 and 5) --------------------------------------------------------------
